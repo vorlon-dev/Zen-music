@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         applicationId = "com.zen.music.zenmusic"
-        minSdk = 24                    // Required by ytdlp_flutter
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -25,6 +25,8 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

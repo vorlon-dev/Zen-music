@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'package:yt_extractor/yt_extractor.dart';
-import 'package:ytdlp_flutter/ytdlp_flutter.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt_explode;
 import '../models/song.dart';
 import 'jiosaavn_service.dart';
 
 class YoutubeService {
+  static bool videoEnabled = true;
+
   final _extractor = YtExtractor();
   final _yt = yt_explode.YoutubeExplode();
   final _jiosaavn = JiosaavnService();
@@ -48,12 +49,10 @@ class YoutubeService {
 
     final combined = <Song>[];
 
-    // JioSaavn first (320kbps source)
     final jsResults = await _jiosaavn.search(query, limit: 15);
     combined.addAll(jsResults);
     print('🎧 JioSaavn: ${jsResults.length} songs');
 
-    // YouTube Music
     try {
       await _ensureExtractorInit();
       final page =
@@ -77,22 +76,21 @@ class YoutubeService {
     return _deduplicateByTitle(combined);
   }
 
+  /// Videos tab — uses youtube_explode_dart directly (more reliable than yt_extractor for video search).
   Future<List<Song>> _youtubeVideoSearch(String query) async {
     try {
-      await _ensureExtractorInit();
-      final page = await _extractor.search(query, filter: SearchFilter.videos);
+      final results = await _yt.search.search(query);
       final songs = <Song>[];
-      for (final item in page.items) {
-        final vid = _extractVideoId(item.url);
-        if (vid == null) continue;
+      for (final v in results) {
         songs.add(Song(
-          id: vid,
-          title: item.name,
-          artist: item.uploaderName ?? 'Unknown',
-          thumbnail: 'https://i.ytimg.com/vi/$vid/maxresdefault.jpg',
-          duration: Duration(seconds: item.duration ?? 0),
+          id: v.id.value,
+          title: v.title,
+          artist: v.author,
+          thumbnail: 'https://i.ytimg.com/vi/${v.id.value}/maxresdefault.jpg',
+          duration: v.duration ?? Duration.zero,
         ));
       }
+      print('📹 YouTube videos: ${songs.length}');
       return _deduplicateByTitle(songs);
     } catch (e) {
       print('YouTube video search failed: $e');
@@ -131,41 +129,28 @@ class YoutubeService {
   Future<String> getAudioStreamUrl(Song song) async {
     await _throttle();
 
-    // PRIMARY: JioSaavn 320kbps
     if (song.isFromJiosaavn) {
-      if (song.hasHighQuality) {
-        print('✅ JioSaavn 320kbps (cached)');
-        return song.jiosaavnStreamUrl!;
-      }
+      if (song.hasHighQuality) return song.jiosaavnStreamUrl!;
       final url = await _jiosaavn.fetchStreamUrl(song.jiosaavnId!);
-      if (url != null && url.isNotEmpty) {
-        print('✅ JioSaavn 320kbps (fresh)');
-        return url;
-      }
+      if (url != null && url.isNotEmpty) return url;
     }
 
-    // FALLBACK 1: yt_extractor
     try {
       await _ensureExtractorInit();
       final info = await _extractor.getStreamInfo(
         'https://www.youtube.com/watch?v=${song.id}',
       );
       final audio = info.bestAudioStream;
-      if (audio != null && audio.url.isNotEmpty) {
-        print('✅ yt_extractor');
-        return audio.url;
-      }
+      if (audio != null && audio.url.isNotEmpty) return audio.url;
     } catch (e) {
       print('yt_extractor failed: $e');
     }
 
-    // FALLBACK 2: youtube_explode_dart
     try {
       final manifest = await _yt.videos.streams.getManifest(
         song.id,
         ytClients: [yt_explode.YoutubeApiClient.androidVr],
       );
-      print('✅ youtube_explode_dart');
       return manifest.audioOnly.withHighestBitrate().url.toString();
     } catch (e) {
       print('youtube_explode_dart failed: $e');
@@ -175,98 +160,17 @@ class YoutubeService {
   }
 
   // ═════════════════════════════════════════════
-  // VIDEO STREAM URL — powered by on-device yt-dlp
+  // VIDEO — returns just the YouTube ID for the iframe embed
   // ═════════════════════════════════════════════
 
-  Future<String?> getVideoStreamUrl(Song song) async {
+  /// Returns the YouTube video ID to load in the WebView embed.
+  /// For JioSaavn songs, searches YouTube Music Videos by title.
+  Future<String?> getVideoId(Song song) async {
+    if (!videoEnabled) return null;
     await _throttle();
 
-    try {
-      // 1. Resolve YouTube video ID
-      String? youtubeId;
-
-      if (song.isFromJiosaavn) {
-        await _ensureExtractorInit();
-        final query = '${song.title} ${song.artist}';
-        print('🎬 Resolving video for: $query');
-        final page = await _extractor.search(
-          query,
-          filter: SearchFilter.musicVideos,
-        );
-        for (final item in page.items) {
-          final vid = _extractVideoId(item.url);
-          if (vid != null) {
-            youtubeId = vid;
-            break;
-          }
-        }
-      } else {
-        youtubeId = song.id;
-      }
-
-      if (youtubeId == null) {
-        print('⚠️ No YouTube ID for ${song.title}');
-        return null;
-      }
-
-      // 2. Fetch stream URL via yt-dlp
-      final watchUrl = 'https://www.youtube.com/watch?v=$youtubeId';
-      print('🎬 yt-dlp fetching: $watchUrl');
-
-      final info = await Ytdlp.getVideoInfo(watchUrl);
-      final url = _extractUrlFromInfo(info);
-
-      if (url != null && url.isNotEmpty) {
-        print('🎬 yt-dlp produced video URL');
-        return url;
-      }
-
-      print('⚠️ yt-dlp did not return a playable URL');
-      return null;
-    } catch (e) {
-      print('getVideoStreamUrl failed: $e');
-      return null;
-    }
-  }
-
-  /// Extracts a playable video URL from yt-dlp's info object.
-  /// Field names vary between versions — we try several.
-  String? _extractUrlFromInfo(dynamic info) {
-    // 1. Direct .url field
-    try {
-      final direct = info.url as String?;
-      if (direct != null && direct.isNotEmpty) return direct;
-    } catch (_) {}
-
-    // 2. formats array — prefer mp4 with both video+audio
-    try {
-      final formats = info.formats as List<dynamic>?;
-      if (formats != null && formats.isNotEmpty) {
-        for (final f in formats) {
-          final url = f.url as String?;
-          final vcodec = (f.vcodec ?? '') as String;
-          final acodec = (f.acodec ?? '') as String;
-          if (url != null &&
-              url.isNotEmpty &&
-              vcodec != 'none' &&
-              acodec != 'none') {
-            return url;
-          }
-        }
-        for (final f in formats) {
-          final url = f.url as String?;
-          if (url != null && url.isNotEmpty) return url;
-        }
-      }
-    } catch (_) {}
-
-    return null;
-  }
-
-  /// Resolves a JioSaavn song to a YouTube video ID.
-  Future<String?> resolveVideoId(Song song) async {
     if (!song.isFromJiosaavn) return song.id;
-    await _throttle();
+
     try {
       await _ensureExtractorInit();
       final query = '${song.title} ${song.artist}';
@@ -276,10 +180,13 @@ class YoutubeService {
       );
       for (final item in page.items) {
         final vid = _extractVideoId(item.url);
-        if (vid != null) return vid;
+        if (vid != null) {
+          print('🎬 Resolved to YouTube ID: $vid');
+          return vid;
+        }
       }
     } catch (e) {
-      print('resolveVideoId failed: $e');
+      print('getVideoId failed: $e');
     }
     return null;
   }
@@ -338,10 +245,6 @@ class YoutubeService {
       return [];
     }
   }
-
-  // ═════════════════════════════════════════════
-  // HELPERS
-  // ═════════════════════════════════════════════
 
   String? _extractVideoId(String url) {
     try {

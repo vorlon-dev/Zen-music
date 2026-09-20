@@ -11,7 +11,7 @@ import '../widgets/lyrics_preview_card.dart';
 import '../widgets/lyrics_view.dart';
 import '../widgets/queue_sheet.dart';
 import '../widgets/up_next_row.dart';
-import '../widgets/video_background.dart';
+import '../widgets/youtube_embed.dart';
 import '../widgets/youtube_thumbnail.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -25,7 +25,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _showLyrics = false;
   bool _showVideo = false;
   bool _videoLoading = false;
-  String? _videoUrl;
+  String? _videoId;
   String? _videoForSongId;
 
   List<Song> _relatedSongs = [];
@@ -49,17 +49,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() => _relatedSongs = related);
   }
 
-  // ═════════════════════════════════════════════
-  // VIDEO TOGGLE
-  // ═════════════════════════════════════════════
-
   Future<void> _toggleVideo(Song song) async {
     if (_showVideo && _videoForSongId == song.id) {
       setState(() => _showVideo = false);
       return;
     }
 
-    if (_videoForSongId == song.id && _videoUrl != null) {
+    if (_videoForSongId == song.id && _videoId != null) {
       setState(() => _showVideo = true);
       return;
     }
@@ -69,10 +65,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _showVideo = true;
     });
 
-    final streamUrl = await _yt.getVideoStreamUrl(song);
+    final id = await _yt.getVideoId(song);
     if (!mounted) return;
 
-    if (streamUrl == null) {
+    if (id == null) {
       setState(() {
         _videoLoading = false;
         _showVideo = false;
@@ -84,15 +80,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     setState(() {
-      _videoUrl = streamUrl;
+      _videoId = id;
       _videoForSongId = song.id;
       _videoLoading = false;
     });
   }
-
-  // ═════════════════════════════════════════════
-  // BUILD
-  // ═════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +101,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     if (_videoForSongId != null && _videoForSongId != song.id) {
       _showVideo = false;
-      _videoUrl = null;
+      _videoId = null;
       _videoForSongId = null;
     }
 
@@ -119,13 +111,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          if (_showVideo && _videoUrl != null)
+          if (_showVideo && _videoId != null)
             Positioned.fill(
-              child: VideoBackground(
-                key: ValueKey(_videoUrl),
-                videoUrl: _videoUrl!,
-                positionStream: handler.positionStream,
-                playingStream: handler.playingStream,
+              child: YouTubeEmbed(
+                key: ValueKey(_videoId),
+                videoId: _videoId!,
               ),
             )
           else if (!_showLyrics)

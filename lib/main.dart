@@ -1,12 +1,12 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:ytdlp_flutter/ytdlp_flutter.dart';
 
 import 'audio/zen_audio_handler.dart';
 import 'models/song.dart';
 import 'screens/home_screen.dart';
 import 'services/storage_service.dart';
+import 'services/youtube_service.dart';
 import 'theme/spotify_theme.dart';
 
 late ZenAudioHandler audioHandler;
@@ -19,13 +19,8 @@ Future<void> main() async {
   storage = StorageService();
   await storage.init();
 
-  // Initialize yt-dlp engine (first launch extracts Python + FFmpeg)
-  try {
-    await Ytdlp.init();
-    print('✅ yt-dlp engine ready');
-  } catch (e) {
-    print('⚠️ yt-dlp init failed: $e');
-  }
+  // yt_downloader needs no initialization — video mode is always available.
+  YoutubeService.videoEnabled = true;
 
   // Initialize audio service
   audioHandler = await AudioService.init(
