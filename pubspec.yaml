@@ -1,0 +1,62 @@
+name: zenmusic
+description: "A YouTube music player built with Flutter."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # ─────────────────────────────────────────────
+  # 🎵 YouTube Extraction & Audio Playback
+  # ─────────────────────────────────────────────
+  yt_extractor: ^0.1.0
+  youtube_explode_dart: ^3.1.0
+  just_audio: ^0.10.6
+  audio_service: ^0.18.18
+  audio_session: ^0.1.21
+
+  # On-device yt-dlp for video URL extraction
+  ytdlp_flutter: ^0.1.0
+
+  # ─────────────────────────────────────────────
+  # 📝 Lyrics
+  # ─────────────────────────────────────────────
+  flutter_lyric: ^3.0.6
+  http: ^1.2.2
+
+  # ─────────────────────────────────────────────
+  # 📦 Local Storage & State
+  # ─────────────────────────────────────────────
+  shared_preferences: ^2.3.2
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # ─────────────────────────────────────────────
+  # 🌐 Networking & Utilities
+  # ─────────────────────────────────────────────
+  cached_network_image: ^3.4.1
+  permission_handler: ^11.3.1
+
+  # ─────────────────────────────────────────────
+  # 🎨 UI / State Management
+  # ─────────────────────────────────────────────
+  provider: ^6.1.2
+  material_symbols_icons: ^4.2801.1
+  palette_generator_master: ^1.1.0
+  video_player: ^2.9.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.13
+
+flutter:
+  uses-material-design: true
