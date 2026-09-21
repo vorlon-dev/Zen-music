@@ -1,18 +1,28 @@
 import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/song.dart';
 import '../services/storage_service.dart';
 import '../services/youtube_service.dart';
 
 class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
-  final _player = AudioPlayer();
+  final _equalizer = AndroidEqualizer();
+  late final _player = AudioPlayer(
+    audioPipeline: AudioPipeline(
+      androidAudioEffects: [_equalizer],
+    ),
+  );
   final _yt = YoutubeService();
   final StorageService storage;
 
   List<Song> _queue = [];
   int _currentIndex = 0;
   bool _isAppending = false;
+  AudioServiceRepeatMode _repeatMode = AudioServiceRepeatMode.none;
+
+  // Bumped on every load; stale loads (rapid skips) are abandoned.
+  int _loadGeneration = 0;
 
   final Map<String, String> _urlCache = {};
   Timer? _saveTimer;
@@ -26,7 +36,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     );
 
     _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed) skipToNext();
+      if (state == ProcessingState.completed) _onTrackCompleted();
     });
 
     _saveTimer = Timer.periodic(
@@ -35,6 +45,76 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     );
 
     _restoreLastSession();
+    unawaited(_restoreEqualizer());
+  }
+
+  // ═════════════════════════════════════════════
+  // TRACK END / REPEAT (handler-owned — player loop modes are
+  // useless here: the player always holds a single item)
+  // ═════════════════════════════════════════════
+
+  Future<void> _onTrackCompleted() async {
+    if (_repeatMode == AudioServiceRepeatMode.one) {
+      await _player.seek(Duration.zero);
+      await play();
+      return;
+    }
+    if (_currentIndex + 1 < _queue.length) {
+      await _playIndex(_currentIndex + 1);
+      _prefetchNext();
+      return;
+    }
+    if (_repeatMode == AudioServiceRepeatMode.all && _queue.isNotEmpty) {
+      await _playIndex(0);
+      _prefetchNext();
+    }
+  }
+
+  // ═════════════════════════════════════════════
+  // EQUALIZER (Android system EQ via just_audio)
+  // ═════════════════════════════════════════════
+
+  Future<AndroidEqualizerParameters?> getEqualizerParameters() async {
+    try {
+      return await _equalizer.parameters;
+    } catch (e) {
+      print('getEqualizerParameters failed: $e');
+      return null;
+    }
+  }
+
+  Future<void> setEqualizerEnabled(bool enabled) async {
+    try {
+      await _equalizer.setEnabled(enabled);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('eq_enabled', enabled);
+    } catch (_) {}
+  }
+
+  Future<void> setEqualizerBandGain(int index, double gain) async {
+    try {
+      final params = await _equalizer.parameters;
+      if (index < 0 || index >= params.bands.length) return;
+      await params.bands[index].setGain(gain);
+    } catch (_) {}
+  }
+
+  Future<void> resetEqualizerBands() async {
+    try {
+      final params = await _equalizer.parameters;
+      for (final band in params.bands) {
+        await band.setGain(0);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _restoreEqualizer() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('eq_enabled') ?? false) {
+        await _equalizer.setEnabled(true);
+      }
+    } catch (_) {}
   }
 
   // ═════════════════════════════════════════════
@@ -157,6 +237,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> _playIndex(int index) async {
     if (index < 0 || index >= _queue.length) return;
 
+    final generation = ++_loadGeneration;
     _currentIndex = index;
     final song = _queue[index];
     final mediaItem = _toMediaItem(song);
@@ -164,13 +245,17 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
     try {
       final url = await _getStreamUrl(song);
+      // A newer skip started while we were resolving — abandon this
+      // load so the wrong song never wins the race.
+      if (generation != _loadGeneration) return;
       await _player.setUrl(url, tag: mediaItem);
+      if (generation != _loadGeneration) return;
       await play();
       await storage.savePlayedSong(song);
       await _saveCurrentSession();
     } catch (e) {
       print('Failed to play ${song.title}: $e');
-      if (_currentIndex + 1 < _queue.length) {
+      if (generation == _loadGeneration && _currentIndex + 1 < _queue.length) {
         await _playIndex(_currentIndex + 1);
       }
     }
@@ -269,21 +354,33 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   @override
   Future<void> seek(Duration position) => _player.seek(position);
 
+  /// Next: advance; wrap ONLY on repeat-all. Never jumps into
+  /// radio-filled songs unexpectedly from a manual press.
   @override
   Future<void> skipToNext() async {
-    await _playIndex(
-        _currentIndex + 1 >= _queue.length ? 0 : _currentIndex + 1);
+    if (_currentIndex + 1 < _queue.length) {
+      await _playIndex(_currentIndex + 1);
+    } else if (_repeatMode == AudioServiceRepeatMode.all &&
+        _queue.isNotEmpty) {
+      await _playIndex(0);
+    }
     _prefetchNext();
   }
 
+  /// Previous: restart if >3 s in, else step back. At the very start
+  /// of the first song: restart — NEVER wrap into radio songs.
   @override
   Future<void> skipToPrevious() async {
     if (_player.position.inSeconds > 3) {
       await _player.seek(Duration.zero);
       return;
     }
-    await _playIndex(
-        _currentIndex - 1 < 0 ? _queue.length - 1 : _currentIndex - 1);
+    if (_currentIndex > 0) {
+      await _playIndex(_currentIndex - 1);
+    } else {
+      await _player.seek(Duration.zero);
+      await play();
+    }
   }
 
   @override
@@ -295,21 +392,25 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> setShuffleMode(AudioServiceShuffleMode mode) async {
-    await _player.setShuffleModeEnabled(mode == AudioServiceShuffleMode.all);
+    // Shuffle the upcoming part of the queue (current song stays).
+    if (mode == AudioServiceShuffleMode.all &&
+        _currentIndex + 1 < _queue.length) {
+      final upcoming = _queue.sublist(_currentIndex + 1);
+      upcoming.shuffle();
+      _queue = [
+        ..._queue.sublist(0, _currentIndex + 1),
+        ...upcoming,
+      ];
+      queue.add(_queue.map(_toMediaItem).toList());
+    }
   }
 
   @override
   Future<void> setRepeatMode(AudioServiceRepeatMode mode) async {
-    switch (mode) {
-      case AudioServiceRepeatMode.none:
-        await _player.setLoopMode(LoopMode.off);
-        break;
-      case AudioServiceRepeatMode.one:
-        await _player.setLoopMode(LoopMode.one);
-        break;
-      default:
-        await _player.setLoopMode(LoopMode.all);
-    }
+    _repeatMode = mode;
+    // Loop modes are meaningless on a single-item player — repeat is
+    // handled in _onTrackCompleted / skipToNext instead.
+    await _player.setLoopMode(LoopMode.off);
   }
 
   // ═════════════════════════════════════════════

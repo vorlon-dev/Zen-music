@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -10,10 +13,12 @@ import '../widgets/current_lyric_line.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/lyrics_preview_card.dart';
 import '../widgets/lyrics_view.dart';
+import '../widgets/marquee_text.dart';
 import '../widgets/queue_sheet.dart';
 import '../widgets/up_next_row.dart';
-import '../widgets/youtube_embed.dart';
+import '../widgets/video_backdrop.dart';
 import '../widgets/youtube_thumbnail.dart';
+import 'player_screen.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
@@ -24,14 +29,21 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen> {
   bool _showLyrics = false;
+
+  // Video state (extracted stream, Canvas loop).
   bool _showVideo = false;
   bool _videoLoading = false;
-  String? _videoId;
+  String? _videoUrl;
+  Map<String, String> _videoHeaders = const {};
   String? _videoForSongId;
+  String? _resolvingFor;
+  bool _videoTriedSd = false;
 
   List<Song> _relatedSongs = [];
   String? _relatedForId;
   bool _lyricsSynced = false;
+
+  StreamSubscription<Song?>? _songSub;
 
   final _yt = YoutubeService();
 
@@ -39,6 +51,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void initState() {
     super.initState();
     _loadRelated();
+
+    _songSub = audioHandler.currentSongStream.listen((song) {
+      if (!mounted || song == null) return;
+      if (_lyricsSynced) setState(() => _lyricsSynced = false);
+      _loadRelated();
+      if (_showVideo) _resolveVideoFor(song);
+    });
+  }
+
+  @override
+  void dispose() {
+    _songSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadRelated() async {
@@ -52,12 +77,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _toggleVideo(Song song) async {
-    if (_showVideo && _videoForSongId == song.id) {
+    if (_showVideo) {
       setState(() => _showVideo = false);
       return;
     }
 
-    if (_videoForSongId == song.id && _videoId != null) {
+    if (_videoForSongId == song.id && _videoUrl != null) {
       setState(() => _showVideo = true);
       return;
     }
@@ -67,25 +92,88 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _showVideo = true;
     });
 
-    final id = await _yt.getVideoId(song);
-    if (!mounted) return;
+    await _resolveVideoFor(song, userInitiated: true);
 
-    if (id == null) {
+    if (!mounted) return;
+    setState(() => _videoLoading = false);
+  }
+
+  Future<void> _resolveVideoFor(
+      Song song, {
+        bool userInitiated = false,
+        bool preferHd = true,
+      }) async {
+    if (_videoForSongId == song.id && _videoUrl != null) return;
+    if (_resolvingFor == song.id) return;
+    _resolvingFor = song.id;
+
+    if (_videoForSongId != song.id && preferHd) {
+      _videoTriedSd = false;
+    }
+
+    final result = await _yt.getVideoStreamUrl(song, preferHd: preferHd);
+
+    if (!mounted) {
+      _resolvingFor = null;
+      return;
+    }
+    _resolvingFor = null;
+
+    final current = audioHandler.currentSong;
+    if (current == null || current.id != song.id) return;
+
+    if (result == null || result.url.isEmpty) {
       setState(() {
-        _videoLoading = false;
         _showVideo = false;
+        _videoUrl = null;
+        _videoHeaders = const {};
+        _videoForSongId = null;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Video not available for this song')),
-      );
+      if (userInitiated) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Video not available for this song')),
+        );
+      }
       return;
     }
 
     setState(() {
-      _videoId = id;
+      _videoUrl = result.url;
+      _videoHeaders = result.headers;
       _videoForSongId = song.id;
-      _videoLoading = false;
     });
+  }
+
+  void _onVideoUnavailable(String reason) {
+    if (!mounted) return;
+
+    if (!_videoTriedSd) {
+      _videoTriedSd = true;
+      final song = audioHandler.currentSong;
+      if (song != null && _showVideo) {
+        print('🔁 Video: HD failed ($reason) — retrying SD');
+        setState(() {
+          _videoUrl = null;
+          _videoHeaders = const {};
+          _videoForSongId = null;
+          _videoLoading = true;
+        });
+        _resolveVideoFor(song, preferHd: false).then((_) {
+          if (mounted) setState(() => _videoLoading = false);
+        });
+        return;
+      }
+    }
+
+    setState(() {
+      _showVideo = false;
+      _videoUrl = null;
+      _videoHeaders = const {};
+      _videoForSongId = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Video unavailable for this song')),
+    );
   }
 
   @override
@@ -106,34 +194,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
     }
 
-    if (_videoForSongId != null && _videoForSongId != song.id) {
-      _showVideo = false;
-      _videoId = null;
-      _videoForSongId = null;
-    }
-
     if (_relatedForId != song.id) {
       _lyricsSynced = false;
     }
-
-    _loadRelated();
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          if (_showVideo && _videoId != null)
+          if (_showVideo && _videoUrl != null)
             Positioned.fill(
-              child: YouTubeEmbed(
-                key: ValueKey(_videoId),
-                videoId: _videoId!,
+              child: VideoBackdrop(
+                streamUrl: _videoUrl!,
+                playing: controller.isPlaying,
+                httpHeaders: _videoHeaders,
+                onUnavailable: _onVideoUnavailable,
               ),
             )
           else
-          // Same album-art-derived colour wash behind both the main
-          // artwork view and the lyrics view — this is what makes the
-          // lyrics screen feel like part of the same "now playing"
-          // surface instead of a plain dark page bolted on.
             Positioned.fill(
               child: GradientBackground(
                 imageUrl: song.thumbnail,
@@ -141,9 +219,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
 
-          // Lyrics mode gets its own darkening scrim on top of the colour
-          // wash so the large lyric text stays legible against busy or
-          // bright artwork, without flattening the colour to plain gray.
           if (_showLyrics && !_showVideo)
             Positioned.fill(
               child: IgnorePointer(
@@ -289,10 +364,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
                                 Flexible(
-                                  child: Text(
-                                    song.title,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                  child: MarqueeText(
+                                    text: song.title,
                                     style: const TextStyle(
                                       fontSize: 21,
                                       fontWeight: FontWeight.w700,
@@ -301,25 +374,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ),
                                   ),
                                 ),
-                                if (_lyricsSynced) ...[
-                                  const SizedBox(width: 10),
-                                  Tooltip(
-                                    message: 'Synced lyrics available',
-                                    child: Container(
-                                      width: 22,
-                                      height: 22,
-                                      decoration: const BoxDecoration(
-                                        color: SpotifyColors.green,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        Icons.check_rounded,
-                                        size: 14,
-                                        color: Colors.black,
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ],
                             ),
                             const SizedBox(height: 4),
@@ -339,18 +393,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       IconButton(
                         iconSize: 26,
                         splashRadius: 22,
-                        icon: const Icon(
-                          Icons.playlist_add_rounded,
-                          color: SpotifyColors.textPrimary,
+                        icon: Icon(
+                          storage.isLiked(song.id)
+                              ? FluentIcons.heart_24_filled
+                              : FluentIcons.heart_24_regular,
+                          color: storage.isLiked(song.id)
+                              ? SpotifyColors.green
+                              : SpotifyColors.textPrimary,
                         ),
-                        onPressed: () {
-                          handler.addToQueue(song);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Added to queue'),
-                              duration: Duration(seconds: 1),
-                            ),
-                          );
+                        tooltip: storage.isLiked(song.id) ? 'Unlike' : 'Like',
+                        onPressed: () async {
+                          await storage.setLiked(
+                              song, !storage.isLiked(song.id));
+                          if (mounted) setState(() {});
                         },
                       ),
                     ],
@@ -439,7 +494,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
             tooltip: _showVideo ? 'Show cover art' : 'Show video',
             splashRadius: 22,
             icon: Icon(
-              _showVideo ? Icons.album_rounded : Icons.videocam_outlined,
+              _showVideo
+                  ? FluentIcons.album_24_regular
+                  : FluentIcons.video_24_regular,
               color: _showVideo
                   ? SpotifyColors.green
                   : SpotifyColors.textPrimary,
@@ -460,7 +517,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           IconButton(
             splashRadius: 20,
             icon: const Icon(
-              Icons.lyrics_outlined,
+              FluentIcons.text_quote_24_regular,
               color: SpotifyColors.textSecondary,
               size: 22,
             ),
@@ -469,7 +526,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           IconButton(
             splashRadius: 20,
             icon: const Icon(
-              Icons.share_outlined,
+              FluentIcons.share_24_regular,
               color: SpotifyColors.textSecondary,
               size: 22,
             ),
@@ -478,7 +535,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           IconButton(
             splashRadius: 20,
             icon: const Icon(
-              Icons.queue_music_rounded,
+              FluentIcons.apps_list_24_filled,
               color: SpotifyColors.textSecondary,
               size: 24,
             ),
@@ -499,7 +556,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: IconButton(
               splashRadius: 20,
               icon: const Icon(
-                Icons.album_outlined,
+                FluentIcons.album_24_regular,
                 color: SpotifyColors.textSecondary,
                 size: 22,
               ),
@@ -514,7 +571,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               IconButton(
                 iconSize: 32,
                 icon: const Icon(
-                  Icons.skip_previous_rounded,
+                  FluentIcons.previous_24_regular,
                   color: SpotifyColors.textPrimary,
                 ),
                 onPressed: () => handler.skipToPrevious(),
@@ -536,8 +593,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       iconSize: 28,
                       icon: Icon(
                         playing
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
+                            ? FluentIcons.pause_24_regular
+                            : FluentIcons.play_24_regular,
                         color: Colors.black,
                       ),
                       onPressed: () =>
@@ -550,7 +607,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               IconButton(
                 iconSize: 32,
                 icon: const Icon(
-                  Icons.skip_next_rounded,
+                  FluentIcons.next_24_regular,
                   color: SpotifyColors.textPrimary,
                 ),
                 onPressed: () => handler.skipToNext(),
@@ -576,14 +633,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
 // SEEK BAR
 // ═════════════════════════════════════════════
 
-class _SeekBar extends StatelessWidget {
+class _SeekBar extends StatefulWidget {
   final dynamic handler;
   final dynamic song;
 
   const _SeekBar({required this.handler, required this.song});
 
   @override
+  State<_SeekBar> createState() => _SeekBarState();
+}
+
+class _SeekBarState extends State<_SeekBar> {
+  double? _dragValue;
+
+  @override
   Widget build(BuildContext context) {
+    final handler = widget.handler;
+
     return StreamBuilder<Duration>(
       stream: handler.positionStream,
       builder: (context, posSnap) {
@@ -591,11 +657,13 @@ class _SeekBar extends StatelessWidget {
         return StreamBuilder<Duration?>(
           stream: handler.durationStream,
           builder: (context, durSnap) {
-            final duration = durSnap.data ?? song.duration;
+            final duration = durSnap.data ?? widget.song.duration;
             final maxSec = duration.inSeconds.toDouble();
             final maxValue = maxSec > 0 ? maxSec : 1.0;
-            final value =
+            final streamValue =
             position.inSeconds.toDouble().clamp(0.0, maxValue).toDouble();
+            final value =
+            (_dragValue ?? streamValue).clamp(0.0, maxValue).toDouble();
 
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -618,8 +686,12 @@ class _SeekBar extends StatelessWidget {
                       min: 0,
                       max: maxValue,
                       value: value,
-                      onChanged: (v) =>
-                          handler.seek(Duration(seconds: v.toInt())),
+                      onChangeStart: (v) => setState(() => _dragValue = v),
+                      onChanged: (v) => setState(() => _dragValue = v),
+                      onChangeEnd: (v) {
+                        handler.seek(Duration(seconds: v.toInt()));
+                        setState(() => _dragValue = null);
+                      },
                     ),
                   ),
                   Padding(
@@ -628,7 +700,9 @@ class _SeekBar extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          _fmt(position),
+                          _fmt(_dragValue != null
+                              ? Duration(seconds: _dragValue!.toInt())
+                              : position),
                           style: const TextStyle(
                             fontSize: 11,
                             color: SpotifyColors.textSecondary,
@@ -710,7 +784,9 @@ class _PlayerControlsState extends State<_PlayerControls> {
             iconSize: 22,
             splashRadius: 20,
             icon: Icon(
-              Icons.shuffle_rounded,
+              _shuffleOn
+                  ? FluentIcons.arrow_shuffle_24_filled
+                  : FluentIcons.arrow_shuffle_off_24_regular,
               color: _shuffleOn
                   ? SpotifyColors.green
                   : SpotifyColors.textSecondary,
@@ -721,7 +797,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
             iconSize: 38,
             splashRadius: 26,
             icon: const Icon(
-              Icons.skip_previous_rounded,
+              FluentIcons.previous_24_regular,
               color: SpotifyColors.textPrimary,
             ),
             onPressed: () => handler.skipToPrevious(),
@@ -737,8 +813,8 @@ class _PlayerControlsState extends State<_PlayerControls> {
               iconSize: 38,
               icon: Icon(
                 controller.isPlaying
-                    ? Icons.pause_rounded
-                    : Icons.play_arrow_rounded,
+                    ? FluentIcons.pause_24_regular
+                    : FluentIcons.play_24_regular,
                 color: Colors.black,
               ),
               onPressed: () =>
@@ -749,7 +825,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
             iconSize: 38,
             splashRadius: 26,
             icon: const Icon(
-              Icons.skip_next_rounded,
+              FluentIcons.next_24_regular,
               color: SpotifyColors.textPrimary,
             ),
             onPressed: () => handler.skipToNext(),
@@ -759,8 +835,10 @@ class _PlayerControlsState extends State<_PlayerControls> {
             splashRadius: 20,
             icon: Icon(
               _repeatMode == AudioServiceRepeatMode.one
-                  ? Icons.repeat_one_rounded
-                  : Icons.repeat_rounded,
+                  ? FluentIcons.arrow_repeat_1_24_filled
+                  : repeatOn
+                  ? FluentIcons.arrow_repeat_all_24_filled
+                  : FluentIcons.arrow_repeat_all_off_24_regular,
               color: repeatOn
                   ? SpotifyColors.green
                   : SpotifyColors.textSecondary,

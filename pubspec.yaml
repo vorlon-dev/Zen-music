@@ -49,7 +49,12 @@ dependencies:
   provider: ^6.1.2
   material_symbols_icons: ^4.2801.1
   palette_generator_master: ^1.1.0
-
+  # ─────────────────────────────────────────────
+  # 🎬 Track 2: extracted-stream video backdrop
+  # ─────────────────────────────────────────────
+  darttubefix: ^1.0.8
+  video_player: ^2.9.2
+  fluentui_system_icons: ^1.1.273
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -7,6 +7,7 @@ class StorageService {
   static const _queriesBoxName = 'search_queries';
   static const _lastSessionBoxName = 'last_session';
   static const _urlCacheBoxName = 'url_cache';
+  static const _likesBoxName = 'liked_songs';
 
   static const _maxHistory = 50;
   static const _maxQueries = 10;
@@ -16,6 +17,7 @@ class StorageService {
   late Box<String> _queriesBox;
   late Box<String> _lastSessionBox;
   late Box<String> _urlCacheBox;
+  late Box<String> _likesBox;
 
   /// Must be called once at startup.
   Future<void> init() async {
@@ -24,6 +26,32 @@ class StorageService {
     _queriesBox = await Hive.openBox<String>(_queriesBoxName);
     _lastSessionBox = await Hive.openBox<String>(_lastSessionBoxName);
     _urlCacheBox = await Hive.openBox<String>(_urlCacheBoxName);
+    _likesBox = await Hive.openBox<String>(_likesBoxName);
+  }
+
+  // ═════════════════════════════════════════════
+  // LIKED SONGS
+  // ═════════════════════════════════════════════
+
+  bool isLiked(String songId) => _likesBox.containsKey(songId);
+
+  Future<void> setLiked(Song song, bool liked) async {
+    if (liked) {
+      await _likesBox.put(song.id, jsonEncode(song.toJson()));
+    } else {
+      await _likesBox.delete(song.id);
+    }
+  }
+
+  List<Song> getLikedSongs() {
+    final songs = <Song>[];
+    for (final raw in _likesBox.values) {
+      try {
+        final map = jsonDecode(raw) as Map<String, dynamic>;
+        songs.add(Song.fromJson(map));
+      } catch (_) {}
+    }
+    return songs;
   }
 
   // ═════════════════════════════════════════════

@@ -1,8 +1,18 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:yt_extractor/yt_extractor.dart';
+import 'package:http/http.dart' as http;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt_explode;
 import '../models/song.dart';
 import 'jiosaavn_service.dart';
+
+/// A resolved video stream: the URL plus the headers ExoPlayer MUST
+/// replay on every request.
+class VideoStreamResult {
+  final String url;
+  final Map<String, String> headers;
+  const VideoStreamResult(this.url, [this.headers = const {}]);
+}
 
 class YoutubeService {
   static bool videoEnabled = true;
@@ -10,8 +20,172 @@ class YoutubeService {
   final _extractor = YtExtractor();
   final _yt = yt_explode.YoutubeExplode();
   final _jiosaavn = JiosaavnService();
+  final _probe = http.Client();
 
   bool _extractorInitialized = false;
+
+  final Map<String, String> _videoIdCache = {};
+
+  // ═════════════════════════════════════════════
+  // CLIENTS — synced with yt-dlp master (2026-08-18), payloads
+  // copied VERBATIM from Musify's maintained youtube_explode fork
+  // (packages/youtube_explode_dart/lib/src/videos/youtube_api_client.dart).
+  //
+  // Community intel encoded here:
+  //  • androidVr  → 403s everything since 2026-08-17 (yt-dlp #17456)
+  //  • androidSdkless → CDN-blocked outright since Jan 2026
+  //  • visionOs   → yt-dlp's ONLY default tokenless client now
+  // Our installed package exposes a public constructor, so these
+  // build inline — no fork, no path dependency.
+  // ═════════════════════════════════════════════
+
+  /// THE tokenless champion (VISIONOS). Carries all anonymous traffic
+  /// for yt-dlp right now. "Made for kids" videos unavailable — chain
+  /// handles via fallbacks.
+  static final yt_explode.YoutubeApiClient visionOs =
+  yt_explode.YoutubeApiClient(
+    {
+      'context': {
+        'client': {
+          'clientName': 'VISIONOS',
+          'clientVersion': '1.02',
+          'deviceMake': 'Apple',
+          'deviceModel': 'RealityDevice17,1',
+          'userAgent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15',
+          'osName': 'visionOS',
+          'osVersion': '26.5.23O471',
+          'hl': 'en',
+          'timeZone': 'UTC',
+          'utcOffsetMinutes': 0,
+        },
+      },
+    },
+    'https://www.youtube.com/youtubei/v1/player?prettyPrint=false',
+  );
+
+  static const _visionOsUa =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15';
+
+  /// yt-dlp's fallback for age-gated / embeddable-only videos.
+  static final yt_explode.YoutubeApiClient webEmbedded =
+  yt_explode.YoutubeApiClient(
+    {
+      'context': {
+        'client': {
+          'clientName': 'WEB_EMBEDDED_PLAYER',
+          'clientVersion': '2.20260708.00.00',
+          'hl': 'en',
+          'timeZone': 'UTC',
+          'utcOffsetMinutes': 0,
+        },
+      },
+    },
+    'https://www.youtube.com/youtubei/v1/player?prettyPrint=false',
+  );
+
+  /// yt-dlp's TVHTML5 fallback pair (fresh versions from the fork).
+  static final yt_explode.YoutubeApiClient tvDowngraded =
+  yt_explode.YoutubeApiClient(
+    {
+      'context': {
+        'client': {
+          'clientName': 'TVHTML5',
+          'clientVersion': '5.20260707',
+          'userAgent': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+          'hl': 'en',
+          'timeZone': 'UTC',
+          'utcOffsetMinutes': 0,
+        },
+      },
+    },
+    'https://www.youtube.com/youtubei/v1/player?prettyPrint=false',
+  );
+
+  static final yt_explode.YoutubeApiClient tvFresh =
+  yt_explode.YoutubeApiClient(
+    {
+      'context': {
+        'client': {
+          'deviceMake': '',
+          'deviceModel': '',
+          'userAgent':
+          'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)',
+          'clientName': 'TVHTML5',
+          'clientVersion': '7.20260707.07.00',
+          'hl': 'en',
+          'timeZone': 'UTC',
+          'gl': 'US',
+          'utcOffsetMinutes': 0,
+          'originalUrl': 'https://www.youtube.com/tv',
+          'theme': 'CLASSIC',
+          'platform': 'DESKTOP',
+          'clientFormFactor': 'UNKNOWN_FORM_FACTOR',
+          'webpSupport': false,
+          'configInfo': {},
+          'tvAppInfo': {'appQuality': 'TV_APP_QUALITY_FULL_ANIMATION'},
+          'acceptHeader':
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        'user': {'lockedSafetyMode': false},
+        'request': {'useSsl': true},
+      },
+      'contentCheckOk': true,
+      'racyCheckOk': true,
+    },
+    'https://www.youtube.com/youtubei/v1/player?prettyPrint=false',
+  );
+
+  static final yt_explode.YoutubeApiClient iosFresh =
+  yt_explode.YoutubeApiClient(
+    {
+      'context': {
+        'client': {
+          'clientName': 'IOS',
+          'clientVersion': '21.26.4',
+          'deviceMake': 'Apple',
+          'deviceModel': 'iPhone16,2',
+          'userAgent':
+          'com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
+          'hl': 'en',
+          'platform': 'MOBILE',
+          'osName': 'IOS',
+          'osVersion': '18.3.2.22D82',
+          'timeZone': 'UTC',
+          'gl': 'US',
+          'utcOffsetMinutes': 0,
+        },
+      },
+    },
+    'https://www.youtube.com/youtubei/v1/player?key=AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc&prettyPrint=false',
+  );
+
+  /// Progressive HD chain — dead clients removed (androidVr,
+  /// androidSdkless), fresh payloads, visionOs first.
+  static final List<_HdClient> _hdClients = [
+    _HdClient('visionOs', visionOs, _visionOsUa),
+    _HdClient('webEmbedded', webEmbedded, null),
+    _HdClient('tvDowngraded', tvDowngraded,
+        'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version'),
+    _HdClient(
+        'tv',
+        tvFresh,
+        'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)'),
+    _HdClient('ios', iosFresh,
+        'com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)'),
+  ];
+
+  /// safari client's UA (for the HLS tier).
+  static const _safariUa = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+      'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)';
+
+  /// Public Invidious instances (proxied 720p+ — sidesteps googlevideo).
+  static const List<String> _invidiousInstances = [
+    'https://yewtu.be',
+    'https://inv.nadeko.net',
+    'https://invidious.f5.si',
+    'https://invidious.privacyredirect.com',
+  ];
 
   DateTime? _lastRequestTime;
   static const _minRequestInterval = Duration(milliseconds: 1200);
@@ -76,7 +250,6 @@ class YoutubeService {
     return _deduplicateByTitle(combined);
   }
 
-  /// Videos tab — uses youtube_explode_dart directly (more reliable than yt_extractor for video search).
   Future<List<Song>> _youtubeVideoSearch(String query) async {
     try {
       final results = await _yt.search.search(query);
@@ -129,12 +302,14 @@ class YoutubeService {
   Future<String> getAudioStreamUrl(Song song) async {
     await _throttle();
 
+    // Tier 1: JioSaavn 320kbps.
     if (song.isFromJiosaavn) {
       if (song.hasHighQuality) return song.jiosaavnStreamUrl!;
       final url = await _jiosaavn.fetchStreamUrl(song.jiosaavnId!);
       if (url != null && url.isNotEmpty) return url;
     }
 
+    // Tier 2: yt_extractor.
     try {
       await _ensureExtractorInit();
       final info = await _extractor.getStreamInfo(
@@ -146,6 +321,29 @@ class YoutubeService {
       print('yt_extractor failed: $e');
     }
 
+    // Tier 3: visionOs (yt-dlp's current tokenless default).
+    try {
+      final manifest = await _yt.videos.streams.getManifest(
+        song.id,
+        ytClients: [visionOs],
+      );
+      return manifest.audioOnly.withHighestBitrate().url.toString();
+    } catch (e) {
+      print('youtube_explode (visionOs) failed: $e');
+    }
+
+    // Tier 4: androidSdkless (kept — may survive on some networks).
+    try {
+      final manifest = await _yt.videos.streams.getManifest(
+        song.id,
+        ytClients: [yt_explode.YoutubeApiClient.androidSdkless],
+      );
+      return manifest.audioOnly.withHighestBitrate().url.toString();
+    } catch (e) {
+      print('youtube_explode (androidSdkless) failed: $e');
+    }
+
+    // Tier 5: androidVr (documented broken — last-ditch only).
     try {
       final manifest = await _yt.videos.streams.getManifest(
         song.id,
@@ -153,27 +351,352 @@ class YoutubeService {
       );
       return manifest.audioOnly.withHighestBitrate().url.toString();
     } catch (e) {
-      print('youtube_explode_dart failed: $e');
+      print('youtube_explode (androidVr) failed: $e');
     }
 
     throw Exception('All audio extractors failed for ${song.title}');
   }
 
   // ═════════════════════════════════════════════
-  // VIDEO — returns just the YouTube ID for the iframe embed
+  // VIDEO STREAM — Canvas backdrop
   // ═════════════════════════════════════════════
 
-  /// Returns the YouTube video ID to load in the WebView embed.
-  /// For JioSaavn songs, searches YouTube Music Videos by title.
+  /// [preferHd] = true (default):
+  ///   1. visionOs (tokenless, yt-dlp's sole default client)
+  ///   2. HLS (safari) — different delivery path
+  ///   3. Invidious (proxied — bypasses googlevideo entirely)
+  ///   4. webEmbedded → tvDowngraded → tv → ios (yt-dlp fallbacks)
+  /// [preferHd] = false: default-client muxed (token-free 360p).
+  Future<VideoStreamResult?> getVideoStreamUrl(Song song,
+      {bool preferHd = true}) async {
+    if (!videoEnabled) return null;
+
+    final videoId = await getVideoId(song); // handles JioSaavn + cache
+    if (videoId == null || videoId.isEmpty) {
+      print('🎬 Video: no YouTube id for "${song.title}"');
+      return null;
+    }
+
+    if (preferHd) {
+      // 1) visionOs — the community's current answer.
+      final v = await _progressiveAttempt(
+          videoId, _HdClient('visionOs', visionOs, _visionOsUa));
+      if (v != null) return v;
+
+      // 2) HLS tier (safari client).
+      final hls = await _resolveHlsStream(videoId);
+      if (hls != null) return hls;
+
+      // 3) Invidious tier (proxied).
+      final inv = await _resolveInvidiousStream(videoId);
+      if (inv != null) return inv;
+
+      // 4) Remaining progressive fallbacks.
+      for (final entry in _hdClients.skip(1)) {
+        final r = await _progressiveAttempt(videoId, entry);
+        if (r != null) return r;
+      }
+    }
+
+    // SD fallback — the token-free muxed path (usually 360p).
+    await _throttle();
+    print('🎬 Video: resolving SD muxed (default client) for $videoId ...');
+    try {
+      final manifest = await _yt.videos.streams.getManifest(videoId);
+      if (manifest.muxed.isEmpty) {
+        print('🎬 Video: no muxed streams for $videoId');
+        return null;
+      }
+      final best = manifest.muxed.withHighestBitrate();
+      print('✅ Video: SD muxed ${best.videoQualityLabel} ($videoId)');
+      return VideoStreamResult(best.url.toString());
+    } catch (e) {
+      print('❌ Video: SD muxed failed for $videoId — $e');
+      return null;
+    }
+  }
+
+  /// One progressive client attempt: manifest → mp4 video-only
+  /// 1080p → 720p → highest ≤1080 → highest overall → probe with the
+  /// client's UA → return.
+  Future<VideoStreamResult?> _progressiveAttempt(
+      String videoId, _HdClient entry) async {
+    await _throttle();
+    print('🎬 Video: trying ${entry.name} for $videoId ...');
+    try {
+      final manifest = await _yt.videos.streams.getManifest(
+        videoId,
+        ytClients: [entry.client],
+      );
+
+      final mp4Only = manifest.videoOnly
+          .where((s) => s.container == yt_explode.StreamContainer.mp4)
+          .toList();
+
+      String? url;
+      if (mp4Only.isNotEmpty) {
+        // Quality ladder: 1080 → 720 → highest ≤1080 → highest overall.
+        // `dynamic` deliberately: no type-name assumptions across
+        // package versions; .videoQualityLabel/.url resolve at runtime.
+        dynamic pick;
+        for (final target in const [1080, 720]) {
+          for (final s in mp4Only) {
+            if (_streamHeight(s) == target) {
+              pick = s;
+              break;
+            }
+          }
+          if (pick != null) break;
+        }
+        if (pick == null) {
+          dynamic best;
+          for (final s in mp4Only) {
+            final h = _streamHeight(s);
+            if (h <= 1080 && (best == null || h > _streamHeight(best))) {
+              best = s;
+            }
+          }
+          pick = best ?? mp4Only.withHighestBitrate();
+        }
+        print('   ↳ ${entry.name} candidate: ${pick.videoQualityLabel}');
+        url = pick.url.toString();
+      } else if (manifest.videoOnly.isNotEmpty) {
+        final best = manifest.videoOnly.withHighestBitrate();
+        print('   ↳ ${entry.name} candidate: '
+            '${best.videoQualityLabel} (non-mp4)');
+        url = best.url.toString();
+      } else {
+        print('   ↳ ${entry.name}: no video-only streams');
+        return null;
+      }
+
+      if (!await _isPlayable(url, entry.userAgent)) {
+        print('   ↳ ${entry.name}: URL blocked (403/network) — next');
+        return null;
+      }
+
+      final ua = entry.userAgent;
+      final headers = ua == null
+          ? const <String, String>{}
+          : <String, String>{'User-Agent': ua};
+
+      print('✅ Video: HD stream via ${entry.name} ($videoId)');
+      return VideoStreamResult(url, headers);
+    } catch (e) {
+      print('   ↳ ${entry.name} failed — $e');
+      return null;
+    }
+  }
+
+  /// Leading resolution digits from a quality label ('1080p60' → 1080).
+  static int _streamHeight(dynamic s) {
+    final m = RegExp(r'^(\d+)').firstMatch('${s.videoQualityLabel}');
+    return int.tryParse(m?.group(1) ?? '') ?? 0;
+  }
+
+  // ═════════════════════════════════════════════
+  // HLS TIER (safari client)
+  // ═════════════════════════════════════════════
+
+  Future<VideoStreamResult?> _resolveHlsStream(String videoId) async {
+    await _throttle();
+    print('🎬 Video: trying HLS (safari) for $videoId ...');
+    try {
+      final manifest = await _yt.videos.streams.getManifest(
+        videoId,
+        ytClients: [yt_explode.YoutubeApiClient.safari],
+      );
+      final hls = manifest.hls;
+      if (hls.isEmpty) {
+        print('   ↳ safari: no HLS streams');
+        return null;
+      }
+
+      for (final entry in hls) {
+        final playlistUrl = entry.url;
+        try {
+          final resp = await _probe
+              .get(playlistUrl)
+              .timeout(const Duration(seconds: 8));
+          if (resp.statusCode != 200) {
+            print('   ↳ HLS playlist status ${resp.statusCode} — next');
+            continue;
+          }
+          final body = resp.body;
+
+          if (body.contains('#EXT-X-STREAM-INF')) {
+            final variant = _pickHlsVariant(playlistUrl, body);
+            if (variant == null) {
+              print('   ↳ HLS master parsed but no usable variant');
+              continue;
+            }
+            print('✅ Video: HLS variant ${variant.label} ($videoId)');
+            return VideoStreamResult(
+              variant.url,
+              {'User-Agent': _safariUa},
+            );
+          }
+
+          print('✅ Video: HLS media playlist, single quality ($videoId)');
+          return VideoStreamResult(
+            playlistUrl.toString(),
+            {'User-Agent': _safariUa},
+          );
+        } catch (e) {
+          print('   ↳ HLS entry failed — $e');
+          continue;
+        }
+      }
+      return null;
+    } catch (e) {
+      print('   ↳ safari manifest failed — $e');
+      return null;
+    }
+  }
+
+  /// Parses a master m3u8 → the variant closest to 1080p
+  /// (exact 1080 → exact 720 → highest ≤1080 → largest available).
+  _HlsVariant? _pickHlsVariant(Uri masterUrl, String body) {
+    final lines = body.split('\n');
+    final variants = <_HlsVariant>[];
+    final heights = <int>[];
+
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i].trim();
+      if (!line.startsWith('#EXT-X-STREAM-INF')) continue;
+      final m = RegExp(r'RESOLUTION=(\d+)x(\d+)').firstMatch(line);
+      final next = i + 1 < lines.length ? lines[i + 1].trim() : '';
+      if (m == null || next.isEmpty || next.startsWith('#')) continue;
+      final h = int.parse(m.group(2)!);
+      variants.add(_HlsVariant(
+        masterUrl.resolve(next).toString(),
+        '${m.group(1)}x$h',
+      ));
+      heights.add(h);
+    }
+    if (variants.isEmpty) return null;
+
+    // Exact 1080 first, then exact 720.
+    for (var i = 0; i < variants.length; i++) {
+      if (heights[i] == 1080) return variants[i];
+    }
+    for (var i = 0; i < variants.length; i++) {
+      if (heights[i] == 720) return variants[i];
+    }
+    // Highest not exceeding 1080.
+    int? bestIdx;
+    for (var i = 0; i < variants.length; i++) {
+      if (heights[i] <= 1080 &&
+          (bestIdx == null || heights[i] > heights[bestIdx])) {
+        bestIdx = i;
+      }
+    }
+    if (bestIdx != null) return variants[bestIdx];
+    // Otherwise the largest available.
+    var largest = 0;
+    for (var i = 1; i < variants.length; i++) {
+      if (heights[i] > heights[largest]) largest = i;
+    }
+    return variants[largest];
+  }
+
+  // ═════════════════════════════════════════════
+  // INVIDIOUS TIER (proxied)
+  // ═════════════════════════════════════════════
+
+  Future<VideoStreamResult?> _resolveInvidiousStream(String videoId) async {
+    for (final base in _invidiousInstances) {
+      print('🎬 Video: trying Invidious $base for $videoId ...');
+      try {
+        final uri = Uri.parse('$base/api/v1/videos/$videoId?local=true');
+        final resp = await _probe.get(uri).timeout(const Duration(seconds: 8));
+        if (resp.statusCode != 200) {
+          print('   ↳ $base status ${resp.statusCode} — next instance');
+          continue;
+        }
+        final dynamic decoded = jsonDecode(resp.body);
+        if (decoded is! Map<String, dynamic>) continue;
+
+        final formatStreams = decoded['formatStreams'] as List<dynamic>? ?? [];
+        for (final f in formatStreams) {
+          if (f is! Map) continue;
+          final url = f['url'];
+          if ('${f['itag']}' == '22' && url is String && url.isNotEmpty) {
+            if (await _isPlayable(url, null)) {
+              print('✅ Video: Invidious muxed 720p ($videoId via $base)');
+              return VideoStreamResult(url);
+            }
+            print('   ↳ $base: itag 22 URL not playable — next instance');
+          }
+        }
+
+        final adaptive = decoded['adaptiveFormats'] as List<dynamic>? ?? [];
+        String? bestUrl;
+        var bestHeight = 0;
+        for (final f in adaptive) {
+          if (f is! Map) continue;
+          final type = '${f['type']}';
+          if (!type.startsWith('video/mp4')) continue;
+          final url = f['url'];
+          if (url is! String || url.isEmpty) continue;
+          final label = '${f['qualityLabel']}';
+          final height =
+              int.tryParse(label.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+          if (height == 720) {
+            if (await _isPlayable(url, null)) {
+              print('✅ Video: Invidious video-only 720p ($videoId via $base)');
+              return VideoStreamResult(url);
+            }
+            print('   ↳ $base: 720p URL not playable — next instance');
+          }
+          if (height > bestHeight && height <= 720) {
+            bestHeight = height;
+            bestUrl = url;
+          }
+        }
+        if (bestUrl != null && await _isPlayable(bestUrl, null)) {
+          print('✅ Video: Invidious video-only ${bestHeight}p '
+              '($videoId via $base)');
+          return VideoStreamResult(bestUrl);
+        }
+        print('   ↳ $base: no usable mp4 streams');
+      } catch (e) {
+        print('   ↳ $base failed — $e');
+        continue;
+      }
+    }
+    return null;
+  }
+
+  Future<bool> _isPlayable(String url, String? userAgent) async {
+    try {
+      final headers = <String, String>{'Range': 'bytes=0-1'};
+      final ua = userAgent;
+      if (ua != null) headers['User-Agent'] = ua;
+      final resp = await _probe
+          .get(Uri.parse(url), headers: headers)
+          .timeout(const Duration(seconds: 6));
+      return resp.statusCode == 200 || resp.statusCode == 206;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ═════════════════════════════════════════════
+  // VIDEO ID — resolution (all song types) + cache
+  // ═════════════════════════════════════════════
+
   Future<String?> getVideoId(Song song) async {
     if (!videoEnabled) return null;
-    await _throttle();
-
     if (!song.isFromJiosaavn) return song.id;
+
+    final cached = _videoIdCache[song.id];
+    if (cached != null) return cached;
+
+    final query = '${song.title} ${song.artist}';
 
     try {
       await _ensureExtractorInit();
-      final query = '${song.title} ${song.artist}';
       final page = await _extractor.search(
         query,
         filter: SearchFilter.musicVideos,
@@ -181,13 +704,29 @@ class YoutubeService {
       for (final item in page.items) {
         final vid = _extractVideoId(item.url);
         if (vid != null) {
-          print('🎬 Resolved to YouTube ID: $vid');
+          _videoIdCache[song.id] = vid;
+          print('🎬 Resolved (yt_extractor) "${song.title}" → $vid');
           return vid;
         }
       }
     } catch (e) {
-      print('getVideoId failed: $e');
+      print('getVideoId yt_extractor failed: $e');
     }
+
+    try {
+      await _throttle();
+      final results = await _yt.search.search(query);
+      if (results.isNotEmpty) {
+        final vid = results.first.id.value;
+        _videoIdCache[song.id] = vid;
+        print('🎬 Resolved (youtube_explode) "${song.title}" → $vid');
+        return vid;
+      }
+    } catch (e) {
+      print('getVideoId youtube_explode failed: $e');
+    }
+
+    print('🎬 No YouTube video found for "${song.title}"');
     return null;
   }
 
@@ -201,21 +740,7 @@ class YoutubeService {
     String? youtubeId;
 
     if (seedSong.isFromJiosaavn) {
-      try {
-        await _ensureExtractorInit();
-        final query = '${seedSong.title} ${seedSong.artist}';
-        final page =
-        await _extractor.search(query, filter: SearchFilter.musicSongs);
-        for (final item in page.items) {
-          final vid = _extractVideoId(item.url);
-          if (vid != null) {
-            youtubeId = vid;
-            break;
-          }
-        }
-      } catch (e) {
-        print('Seed resolution failed: $e');
-      }
+      youtubeId = await getVideoId(seedSong);
     } else {
       youtubeId = seedSong.id;
     }
@@ -267,5 +792,19 @@ class YoutubeService {
   void dispose() {
     _yt.close();
     _jiosaavn.dispose();
+    _probe.close();
   }
+}
+
+class _HdClient {
+  final String name;
+  final yt_explode.YoutubeApiClient client;
+  final String? userAgent;
+  const _HdClient(this.name, this.client, this.userAgent);
+}
+
+class _HlsVariant {
+  final String url;
+  final String label;
+  const _HlsVariant(this.url, this.label);
 }

@@ -1,10 +1,15 @@
 import 'package:yt_extractor/yt_extractor.dart';
+import '../models/collection.dart';
 import '../models/song.dart';
 import 'jiosaavn_service.dart';
+import 'yt_music_service.dart';
+import 'youtube_service.dart';
 
 class HomeService {
   final _extractor = YtExtractor();
   final _jiosaavn = JiosaavnService();
+  final _ytm = YtMusicService();
+  final _ytService = YoutubeService();
 
   bool _extractorInitialized = false;
 
@@ -15,61 +20,153 @@ class HomeService {
   }
 
   // ═════════════════════════════════════════════
-  // SECTION 1: Trending Now (JioSaavn)
+  // PINNED EDITORIAL PLAYLISTS
   // ═════════════════════════════════════════════
-  Future<List<Song>> getTrendingNow() async {
+
+  static const _plTop50 = '1134543272';
+  static const _plDumdaar = '49';
+  static const _plMostSearched = '946682072';
+  static const _plLoveHindi = '1139074020';
+
+  Future<List<Song>> _pinnedPlaylist({
+    required String id,
+    required String fallbackQuery,
+    int max = 20,
+  }) async {
     try {
-      return await _jiosaavn.search('top hits 2024', limit: 15);
+      final detail = await _jiosaavn.getPlaylist(id);
+      final songs = detail?.songs ?? [];
+      if (songs.isNotEmpty) return songs.take(max).toList();
     } catch (e) {
-      print('getTrendingNow failed: $e');
+      print('pinned playlist $id failed: $e');
+    }
+    return _jiosaavn.search(fallbackQuery, limit: 15);
+  }
+
+  // ═════════════════════════════════════════════
+  // YT MUSIC — artist top songs (real YouTube ranking)
+  // ═════════════════════════════════════════════
+
+  static const _ytArtists = [
+    'Arijit Singh',
+    'Shreya Ghoshal',
+    'Pritam',
+    'Ed Sheeran',
+    'A.R. Rahman',
+    'Dua Lipa',
+    'Anirudh Ravichander',
+    'The Weeknd',
+  ];
+
+  Future<List<Song>> getYtTrendingSongs() async {
+    try {
+      final day = DateTime.now().weekday;
+      final picks = [
+        _ytArtists[day % _ytArtists.length],
+        _ytArtists[(day + 3) % _ytArtists.length],
+      ];
+      final out = <Song>[];
+      final seen = <String>{};
+      for (final name in picks) {
+        final ids = await _ytm.searchArtistIds(name, limit: 1);
+        if (ids.isEmpty) continue;
+        final songs = await _ytm.getArtistTopSongs(ids.first, limit: 8);
+        for (final s in songs) {
+          if (seen.add(s.id)) out.add(s);
+        }
+      }
+      return out.take(15).toList();
+    } catch (e) {
+      print('getYtTrendingSongs failed: $e');
+      return [];
+    }
+  }
+
+  /// YT Music songs-shelf search — real YouTube Music content for
+  /// editorial-style queries ("top hits", "new music"...).
+  Future<List<Song>> getYtmShelf(String query, {int limit = 12}) async {
+    try {
+      return await _ytm.searchSongs(query, limit: limit);
+    } catch (e) {
+      print('getYtmShelf failed: $e');
       return [];
     }
   }
 
   // ═════════════════════════════════════════════
-  // SECTION 2: Today's Biggest Hits (YouTube Music)
+  // PERSONALIZED VIDEOS — seeded from listening history
   // ═════════════════════════════════════════════
-  Future<List<Song>> getBiggestHits() async {
+
+  /// Related YouTube videos for the songs the user actually plays.
+  /// Seeds = recently played (most recent first). Falls back to a
+  /// generic trending-video search when there's no history yet.
+  Future<List<Song>> getPersonalizedVideos(List<Song> seeds) async {
+    if (seeds.isEmpty) return [];
+
+    final out = <Song>[];
+    final seen = <String>{};
+    try {
+      for (final seed in seeds.take(3)) {
+        final related = await _ytService.getRelatedSongs(seed);
+        for (final s in related) {
+          if (seen.add(s.id)) out.add(s);
+        }
+        if (out.length >= 15) break;
+      }
+    } catch (e) {
+      print('getPersonalizedVideos related failed: $e');
+    }
+    if (out.isNotEmpty) return out.take(15).toList();
+
     await _ensureExtractorInit();
     try {
       final page = await _extractor.search(
-        'top songs this week',
-        filter: SearchFilter.musicSongs,
+        'trending music videos',
+        filter: SearchFilter.musicVideos,
       );
-      final songs = <Song>[];
       for (final item in page.items) {
         final vid = _extractVideoId(item.url);
-        if (vid == null) continue;
-        songs.add(Song(
+        if (vid == null || !seen.add(vid)) continue;
+        out.add(Song(
           id: vid,
           title: item.name,
           artist: item.uploaderName ?? 'Unknown',
-          thumbnail: 'https://i.ytimg.com/vi/$vid/maxresdefault.jpg',
+          thumbnail: 'https://i.ytimg.com/vi/$vid/hqdefault.jpg',
           duration: Duration(seconds: item.duration ?? 0),
         ));
+        if (out.length >= 15) break;
       }
-      return songs.take(15).toList();
     } catch (e) {
-      print('getBiggestHits failed: $e');
-      return [];
+      print('getPersonalizedVideos fallback failed: $e');
     }
+    return out;
   }
 
   // ═════════════════════════════════════════════
-  // SECTION 3: New Releases (JioSaavn)
+  // SECTIONS
   // ═════════════════════════════════════════════
-  Future<List<Song>> getNewReleases() async {
-    try {
-      return await _jiosaavn.search('new songs 2024', limit: 15);
-    } catch (e) {
-      print('getNewReleases failed: $e');
-      return [];
-    }
-  }
 
-  // ═════════════════════════════════════════════
-  // SECTION 4: Recommended for Today (YouTube Trending)
-  // ═════════════════════════════════════════════
+  Future<List<Song>> getTrendingNow() => _pinnedPlaylist(
+    id: _plTop50,
+    fallbackQuery: 'top hits 2025',
+  );
+
+  Future<List<Song>> getBiggestHits() => _pinnedPlaylist(
+    id: _plDumdaar,
+    fallbackQuery: 'top songs this week',
+  );
+
+  Future<List<Song>> getTopCharts() => _pinnedPlaylist(
+    id: _plMostSearched,
+    fallbackQuery: 'billboard hot 100',
+  );
+
+  Future<List<Song>> getStartListening() => _pinnedPlaylist(
+    id: _plLoveHindi,
+    fallbackQuery: 'popular songs',
+    max: 6,
+  );
+
   Future<List<Song>> getRecommendedToday() async {
     await _ensureExtractorInit();
     try {
@@ -97,26 +194,31 @@ class HomeService {
   }
 
   // ═════════════════════════════════════════════
-  // SECTION 5: Top Charts (JioSaavn)
+  // COLLECTION ROWS (cards)
   // ═════════════════════════════════════════════
-  Future<List<Song>> getTopCharts() async {
+
+  Future<List<Collection>> getHomeCollections() async {
     try {
-      return await _jiosaavn.search('billboard hot 100', limit: 15);
+      final a = await _jiosaavn.searchPlaylists('superhit hits', limit: 8);
+      final b = await _jiosaavn.searchPlaylists('love songs', limit: 8);
+      final seen = <String>{};
+      return [...a, ...b].where((c) => seen.add(c.id)).take(12).toList();
     } catch (e) {
-      print('getTopCharts failed: $e');
+      print('getHomeCollections failed: $e');
       return [];
     }
   }
 
-  // ═════════════════════════════════════════════
-  // SECTION 6: Start Listening (Mixed vertical list)
-  // ═════════════════════════════════════════════
-  Future<List<Song>> getStartListening() async {
+  Future<List<Collection>> getNewReleaseAlbums() async {
     try {
-      final results = await _jiosaavn.search('popular songs', limit: 6);
-      return results;
+      final a =
+      await _jiosaavn.searchAlbums('new hindi songs 2025', limit: 8);
+      final b =
+      await _jiosaavn.searchAlbums('new punjabi songs 2025', limit: 8);
+      final seen = <String>{};
+      return [...a, ...b].where((c) => seen.add(c.id)).take(12).toList();
     } catch (e) {
-      print('getStartListening failed: $e');
+      print('getNewReleaseAlbums failed: $e');
       return [];
     }
   }
