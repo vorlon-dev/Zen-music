@@ -6,6 +6,7 @@ import '../main.dart';
 import '../models/song.dart';
 import '../services/youtube_service.dart';
 import '../theme/spotify_theme.dart';
+import '../widgets/current_lyric_line.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/lyrics_preview_card.dart';
 import '../widgets/lyrics_view.dart';
@@ -30,6 +31,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   List<Song> _relatedSongs = [];
   String? _relatedForId;
+  bool _lyricsSynced = false;
 
   final _yt = YoutubeService();
 
@@ -95,7 +97,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (song == null) {
       return const Scaffold(
         backgroundColor: SpotifyColors.background,
-        body: Center(child: Text('Nothing playing')),
+        body: Center(
+          child: Text(
+            'Nothing playing',
+            style: TextStyle(color: SpotifyColors.textSecondary),
+          ),
+        ),
       );
     }
 
@@ -103,6 +110,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _showVideo = false;
       _videoId = null;
       _videoForSongId = null;
+    }
+
+    if (_relatedForId != song.id) {
+      _lyricsSynced = false;
     }
 
     _loadRelated();
@@ -118,22 +129,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 videoId: _videoId!,
               ),
             )
-          else if (!_showLyrics)
+          else
+          // Same album-art-derived colour wash behind both the main
+          // artwork view and the lyrics view — this is what makes the
+          // lyrics screen feel like part of the same "now playing"
+          // surface instead of a plain dark page bolted on.
             Positioned.fill(
               child: GradientBackground(
                 imageUrl: song.thumbnail,
                 child: const SizedBox.expand(),
               ),
-            )
-          else
+            ),
+
+          // Lyrics mode gets its own darkening scrim on top of the colour
+          // wash so the large lyric text stays legible against busy or
+          // bright artwork, without flattening the colour to plain gray.
+          if (_showLyrics && !_showVideo)
             Positioned.fill(
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFF1A1A1A), Color(0xFF0A0A0A)],
-                  ),
+              child: IgnorePointer(
+                child: Container(
+                  color: Colors.black.withOpacity(0.35),
                 ),
               ),
             ),
@@ -169,8 +184,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: Container(
                 color: Colors.black54,
                 child: const Center(
-                  child: CircularProgressIndicator(
-                    color: SpotifyColors.green,
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      color: SpotifyColors.green,
+                      strokeWidth: 2.5,
+                    ),
                   ),
                 ),
               ),
@@ -187,8 +207,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         Expanded(
           child: LyricsView(
             key: ValueKey('lyrics-${song.id}'),
+            songId: song.id,
             title: song.title,
             artist: song.artist,
+            imageUrl: song.thumbnail,
             duration: song.duration,
             positionStream: handler.positionStream,
             onSeek: (pos) => handler.seek(pos),
@@ -210,15 +232,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
               children: [
                 if (!_showVideo)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                    padding: const EdgeInsets.fromLTRB(28, 20, 28, 28),
                     child: AspectRatio(
                       aspectRatio: 1,
                       child: Hero(
                         tag: 'artwork-${song.id}',
-                        child: YoutubeThumbnail(
-                          videoId: song.id,
-                          imageUrl: song.thumbnail,
-                          borderRadius: 12,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.45),
+                                blurRadius: 24,
+                                offset: const Offset(0, 12),
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: YoutubeThumbnail(
+                              videoId: song.id,
+                              imageUrl: song.thumbnail,
+                              borderRadius: 10,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -226,41 +263,84 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 else
                   const SizedBox(height: 340),
 
+                if (!_showVideo)
+                  CurrentLyricLine(
+                    title: song.title,
+                    artist: song.artist,
+                    duration: song.duration,
+                    positionStream: handler.positionStream,
+                    onTap: () => setState(() => _showLyrics = true),
+                    onSyncStatus: (synced) {
+                      if (mounted && synced != _lyricsSynced) {
+                        setState(() => _lyricsSynced = synced);
+                      }
+                    },
+                  ),
+
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
                   child: Row(
                     children: [
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              song.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: SpotifyColors.textPrimary,
-                              ),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    song.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 21,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.3,
+                                      color: SpotifyColors.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                if (_lyricsSynced) ...[
+                                  const SizedBox(width: 10),
+                                  Tooltip(
+                                    message: 'Synced lyrics available',
+                                    child: Container(
+                                      width: 22,
+                                      height: 22,
+                                      decoration: const BoxDecoration(
+                                        color: SpotifyColors.green,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.check_rounded,
+                                        size: 14,
+                                        color: Colors.black,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 4),
                             Text(
                               song.artist,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 15,
+                                fontSize: 14,
                                 color: SpotifyColors.textSecondary,
                               ),
                             ),
                           ],
                         ),
                       ),
+                      const SizedBox(width: 8),
                       IconButton(
-                        iconSize: 36,
+                        iconSize: 26,
+                        splashRadius: 22,
                         icon: const Icon(
-                          Icons.add_circle_outline,
+                          Icons.playlist_add_rounded,
                           color: SpotifyColors.textPrimary,
                         ),
                         onPressed: () {
@@ -277,13 +357,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 _SeekBar(handler: handler, song: song),
                 const SizedBox(height: 4),
                 _PlayerControls(handler: handler, controller: controller),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 _smallIconsRow(song, handler),
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: LyricsPreviewCard(
@@ -317,30 +397,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _topBar(Song song) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+      padding: const EdgeInsets.fromLTRB(4, 8, 8, 4),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.keyboard_arrow_down, size: 32),
+            icon: const Icon(
+              Icons.expand_more_rounded,
+              size: 30,
+              color: SpotifyColors.textPrimary,
+            ),
+            splashRadius: 22,
             onPressed: () => Navigator.pop(context),
           ),
           Expanded(
             child: Column(
               children: [
                 Text(
-                  _showVideo ? 'Video' : 'Playing from Search',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: SpotifyColors.textSecondary,
+                  _showVideo ? 'PLAYING VIDEO' : 'NOW PLAYING',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.8,
+                    color: SpotifyColors.textSecondary.withOpacity(0.8),
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  _showVideo ? song.title : 'Recent Searches',
+                  song.artist,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: SpotifyColors.textPrimary,
                   ),
@@ -349,9 +436,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
           IconButton(
-            tooltip: _showVideo ? 'Hide video' : 'Show video',
+            tooltip: _showVideo ? 'Show cover art' : 'Show video',
+            splashRadius: 22,
             icon: Icon(
-              _showVideo ? Icons.music_note : Icons.videocam_outlined,
+              _showVideo ? Icons.album_rounded : Icons.videocam_outlined,
               color: _showVideo
                   ? SpotifyColors.green
                   : SpotifyColors.textPrimary,
@@ -365,28 +453,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _smallIconsRow(Song song, dynamic handler) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+      padding: const EdgeInsets.symmetric(horizontal: 36),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
+            splashRadius: 20,
             icon: const Icon(
               Icons.lyrics_outlined,
               color: SpotifyColors.textSecondary,
+              size: 22,
             ),
             onPressed: () => setState(() => _showLyrics = true),
           ),
           IconButton(
+            splashRadius: 20,
             icon: const Icon(
               Icons.share_outlined,
               color: SpotifyColors.textSecondary,
+              size: 22,
             ),
             onPressed: () {},
           ),
           IconButton(
+            splashRadius: 20,
             icon: const Icon(
-              Icons.queue_music,
+              Icons.queue_music_rounded,
               color: SpotifyColors.textSecondary,
+              size: 24,
             ),
             onPressed: () => _showQueue(context),
           ),
@@ -397,44 +491,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _miniControls(Song song, dynamic handler) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+      padding: const EdgeInsets.fromLTRB(28, 12, 28, 24),
       child: Column(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  song.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: SpotifyColors.textPrimary,
-                  ),
-                ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: IconButton(
+              splashRadius: 20,
+              icon: const Icon(
+                Icons.album_outlined,
+                color: SpotifyColors.textSecondary,
+                size: 22,
               ),
-              IconButton(
-                icon: const Icon(
-                  Icons.image_outlined,
-                  color: SpotifyColors.textSecondary,
-                ),
-                onPressed: () => setState(() => _showLyrics = false),
-              ),
-            ],
+              tooltip: 'Show cover art',
+              onPressed: () => setState(() => _showLyrics = false),
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               IconButton(
-                iconSize: 36,
-                icon: const Icon(Icons.skip_previous),
+                iconSize: 32,
+                icon: const Icon(
+                  Icons.skip_previous_rounded,
+                  color: SpotifyColors.textPrimary,
+                ),
                 onPressed: () => handler.skipToPrevious(),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Container(
-                width: 56,
-                height: 56,
+                width: 52,
+                height: 52,
                 decoration: const BoxDecoration(
                   color: Colors.white,
                   shape: BoxShape.circle,
@@ -445,9 +533,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   builder: (context, snap) {
                     final playing = snap.data ?? false;
                     return IconButton(
-                      iconSize: 32,
+                      iconSize: 28,
                       icon: Icon(
-                        playing ? Icons.pause : Icons.play_arrow,
+                        playing
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
                         color: Colors.black,
                       ),
                       onPressed: () =>
@@ -456,10 +546,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   },
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               IconButton(
-                iconSize: 36,
-                icon: const Icon(Icons.skip_next),
+                iconSize: 32,
+                icon: const Icon(
+                  Icons.skip_next_rounded,
+                  color: SpotifyColors.textPrimary,
+                ),
                 onPressed: () => handler.skipToNext(),
               ),
             ],
@@ -505,15 +598,29 @@ class _SeekBar extends StatelessWidget {
             position.inSeconds.toDouble().clamp(0.0, maxValue).toDouble();
 
             return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Column(
                 children: [
-                  Slider(
-                    min: 0,
-                    max: maxValue,
-                    value: value,
-                    onChanged: (v) =>
-                        handler.seek(Duration(seconds: v.toInt())),
+                  SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 3,
+                      activeTrackColor: SpotifyColors.textPrimary,
+                      inactiveTrackColor:
+                      SpotifyColors.textTertiary.withOpacity(0.3),
+                      thumbColor: SpotifyColors.textPrimary,
+                      thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 6),
+                      overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 14),
+                      overlayColor: Colors.white.withOpacity(0.12),
+                    ),
+                    child: Slider(
+                      min: 0,
+                      max: maxValue,
+                      value: value,
+                      onChanged: (v) =>
+                          handler.seek(Duration(seconds: v.toInt())),
+                    ),
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -557,42 +664,81 @@ class _SeekBar extends StatelessWidget {
 // PLAYER CONTROLS
 // ═════════════════════════════════════════════
 
-class _PlayerControls extends StatelessWidget {
+class _PlayerControls extends StatefulWidget {
   final dynamic handler;
   final dynamic controller;
 
   const _PlayerControls({required this.handler, required this.controller});
 
   @override
+  State<_PlayerControls> createState() => _PlayerControlsState();
+}
+
+class _PlayerControlsState extends State<_PlayerControls> {
+  bool _shuffleOn = false;
+  AudioServiceRepeatMode _repeatMode = AudioServiceRepeatMode.none;
+
+  void _toggleShuffle() {
+    setState(() => _shuffleOn = !_shuffleOn);
+    widget.handler.setShuffleMode(
+      _shuffleOn ? AudioServiceShuffleMode.all : AudioServiceShuffleMode.none,
+    );
+  }
+
+  void _cycleRepeat() {
+    final next = switch (_repeatMode) {
+      AudioServiceRepeatMode.none => AudioServiceRepeatMode.all,
+      AudioServiceRepeatMode.all => AudioServiceRepeatMode.one,
+      _ => AudioServiceRepeatMode.none,
+    };
+    setState(() => _repeatMode = next);
+    widget.handler.setRepeatMode(next);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final handler = widget.handler;
+    final controller = widget.controller;
+    final repeatOn = _repeatMode != AudioServiceRepeatMode.none;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
-            iconSize: 28,
-            icon: const Icon(Icons.shuffle, color: SpotifyColors.green),
-            onPressed: () {
-              handler.setShuffleMode(AudioServiceShuffleMode.all);
-            },
+            iconSize: 22,
+            splashRadius: 20,
+            icon: Icon(
+              Icons.shuffle_rounded,
+              color: _shuffleOn
+                  ? SpotifyColors.green
+                  : SpotifyColors.textSecondary,
+            ),
+            onPressed: _toggleShuffle,
           ),
           IconButton(
-            iconSize: 40,
-            icon: const Icon(Icons.skip_previous),
+            iconSize: 38,
+            splashRadius: 26,
+            icon: const Icon(
+              Icons.skip_previous_rounded,
+              color: SpotifyColors.textPrimary,
+            ),
             onPressed: () => handler.skipToPrevious(),
           ),
           Container(
-            width: 72,
-            height: 72,
+            width: 68,
+            height: 68,
             decoration: const BoxDecoration(
               color: Colors.white,
               shape: BoxShape.circle,
             ),
             child: IconButton(
-              iconSize: 42,
+              iconSize: 38,
               icon: Icon(
-                controller.isPlaying ? Icons.pause : Icons.play_arrow,
+                controller.isPlaying
+                    ? Icons.pause_rounded
+                    : Icons.play_arrow_rounded,
                 color: Colors.black,
               ),
               onPressed: () =>
@@ -600,17 +746,26 @@ class _PlayerControls extends StatelessWidget {
             ),
           ),
           IconButton(
-            iconSize: 40,
-            icon: const Icon(Icons.skip_next),
+            iconSize: 38,
+            splashRadius: 26,
+            icon: const Icon(
+              Icons.skip_next_rounded,
+              color: SpotifyColors.textPrimary,
+            ),
             onPressed: () => handler.skipToNext(),
           ),
           IconButton(
-            iconSize: 28,
-            icon: const Icon(
-              Icons.timer_outlined,
-              color: SpotifyColors.textSecondary,
+            iconSize: 22,
+            splashRadius: 20,
+            icon: Icon(
+              _repeatMode == AudioServiceRepeatMode.one
+                  ? Icons.repeat_one_rounded
+                  : Icons.repeat_rounded,
+              color: repeatOn
+                  ? SpotifyColors.green
+                  : SpotifyColors.textSecondary,
             ),
-            onPressed: () {},
+            onPressed: _cycleRepeat,
           ),
         ],
       ),
