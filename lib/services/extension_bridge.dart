@@ -2,8 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
-/// Bridge to the extension engine (Echo-contract extensions loaded
-/// via DexClassLoader on the native side).
+/// Bridge to the extension engine (DexClassLoader host on the native side).
 class ExtensionBridge {
   static const _channel = MethodChannel('zen/extensions');
 
@@ -33,6 +32,15 @@ class ExtensionBridge {
   static Future<bool> select(String id) async {
     try {
       return await _channel.invokeMethod('select', {'id': id}) == true;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Clears the active extension — back to built-in sources.
+  static Future<bool> deselect() async {
+    try {
+      return await _channel.invokeMethod('deselect') == true;
     } on PlatformException {
       return false;
     }

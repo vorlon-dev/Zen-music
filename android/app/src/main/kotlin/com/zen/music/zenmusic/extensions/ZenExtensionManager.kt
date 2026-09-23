@@ -1,19 +1,29 @@
 package com.zen.music.zenmusic.extensions
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
+import dev.brahmkshatriya.echo.common.clients.AlbumClient
+import dev.brahmkshatriya.echo.common.clients.ArtistClient
 import dev.brahmkshatriya.echo.common.clients.ExtensionClient
+import dev.brahmkshatriya.echo.common.clients.HomeFeedClient
+import dev.brahmkshatriya.echo.common.clients.PlaylistClient
 import dev.brahmkshatriya.echo.common.clients.SearchFeedClient
 import dev.brahmkshatriya.echo.common.clients.TrackClient
+import dev.brahmkshatriya.echo.common.models.Album
+import dev.brahmkshatriya.echo.common.models.Artist
+import dev.brahmkshatriya.echo.common.models.EchoMediaItem
+import dev.brahmkshatriya.echo.common.models.Feed.Companion.loadAll
+import dev.brahmkshatriya.echo.common.models.ImageHolder
 import dev.brahmkshatriya.echo.common.models.ImportType
 import dev.brahmkshatriya.echo.common.models.Metadata
+import dev.brahmkshatriya.echo.common.models.Playlist
 import dev.brahmkshatriya.echo.common.models.Shelf
 import dev.brahmkshatriya.echo.common.models.Streamable
 import dev.brahmkshatriya.echo.common.models.Track
 import dev.brahmkshatriya.echo.common.providers.MetadataProvider
-import dev.brahmkshatriya.echo.common.providers.SettingsProvider
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -93,6 +103,20 @@ class ZenExtensionManager(private val context: Context) {
         )
     }
 
+    // Icon → flat json: url+headers, or hex, or empty (fallback icon).
+    fun iconJson(icon: ImageHolder?): JSONObject {
+        val obj = JSONObject()
+        when (icon) {
+            is ImageHolder.NetworkRequestImageHolder -> {
+                obj.put("url", icon.request.url)
+                obj.put("headers", JSONObject(icon.request.headers))
+            }
+            is ImageHolder.HexColorImageHolder -> obj.put("hex", icon.hex)
+            else -> {} // ResourceUri/ResourceId holders are not renderable here
+        }
+        return obj
+    }
+
     fun list(): JSONArray {
         val activeId = prefs.getString("active", null)
         val arr = JSONArray()
@@ -104,6 +128,7 @@ class ZenExtensionManager(private val context: Context) {
                     .put("version", ext.metadata.version)
                     .put("description", ext.metadata.description)
                     .put("author", ext.metadata.author)
+                    .put("icon", iconJson(ext.metadata.icon))
                     .put("isActive", ext.metadata.id == activeId)
             )
         }
@@ -112,26 +137,28 @@ class ZenExtensionManager(private val context: Context) {
 
     fun select(id: String): Boolean {
         val ext = installed[id] ?: return false
+        activate(ext) // injects providers before init, nulls active on failure
+        if (active == null) return false
+        // Persist only a selection that actually activated — a failed
+        // activation must not report itself as active in list().
         prefs.edit().putString("active", id).apply()
-        return try {
-            runBlocking {
-                ext.client.onInitialize()
-                ext.client.onExtensionSelected()
-            }
-            active = ext
-            Log.i("ZenExt", "✅ extension $id: activated")
-            true
-        } catch (e: Exception) {
-            Log.e("ZenExt", "❌ extension $id: activation failed", e)
-            // Leave active unset — the next search/resolve call will
-            // attempt auto-reactivation and surface the real error.
-            false
-        }
+        return true
+    }
+
+    /// Clears the active extension — the app returns to built-in sources.
+    fun clearActive(): Boolean {
+        val had = prefs.getString("active", null) != null
+        prefs.edit().remove("active").apply()
+        active = null
+        return had
     }
 
     fun active(): ParsedExtension? = active
 
     private var active: ParsedExtension? = null
+
+    // Clients that completed onInitialize — id → instance.
+    private val initializedClients = mutableMapOf<String, ExtensionClient>()
 
     /// Returns the active extension client, re-running activation if a
     /// previous activation failed or was lost (half-initialized extension).
@@ -150,29 +177,27 @@ class ZenExtensionManager(private val context: Context) {
 
     private fun activate(ext: ParsedExtension) {
         active = ext
-        // Lifecycle per Echo's real host: inject providers
-        // (Metadata → Settings) BEFORE onInitialize, then
-        // onExtensionSelected. Synchronous + logged so a failed init
-        // never leaves a half-initialized extension answering calls.
         try {
-            Log.i("ZenExt", "extension ${ext.metadata.id}: injecting providers...")
-            (ext.client as? MetadataProvider)?.setMetadata(ext.metadata)
-            (ext.client as? SettingsProvider)?.setSettings(
-                ZenExtensionSettings(context, ext.metadata.id)
-            )
-            Log.i("ZenExt", "extension ${ext.metadata.id}: onInitialize...")
-            runBlocking {
-                ext.client.onInitialize()
-                ext.client.onExtensionSelected()
+            // Contract: injections → onInitialize once per client instance;
+            // onExtensionSelected on every (re)select.
+            if (initializedClients[ext.metadata.id] !== ext.client) {
+                Log.i("ZenExt", "extension ${ext.metadata.id}: injecting providers...")
+                (ext.client as? MetadataProvider)?.setMetadata(ext.metadata)
+                ext.client.setSettings(ZenExtensionSettings(context, ext.metadata.id))
+                Log.i("ZenExt", "extension ${ext.metadata.id}: onInitialize...")
+                runBlocking { ext.client.onInitialize() }
+                initializedClients[ext.metadata.id] = ext.client
+                Log.i("ZenExt", "✅ extension ${ext.metadata.id}: initialized")
             }
-            Log.i("ZenExt", "✅ extension ${ext.metadata.id}: initialized")
+            runBlocking { ext.client.onExtensionSelected() }
+            Log.i("ZenExt", "✅ extension ${ext.metadata.id}: selected")
         } catch (t: Throwable) {
-            Log.e("ZenExt", "❌ extension ${ext.metadata.id}: init threw", t)
+            Log.e("ZenExt", "❌ extension ${ext.metadata.id}: activation failed", t)
             active = null // half-initialized extension must not answer calls
         }
     }
 
-    // ── Search (PagedData walker — uses only pasted Feed/Shelf API) ──
+    // ── Search (PagedData walker) ──
 
     fun search(query: String): JSONArray {
         val client = activeClient() as? SearchFeedClient
@@ -206,6 +231,102 @@ class ZenExtensionManager(private val context: Context) {
             )
         }
         return arr
+    }
+
+    // ── Home feed (HomeFeedClient — shelves serialized as-is) ──
+
+    fun homeFeed(): String {
+        val client = activeClient() as? HomeFeedClient
+            ?: error("Extension does not provide a home feed")
+
+        val feed = runBlocking { client.loadHomeFeed() }
+        val shelves: List<Shelf> = runBlocking {
+            val data = feed.getPagedData(feed.notSortTabs.firstOrNull())
+            data.pagedData.loadAll()
+        }
+        return Json.encodeToString(ListSerializer(Shelf.serializer()), shelves)
+    }
+
+    // ── Detail pages: album / playlist / artist ──
+
+    fun loadDetail(itemJson: String): JSONObject {
+        val item = try {
+            Json.decodeFromString(EchoMediaItem.serializer(), itemJson)
+        } catch (t: Throwable) {
+            error("Malformed media item: ${t.message}")
+        }
+        val client = activeClient()
+        val result = JSONObject()
+
+        // NOTE: item + tracks are encoded via EchoMediaItem.serializer()
+        // (the sealed parent) — concrete serializers like Track.serializer()
+        // omit the mediaItemType discriminator and Dart-side parsing of
+        // these payloads depends on it.
+        when (item) {
+            is Album -> {
+                val c = client as? AlbumClient
+                    ?: error("Extension does not support albums")
+                val loaded = runBlocking { c.loadAlbum(item) }
+                result.put(
+                    "item",
+                    JSONObject(Json.encodeToString(EchoMediaItem.serializer(), loaded))
+                )
+                // Contract's own Feed.loadAll walks every not-sort tab —
+                // a first-tab walk misses tabbed feeds.
+                val tracks: List<Track> = runBlocking {
+                    c.loadTracks(loaded)?.loadAll() ?: emptyList()
+                }
+                Log.i("ZenExt", "album ${loaded.id}: ${tracks.size} tracks")
+                result.put(
+                    "tracks",
+                    JSONArray(
+                        Json.encodeToString(
+                            ListSerializer(EchoMediaItem.serializer()), tracks
+                        )
+                    )
+                )
+            }
+            is Playlist -> {
+                val c = client as? PlaylistClient
+                    ?: error("Extension does not support playlists")
+                val loaded = runBlocking { c.loadPlaylist(item) }
+                result.put(
+                    "item",
+                    JSONObject(Json.encodeToString(EchoMediaItem.serializer(), loaded))
+                )
+                val tracks: List<Track> = runBlocking {
+                    c.loadTracks(loaded).loadAll()
+                }
+                Log.i("ZenExt", "playlist ${loaded.id}: ${tracks.size} tracks")
+                result.put(
+                    "tracks",
+                    JSONArray(
+                        Json.encodeToString(
+                            ListSerializer(EchoMediaItem.serializer()), tracks
+                        )
+                    )
+                )
+            }
+            is Artist -> {
+                val c = client as? ArtistClient
+                    ?: error("Extension does not support artists")
+                val loaded = runBlocking { c.loadArtist(item) }
+                result.put(
+                    "item",
+                    JSONObject(Json.encodeToString(EchoMediaItem.serializer(), loaded))
+                )
+                val shelves: List<Shelf> = runBlocking {
+                    c.loadFeed(loaded).loadAll()
+                }
+                Log.i("ZenExt", "artist ${loaded.id}: ${shelves.size} shelves")
+                result.put(
+                    "shelves",
+                    JSONArray(Json.encodeToString(ListSerializer(Shelf.serializer()), shelves))
+                )
+            }
+            else -> error("No detail page for ${item::class.simpleName}")
+        }
+        return result
     }
 
     // ── Playback bridge: track json → resolved stream json ──

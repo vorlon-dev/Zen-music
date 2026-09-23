@@ -10,6 +10,7 @@ import '../models/song.dart';
 import '../services/listening_stats_service.dart';
 import '../services/spotify_bridge.dart';
 import '../theme/spotify_theme.dart';
+import '../utilities/zen_transitions.dart';
 import 'equalizer_screen.dart';
 import 'import_spotify_screen.dart';
 
@@ -66,6 +67,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: SpotifyColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Text(title,
             style: TextStyle(
                 color:
@@ -197,7 +199,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       backgroundColor: SpotifyColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (_) => SafeArea(
         child: ListView.builder(
@@ -237,46 +239,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: SpotifyColors.textPrimary)),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
-          _group('Playback', Icons.tune_rounded, [
-            _tile(FluentIcons.options_24_regular, 'Equalizer',
-                'Bass, treble & presets', () async {
-                  await Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const EqualizerScreen()));
-                }),
-            _tile(FluentIcons.speaker_2_24_regular, 'Audio quality',
-                _audioQuality == 'high'
-                    ? 'High (best available)'
-                    : _audioQuality == 'medium'
-                    ? 'Medium (≤160 kbps)'
-                    : 'Low (≤96 kbps)', () {
-                  _showQualityPicker();
-                }),
+          _category('Playback', FluentIcons.options_24_regular, [
+            _prefRow(
+              FluentIcons.options_24_regular,
+              'Equalizer',
+              'Bass, treble & presets',
+                  () => pushSharedAxisY(context, const EqualizerScreen()),
+            ),
+            _prefRow(
+              FluentIcons.speaker_2_24_regular,
+              'Audio quality',
+              _audioQuality == 'high'
+                  ? 'High (best available)'
+                  : _audioQuality == 'medium'
+                  ? 'Medium (≤160 kbps)'
+                  : 'Low (≤96 kbps)',
+              _showQualityPicker,
+            ),
             _statsToggle(),
-            SwitchListTile(
-              secondary: const Icon(FluentIcons.cloud_off_24_regular,
-                  color: SpotifyColors.textSecondary),
-              activeColor: SpotifyColors.green,
-              title: const Text('Offline mode',
-                  style: TextStyle(
-                      color: SpotifyColors.textPrimary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600)),
-              subtitle: const Text(
-                  'Only cached/local content — skips network lookups',
-                  style:
-                  TextStyle(color: SpotifyColors.textSecondary, fontSize: 12)),
-              value: _offlineMode,
-              onChanged: (v) async {
+            _switchRow(
+              FluentIcons.cloud_off_24_regular,
+              'Offline mode',
+              'Only cached/local content — skips network lookups',
+              _offlineMode,
+                  (v) async {
                 await storage.setOfflineMode(v);
                 setState(() => _offlineMode = v);
                 _toast(v ? 'Offline mode on' : 'Offline mode off');
               },
             ),
           ]),
-          _group('Spotify', Icons.music_note_rounded, [
-            _tile(
+          _category('Spotify', FluentIcons.music_note_2_24_regular, [
+            _prefRow(
               FluentIcons.music_note_2_24_regular,
               'Spotify account',
               _spotifyConnected == null
@@ -299,14 +295,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
               },
             ),
-            _tile(FluentIcons.arrow_upload_24_regular,
-                'Import Spotify playlist', 'From a CSV export', () async {
-                  await Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const ImportSpotifyScreen()));
-                }),
+            _prefRow(
+              FluentIcons.arrow_upload_24_regular,
+              'Import Spotify playlist',
+              'From a CSV export',
+                  () => pushSharedAxisY(context, const ImportSpotifyScreen()),
+            ),
           ]),
-          _group('Data & Storage', Icons.storage_rounded, [
-            _tile(
+          _category('Data & Storage', FluentIcons.delete_24_regular, [
+            _prefRow(
               FluentIcons.delete_24_regular,
               'Clear audio URL cache',
               _cacheCount > 0 ? '$_cacheCount cached streams' : 'Empty',
@@ -320,7 +317,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _load();
                   }),
             ),
-            _tile(FluentIcons.history_24_regular, 'Clear recently played',
+            _prefRow(
+              FluentIcons.history_24_regular,
+              'Clear recently played',
               _historyCount > 0 ? '$_historyCount songs' : 'Empty',
               _historyCount == 0
                   ? null
@@ -331,58 +330,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _load();
                   }),
             ),
-            _tile(FluentIcons.search_24_regular, 'Clear search history',
-                'Removes recent searches', () {
-                  _confirm('Clear searches', 'Delete recent searches?', () async {
-                    await storage.clearQueries();
-                    _toast('Search history cleared');
-                  });
-                }),
-            _tile(FluentIcons.data_trending_24_regular,
-                'Clear listening stats', 'Resets minutes and play counts',
-                    () {
-                  _confirm('Clear listening stats',
-                      'Delete all listening stats? This cannot be undone.',
-                          () async {
-                        await listeningStatsService.clearStats();
-                        _toast('Listening stats cleared');
-                      }, dangerous: true);
-                }, dangerous: true),
+            _prefRow(
+              FluentIcons.search_24_regular,
+              'Clear search history',
+              'Removes recent searches',
+                  () {
+                _confirm('Clear searches', 'Delete recent searches?',
+                        () async {
+                      await storage.clearQueries();
+                      _toast('Search history cleared');
+                    });
+              },
+            ),
+            _prefRow(
+              FluentIcons.data_trending_24_regular,
+              'Clear listening stats',
+              'Resets minutes and play counts',
+                  () {
+                _confirm('Clear listening stats',
+                    'Delete all listening stats? This cannot be undone.',
+                        () async {
+                      await listeningStatsService.clearStats();
+                      _toast('Listening stats cleared');
+                    }, dangerous: true);
+              },
+              dangerous: true,
+            ),
           ]),
-          _group('Backup', Icons.cloud_sync_rounded, [
-            _tile(FluentIcons.cloud_sync_24_regular, 'Backup your data',
-                'Liked songs & playlists → JSON file', _backupData),
-            _tile(FluentIcons.cloud_add_24_regular, 'Restore from backup',
-                'Import a ZenMusic backup file', _restoreData),
+          _category('Backup', FluentIcons.cloud_sync_24_regular, [
+            _prefRow(
+              FluentIcons.cloud_sync_24_regular,
+              'Backup your data',
+              'Liked songs & playlists → JSON file',
+              _backupData,
+            ),
+            _prefRow(
+              FluentIcons.cloud_add_24_regular,
+              'Restore from backup',
+              'Import a ZenMusic backup file',
+              _restoreData,
+            ),
           ]),
-          _group('About', Icons.info_rounded, [
-            SwitchListTile(
-              secondary: const Icon(FluentIcons.arrow_sync_24_regular,
-                  color: SpotifyColors.textSecondary),
-              activeColor: SpotifyColors.green,
-              title: const Text('Automatic update checks',
-                  style: TextStyle(
-                      color: SpotifyColors.textPrimary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600)),
-              subtitle: const Text('Check for new versions on launch',
-                  style:
-                  TextStyle(color: SpotifyColors.textSecondary, fontSize: 12)),
-              value: _checkUpdates,
-              onChanged: (v) async {
+          _category('About', FluentIcons.info_24_regular, [
+            _switchRow(
+              FluentIcons.arrow_sync_24_regular,
+              'Automatic update checks',
+              'Check for new versions on launch',
+              _checkUpdates,
+                  (v) async {
                 await storage.setCheckUpdates(v);
                 setState(() => _checkUpdates = v);
               },
             ),
-            const ListTile(
-              leading: Icon(FluentIcons.info_24_regular,
-                  color: SpotifyColors.textSecondary),
-              title: Text('ZenMusic',
-                  style: TextStyle(
-                      color: SpotifyColors.textPrimary, fontSize: 15)),
-              subtitle: Text('Version 1.0.0',
-                  style: TextStyle(
-                      color: SpotifyColors.textSecondary, fontSize: 12)),
+            _prefRow(
+              FluentIcons.info_24_regular,
+              'ZenMusic',
+              'Version 1.0.0',
+              null,
             ),
           ]),
         ],
@@ -395,20 +399,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _statsToggle() {
     return ValueListenableBuilder<bool>(
       valueListenable: wrappedEnabled,
-      builder: (context, value, _) => SwitchListTile(
-        secondary: const Icon(FluentIcons.data_trending_24_regular,
-            color: SpotifyColors.textSecondary),
-        activeColor: SpotifyColors.green,
-        title: const Text('Listening stats',
-            style: TextStyle(
-                color: SpotifyColors.textPrimary,
-                fontSize: 15,
-                fontWeight: FontWeight.w600)),
-        subtitle: const Text('Track listening time for monthly recap',
-            style:
-            TextStyle(color: SpotifyColors.textSecondary, fontSize: 12)),
-        value: value,
-        onChanged: (v) async {
+      builder: (context, value, _) => _switchRow(
+        FluentIcons.data_trending_24_regular,
+        'Listening stats',
+        'Track listening time for monthly recap',
+        value,
+            (v) async {
           if (!v) {
             listeningStatsService.finishListeningSession(
                 countCurrentTick: true, flushStats: false);
@@ -422,12 +418,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _group(String title, IconData icon, List<Widget> children) {
+  // ── Echo preference building blocks ──
+
+  Widget _category(String title, IconData icon, List<Widget> rows) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+          padding: const EdgeInsets.fromLTRB(4, 18, 4, 10),
           child: Row(
             children: [
               Icon(icon, size: 15, color: SpotifyColors.textSecondary),
@@ -441,39 +439,134 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
         ),
-        Container(
-          decoration: BoxDecoration(
-            color: SpotifyColors.surface,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Column(children: children),
-        ),
+        for (final row in rows) ...[
+          row,
+          const SizedBox(height: 10),
+        ],
       ],
     );
   }
 
-  Widget _tile(IconData icon, String title, String subtitle,
+  /// Echo's OutlinedButton preference row: 64dp stadium pill, 24dp
+  /// padding, leading icon, 16sp title with summary below.
+  Widget _prefRow(
+      IconData icon,
+      String title,
+      String subtitle,
       VoidCallback? onTap,
-      {bool dangerous = false}) {
-    return ListTile(
-      leading: Icon(icon,
-          color: dangerous ? Colors.redAccent : SpotifyColors.textSecondary),
-      title: Text(title,
-          style: TextStyle(
-              color:
-              dangerous ? Colors.redAccent : SpotifyColors.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w600)),
-      subtitle: subtitle.isEmpty
-          ? null
-          : Text(subtitle,
-          style:
-          const TextStyle(color: SpotifyColors.textSecondary, fontSize: 12)),
-      trailing: onTap == null
-          ? null
-          : const Icon(Icons.chevron_right_rounded,
-          color: SpotifyColors.textTertiary),
-      onTap: onTap,
+      {
+        bool dangerous = false,
+      }) {
+    final enabled = onTap != null;
+    final contentColor = dangerous ? Colors.redAccent : SpotifyColors.textPrimary;
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.5,
+      child: Material(
+        color: SpotifyColors.surface,
+        borderRadius: BorderRadius.circular(32),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(32),
+          onTap: onTap,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 64),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+            child: Row(
+              children: [
+                Icon(icon,
+                    size: 24,
+                    color: dangerous
+                        ? Colors.redAccent
+                        : SpotifyColors.textSecondary),
+                const SizedBox(width: 24),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: contentColor,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600)),
+                      if (subtitle.isNotEmpty)
+                        Text(subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: SpotifyColors.textSecondary
+                                    .withOpacity(0.66),
+                                fontSize: 12)),
+                    ],
+                  ),
+                ),
+                if (enabled)
+                  const Icon(Icons.chevron_right_rounded,
+                      color: SpotifyColors.textTertiary),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Same pill with a trailing switch.
+  Widget _switchRow(
+      IconData icon,
+      String title,
+      String subtitle,
+      bool value,
+      ValueChanged<bool> onChanged,
+      ) {
+    return Material(
+      color: SpotifyColors.surface,
+      borderRadius: BorderRadius.circular(32),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(32),
+        onTap: () => onChanged(!value),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+          child: Row(
+            children: [
+              Icon(icon, size: 24, color: SpotifyColors.textSecondary),
+              const SizedBox(width: 24),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: SpotifyColors.textPrimary,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600)),
+                    if (subtitle.isNotEmpty)
+                      Text(subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: SpotifyColors.textSecondary
+                                  .withOpacity(0.66),
+                              fontSize: 12)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Switch(
+                value: value,
+                onChanged: onChanged,
+                activeTrackColor: SpotifyColors.green,
+                activeColor: SpotifyColors.background,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

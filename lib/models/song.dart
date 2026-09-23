@@ -8,6 +8,7 @@ class Song {
   final String? jiosaavnStreamUrl;
   final String? audioType;
   final int? bitrateKbps;
+  final String? extRaw;
 
   Song({
     required this.id,
@@ -19,9 +20,11 @@ class Song {
     this.jiosaavnStreamUrl,
     this.audioType,
     this.bitrateKbps,
+    this.extRaw,
   });
 
   bool get isFromJiosaavn => jiosaavnId != null;
+  bool get isFromExtension => extRaw != null && extRaw!.isNotEmpty;
   bool get hasHighQuality =>
       jiosaavnStreamUrl != null && jiosaavnStreamUrl!.isNotEmpty;
 
@@ -35,6 +38,7 @@ class Song {
     'jiosaavnStreamUrl': jiosaavnStreamUrl,
     'audioType': audioType,
     'bitrateKbps': bitrateKbps,
+    'extRaw': extRaw,
   };
 
   factory Song.fromJson(Map<String, dynamic> json) => Song(
@@ -47,5 +51,6 @@ class Song {
     jiosaavnStreamUrl: json['jiosaavnStreamUrl'],
     audioType: json['audioType'] as String?,
     bitrateKbps: (json['bitrateKbps'] as num?)?.toInt(),
+    extRaw: json['extRaw'] as String?,
   );
 }

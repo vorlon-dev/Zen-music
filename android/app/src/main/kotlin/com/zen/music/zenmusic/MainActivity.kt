@@ -1,6 +1,5 @@
 package com.zen.music.zenmusic
 
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import cc.tomko.outify.SpotifyPlaybackBridge
@@ -45,6 +44,19 @@ class MainActivity : AudioServiceActivity() {
                     "select" -> result.success(
                         extensionManager.select(call.argument<String>("id") ?: "")
                     )
+                    "deselect" -> result.success(extensionManager.clearActive())
+                    "homeFeed" -> {
+                        Thread {
+                            try {
+                                val json = extensionManager.homeFeed()
+                                mainHandler.post { result.success(json) }
+                            } catch (t: Throwable) {
+                                mainHandler.post {
+                                    result.error("HOME_FEED_FAILED", t.message, null)
+                                }
+                            }
+                        }.start()
+                    }
                     "search" -> {
                         val query = call.argument<String>("query") ?: ""
                         Thread {
@@ -54,6 +66,19 @@ class MainActivity : AudioServiceActivity() {
                             } catch (t: Throwable) {
                                 mainHandler.post {
                                     result.error("SEARCH_FAILED", t.message, null)
+                                }
+                            }
+                        }.start()
+                    }
+                    "loadDetail" -> {
+                        val itemJson = call.argument<String>("item") ?: "{}"
+                        Thread {
+                            try {
+                                val json = extensionManager.loadDetail(itemJson)
+                                mainHandler.post { result.success(json.toString()) }
+                            } catch (t: Throwable) {
+                                mainHandler.post {
+                                    result.error("LOAD_DETAIL_FAILED", t.message, null)
                                 }
                             }
                         }.start()

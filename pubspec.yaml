@@ -65,3 +65,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  fonts:
+    - family: PaytoneOne
+      fonts:
+        - asset: assets/fonts/PaytoneOne-Regular.ttf

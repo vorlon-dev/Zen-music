@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 
 class SpotifyColors {
-  static const background = Color(0xFF121212);
-  static const surface = Color(0xFF181818);
-  static const surfaceLight = Color(0xFF282828);
-  static const surfaceLighter = Color(0xFF333333);
-  static const green = Color(0xFF1DB954);
-  static const greenDark = Color(0xFF1AA34A);
+  static const background = Color(0xFF403600);
+  static const surface = Color(0xFF4B4105);
+  static const surfaceLight = Color(0xFF574B08);
+  static const surfaceLighter = Color(0xFF63560C);
+  static const green = Color(0xFFFFDE21);
+  static const greenDark = Color(0xFFE0C41E);
   static const textPrimary = Color(0xFFFFFFFF);
-  static const textSecondary = Color(0xFFB3B3B3);
-  static const textTertiary = Color(0xFF6A6A6A);
+  static const textSecondary = Color(0xFFD8D2BD);
+  static const textTertiary = Color(0xFF9A9480);
 }
-
+class ZenFonts {
+  static const String display = 'PaytoneOne';
+}
 class SpotifyTheme {
   static ThemeData dark() {
     final base = ThemeData.dark(useMaterial3: true);
@@ -38,7 +40,7 @@ class SpotifyTheme {
         iconTheme: IconThemeData(color: SpotifyColors.textPrimary),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Color(0xFF0A0A0A),
+        backgroundColor: Color(0xFF322B00),
         selectedItemColor: SpotifyColors.textPrimary,
         unselectedItemColor: SpotifyColors.textSecondary,
         type: BottomNavigationBarType.fixed,
