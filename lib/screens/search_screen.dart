@@ -1,7 +1,8 @@
 import 'dart:async';
 
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:yt_extractor/yt_extractor.dart';   // ← ADD (SearchFilter)
+import 'package:yt_extractor/yt_extractor.dart';
 
 import '../main.dart';
 import '../models/collection.dart';
@@ -11,7 +12,9 @@ import '../services/yt_music_service.dart';
 import '../services/youtube_service.dart';
 import '../theme/spotify_theme.dart';
 import '../widgets/collection_card.dart';
+import '../widgets/skeleton.dart';
 import '../widgets/song_row.dart';
+import '../widgets/wave_spinner.dart';
 import '../widgets/youtube_thumbnail.dart';
 import 'collection_screen.dart';
 import 'player_screen.dart';
@@ -41,6 +44,7 @@ class _SearchScreenState extends State<SearchScreen> {
   int _latestSuggestionRequest = 0;
   int _latestSearchRequest = 0;
   bool _searching = false;
+  bool _hasSearchedOnce = false;
 
   @override
   void initState() {
@@ -81,11 +85,15 @@ class _SearchScreenState extends State<SearchScreen> {
         _playlistResults = [];
         _albumResults = [];
         _suggestions = [];
+        _hasSearchedOnce = false;
       });
       return;
     }
 
-    setState(() => _searching = true);
+    setState(() {
+      _searching = true;
+      _hasSearchedOnce = true;
+    });
 
     _history
       ..remove(query)
@@ -154,8 +162,11 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
-  void _openPlayer(int index, List<Song> queue) {
-    audioHandler.setQueue(queue, startIndex: index);
+  /// Plays the tapped song and builds a RADIO queue of related songs
+  /// (YTM automix → related streams → filtered search) — like the
+  /// radio system in YT Music / Spotify. NOT the search-result list.
+  void _playWithRadio(Song song) {
+    audioHandler.startRadio(song);
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const PlayerScreen()),
@@ -167,6 +178,19 @@ class _SearchScreenState extends State<SearchScreen> {
       context,
       MaterialPageRoute(builder: (_) => CollectionScreen(collection: c)),
     );
+  }
+
+  void _clearSearch() {
+    _searchBar.clear();
+    _latestSearchRequest++;
+    setState(() {
+      _songResults = [];
+      _videoResults = [];
+      _playlistResults = [];
+      _albumResults = [];
+      _searching = false;
+      _hasSearchedOnce = false;
+    });
   }
 
   @override
@@ -193,14 +217,11 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
                 prefixIcon: _searching
                     ? const Padding(
-                  padding: EdgeInsets.all(12),
+                  padding: EdgeInsets.all(13),
                   child: SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.2,
-                      color: SpotifyColors.green,
-                    ),
+                    child: WaveSpinner(size: 20, strokeWidth: 2.2),
                   ),
                 )
                     : const Icon(Icons.search_rounded,
@@ -209,17 +230,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     ? IconButton(
                   icon: const Icon(Icons.close_rounded,
                       color: SpotifyColors.textSecondary),
-                  onPressed: () {
-                    _searchBar.clear();
-                    _latestSearchRequest++;
-                    setState(() {
-                      _songResults = [];
-                      _videoResults = [];
-                      _playlistResults = [];
-                      _albumResults = [];
-                      _searching = false;
-                    });
-                  },
+                  onPressed: _clearSearch,
                 )
                     : null,
                 filled: true,
@@ -234,10 +245,29 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ),
           Expanded(
-            child: !hasResults ? _idleView() : _resultsView(),
+            child: hasResults
+                ? _resultsView()
+                : (_searching && _hasSearchedOnce
+                ? _skeletonResults()
+                : _idleView()),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _skeletonResults() {
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(top: 8, bottom: 24),
+      children: const [
+        SkeletonTile(),
+        SkeletonTile(),
+        SkeletonTile(),
+        SkeletonTile(),
+        SkeletonTile(),
+        SkeletonTile(),
+      ],
     );
   }
 
@@ -301,26 +331,30 @@ class _SearchScreenState extends State<SearchScreen> {
           _sectionTitle('Songs', Icons.music_note_rounded),
           ...List.generate(
             _songResults.length.clamp(0, 20),
-                (i) => SongRow(
-              song: _songResults[i],
-              onTap: () => _openPlayer(i, _songResults),
-              trailing: IconButton(
-                icon: const Icon(
-                  Icons.playlist_add_rounded,
-                  color: SpotifyColors.textSecondary,
-                  size: 22,
+                (i) {
+              final song = _songResults[i];
+              return SongRow(
+                song: song,
+                // Radio queue: this song + related songs, not the list.
+                onTap: () => _playWithRadio(song),
+                trailing: IconButton(
+                  icon: const Icon(
+                    Icons.playlist_add_rounded,
+                    color: SpotifyColors.textSecondary,
+                    size: 22,
+                  ),
+                  onPressed: () {
+                    audioHandler.addToQueue(song);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Added to queue'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
                 ),
-                onPressed: () {
-                  audioHandler.addToQueue(_songResults[i]);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Added to queue'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                },
-              ),
-            ),
+              );
+            },
           ),
         ],
         if (_videoResults.isNotEmpty) ...[
@@ -335,7 +369,8 @@ class _SearchScreenState extends State<SearchScreen> {
               itemBuilder: (context, i) {
                 final video = _videoResults[i];
                 return GestureDetector(
-                  onTap: () => _openPlayer(i, _videoResults),
+                  // Radio from the video: video's audio + related queue.
+                  onTap: () => _playWithRadio(video),
                   child: SizedBox(
                     width: 200,
                     child: Column(

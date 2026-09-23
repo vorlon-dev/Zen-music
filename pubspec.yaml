@@ -55,6 +55,7 @@ dependencies:
   darttubefix: ^1.0.8
   video_player: ^2.9.2
   fluentui_system_icons: ^1.1.273
+  file_picker: ^13.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

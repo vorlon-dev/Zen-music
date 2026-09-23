@@ -1,0 +1,10 @@
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\armv7-linux-androideabi\release\deps\untrusted-483322f6cba83db3.d: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\input.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\no_panic.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\reader.rs
+
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\armv7-linux-androideabi\release\deps\libuntrusted-483322f6cba83db3.rlib: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\input.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\no_panic.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\reader.rs
+
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\armv7-linux-androideabi\release\deps\libuntrusted-483322f6cba83db3.rmeta: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\input.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\no_panic.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\reader.rs
+
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\lib.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\input.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\no_panic.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.9.0\src\reader.rs:

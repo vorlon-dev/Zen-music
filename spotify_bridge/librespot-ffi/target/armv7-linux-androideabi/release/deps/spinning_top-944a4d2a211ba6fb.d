@@ -1,0 +1,10 @@
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\armv7-linux-androideabi\release\deps\spinning_top-944a4d2a211ba6fb.d: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\relax.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\rw_spinlock.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\spinlock.rs
+
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\armv7-linux-androideabi\release\deps\libspinning_top-944a4d2a211ba6fb.rlib: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\relax.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\rw_spinlock.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\spinlock.rs
+
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\armv7-linux-androideabi\release\deps\libspinning_top-944a4d2a211ba6fb.rmeta: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\relax.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\rw_spinlock.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\spinlock.rs
+
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\lib.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\relax.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\rw_spinlock.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\spinning_top-0.3.0\src\spinlock.rs:

@@ -3,6 +3,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/song.dart';
+import '../services/listening_stats_service.dart';
 import '../services/storage_service.dart';
 import '../services/youtube_service.dart';
 
@@ -24,8 +25,42 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // Bumped on every load; stale loads (rapid skips) are abandoned.
   int _loadGeneration = 0;
 
-  final Map<String, String> _urlCache = {};
+  // Timestamp of the last USER-driven transport action (skip, queue jump,
+  // new queue). The natural-completion handler ignores completions that
+  // land right after a manual action — otherwise a manual skip AND the
+  // completion event both advance, skipping a song.
+  DateTime _lastTransportActionAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  final Map<String, VideoStreamResult> _urlCache = {};
   Timer? _saveTimer;
+  void setAudioQualitySetting(String quality) {
+    _yt.setAudioQualitySetting(quality);
+  }
+  // Sleep timer state.
+  Timer? _sleepTick;
+  DateTime? _sleepEndAt;
+  bool _sleepAtEndOfSong = false;
+  final _sleepTimerController = StreamController<Duration?>.broadcast();
+
+  /// null = off · Duration.zero = end-of-song armed · >0 = countdown
+  Stream<Duration?> get sleepTimerStream => _sleepTimerController.stream;
+
+  // Radio (live stream) mode.
+  bool _isRadioMode = false;
+  final _radioStationController = StreamController<String?>.broadcast();
+
+  bool get isRadioMode => _isRadioMode;
+
+  /// Name of the currently playing radio station (null = not radio).
+  Stream<String?> get radioStationStream => _radioStationController.stream;
+
+  // Quality/type badge stream.
+  final _audioQualityController =
+  StreamController<Map<String, String?>>.broadcast();
+
+  /// {'type': 'OPUS'|'AAC'|..., 'bitrate': '128'} — nulled when queue clears.
+  Stream<Map<String, String?>> get audioQualityStream =>
+      _audioQualityController.stream;
 
   ZenAudioHandler({required this.storage}) {
     _player.playbackEventStream.listen(
@@ -44,16 +79,160 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
           (_) => _saveCurrentSession(),
     );
 
+    _yt.setAudioQualitySetting(storage.getAudioQuality());
+
     _restoreLastSession();
     unawaited(_restoreEqualizer());
   }
 
+  void _markTransportAction() {
+    _lastTransportActionAt = DateTime.now();
+  }
+
   // ═════════════════════════════════════════════
-  // TRACK END / REPEAT (handler-owned — player loop modes are
-  // useless here: the player always holds a single item)
+  // SLEEP TIMER
+  // ═════════════════════════════════════════════
+
+  void _notifySleepTimer(Duration? remaining) {
+    if (!_sleepTimerController.isClosed) _sleepTimerController.add(remaining);
+  }
+
+  void setSleepTimer(Duration duration) {
+    cancelSleepTimer();
+    _sleepEndAt = DateTime.now().add(duration);
+    _notifySleepTimer(duration);
+    _sleepTick = Timer.periodic(const Duration(seconds: 1), (_) {
+      final end = _sleepEndAt;
+      if (end == null) return;
+      final remaining = end.difference(DateTime.now());
+      if (remaining <= Duration.zero) {
+        _sleepEndAt = null;
+        _notifySleepTimer(null);
+        pause();
+      } else {
+        _notifySleepTimer(remaining);
+      }
+    });
+  }
+
+  void setSleepTimerEndOfSong() {
+    cancelSleepTimer();
+    _sleepAtEndOfSong = true;
+    _notifySleepTimer(Duration.zero);
+  }
+
+  void cancelSleepTimer() {
+    _sleepTick?.cancel();
+    _sleepTick = null;
+    _sleepEndAt = null;
+    _sleepAtEndOfSong = false;
+    _notifySleepTimer(null);
+  }
+
+  // ═════════════════════════════════════════════
+  // RADIO (live stream mode)
+  // ═════════════════════════════════════════════
+
+  Future<bool> playRadioStream({
+    required String id,
+    required String name,
+    required String streamUrl,
+    String? image,
+    String? genre,
+  }) async {
+    try {
+      _markTransportAction();
+      _loadGeneration++; // abandon any in-flight music load
+      await _player.stop();
+      _isRadioMode = true;
+      _radioStationController.add(name);
+
+      mediaItem.add(MediaItem(
+        id: id,
+        title: name,
+        artist: genre ?? 'Radio',
+        artUri: (image != null && image.isNotEmpty) ? Uri.parse(image) : null,
+      ));
+
+      await _player.setUrl(streamUrl);
+      await play();
+      return true;
+    } catch (e) {
+      print('Radio play failed: $e');
+      _isRadioMode = false;
+      _radioStationController.add(null);
+      return false;
+    }
+  }
+
+  Future<void> _exitRadioMode() async {
+    if (!_isRadioMode) return;
+    _isRadioMode = false;
+    _radioStationController.add(null);
+    await _player.stop();
+  }
+
+  // ═════════════════════════════════════════════
+  // EXTENSION (raw stream playback — live-source mode)
+  // ═════════════════════════════════════════════
+
+  /// Plays a direct stream (url + headers) outside the music queue —
+  /// used by the extension engine until extension playback is merged
+  /// into the queue system.
+  Future<bool> playStream({
+    required String url,
+    Map<String, String> headers = const {},
+    required String id,
+    required String title,
+    String? artist,
+    String? image,
+  }) async {
+    try {
+      _markTransportAction();
+      _loadGeneration++;
+      await _player.stop();
+      _isRadioMode = true; // live-source mode: no queue advance
+      _radioStationController.add(null);
+
+      mediaItem.add(MediaItem(
+        id: id,
+        title: title,
+        artist: artist ?? 'Extension',
+        artUri: (image != null && image.isNotEmpty) ? Uri.parse(image) : null,
+      ));
+
+      await _player.setUrl(url, headers: headers.isNotEmpty ? headers : null);
+      await play();
+      return true;
+    } catch (e) {
+      print('Extension stream play failed: $e');
+      return false;
+    }
+  }
+
+  // ═════════════════════════════════════════════
+  // TRACK END / REPEAT (handler-owned)
   // ═════════════════════════════════════════════
 
   Future<void> _onTrackCompleted() async {
+    // Guard 1: a manual transport action just happened — the completed
+    // event is stale (the user already moved on). Advancing here would
+    // double-skip.
+    if (DateTime.now().difference(_lastTransportActionAt) <
+        const Duration(milliseconds: 800)) {
+      return;
+    }
+    // Guard 2: radio/extension streams don't auto-advance.
+    if (_isRadioMode) return;
+
+    listeningStatsService.finishListeningSession(countCurrentTick: true);
+
+    if (_sleepAtEndOfSong) {
+      _sleepAtEndOfSong = false;
+      _notifySleepTimer(null);
+      await pause();
+      return;
+    }
     if (_repeatMode == AudioServiceRepeatMode.one) {
       await _player.seek(Duration.zero);
       await play();
@@ -134,8 +313,12 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
     try {
       final song = _queue[_currentIndex];
-      final url = await _getStreamUrl(song);
-      await _player.setUrl(url, tag: _toMediaItem(song));
+      final stream = await _getStreamUrl(song);
+      await _player.setUrl(
+        stream.url,
+        headers: stream.headers.isNotEmpty ? stream.headers : null,
+        tag: _toMediaItem(song),
+      );
       await _player.seek(session.position);
       print('🔄 Restored at ${session.position.inSeconds}s');
     } catch (e) {
@@ -159,6 +342,8 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // ═════════════════════════════════════════════
 
   Future<void> setQueue(List<Song> songs, {int startIndex = 0}) async {
+    _markTransportAction();
+    await _exitRadioMode();
     _queue = List<Song>.from(songs);
     _currentIndex = startIndex;
     queue.add(_queue.map(_toMediaItem).toList());
@@ -167,6 +352,8 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   Future<void> startRadio(Song seedSong) async {
+    _markTransportAction();
+    await _exitRadioMode();
     _queue = [seedSong];
     _currentIndex = 0;
     queue.add(_queue.map(_toMediaItem).toList());
@@ -195,12 +382,37 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     queue.add(_queue.map(_toMediaItem).toList());
   }
 
+  Future<void> reorderQueue(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 ||
+        oldIndex >= _queue.length ||
+        newIndex < 0 ||
+        newIndex > _queue.length) {
+      return;
+    }
+    var insertAt = newIndex;
+    if (insertAt > oldIndex) insertAt--;
+
+    final moved = _queue.removeAt(oldIndex);
+    _queue.insert(insertAt, moved);
+
+    if (oldIndex == _currentIndex) {
+      _currentIndex = insertAt;
+    } else if (oldIndex < _currentIndex && insertAt >= _currentIndex) {
+      _currentIndex--;
+    } else if (oldIndex > _currentIndex && insertAt <= _currentIndex) {
+      _currentIndex++;
+    }
+
+    queue.add(_queue.map(_toMediaItem).toList());
+  }
+
   Future<void> clearQueue() async {
     _queue.clear();
     _urlCache.clear();
     _currentIndex = 0;
     await _player.stop();
     await storage.clearLastSession();
+    _audioQualityController.add({'type': null, 'bitrate': null});
     queue.add(const []);
   }
 
@@ -216,22 +428,22 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // CORE PLAYBACK
   // ═════════════════════════════════════════════
 
-  Future<String> _getStreamUrl(Song song) async {
-    if (_urlCache.containsKey(song.id)) {
-      return _urlCache[song.id]!;
-    }
+  Future<VideoStreamResult> _getStreamUrl(Song song) async {
+    final mem = _urlCache[song.id];
+    if (mem != null) return mem;
 
-    final cached = storage.getCachedUrl(song.id);
-    if (cached != null && cached.isNotEmpty) {
+    final cached = storage.getCachedStream(song.id);
+    if (cached != null) {
       print('💾 URL cache hit for ${song.title}');
-      _urlCache[song.id] = cached;
-      return cached;
+      final result = VideoStreamResult(cached.url, cached.headers);
+      _urlCache[song.id] = result;
+      return result;
     }
 
-    final url = await _yt.getAudioStreamUrl(song);
-    _urlCache[song.id] = url;
-    await storage.cacheUrl(song.id, url);
-    return url;
+    final result = await _yt.getAudioStreamUrl(song);
+    _urlCache[song.id] = result;
+    await storage.cacheStream(song.id, result.url, result.headers);
+    return result;
   }
 
   Future<void> _playIndex(int index) async {
@@ -244,13 +456,20 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     this.mediaItem.add(mediaItem);
 
     try {
-      final url = await _getStreamUrl(song);
+      final stream = await _getStreamUrl(song);
+      _broadcastAudioQuality(song, stream);
       // A newer skip started while we were resolving — abandon this
       // load so the wrong song never wins the race.
       if (generation != _loadGeneration) return;
-      await _player.setUrl(url, tag: mediaItem);
+      await _player.setUrl(
+        stream.url,
+        headers: stream.headers.isNotEmpty ? stream.headers : null,
+        tag: mediaItem,
+      );
       if (generation != _loadGeneration) return;
       await play();
+      listeningStatsService.handlePlayerPlaying(true,
+          currentSong: songToStatsMap(song));
       await storage.savePlayedSong(song);
       await _saveCurrentSession();
     } catch (e) {
@@ -272,15 +491,15 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   Future<void> _prefetchUrl(Song song) async {
     if (_urlCache.containsKey(song.id)) return;
-    final cached = storage.getCachedUrl(song.id);
-    if (cached != null && cached.isNotEmpty) {
-      _urlCache[song.id] = cached;
+    final cached = storage.getCachedStream(song.id);
+    if (cached != null) {
+      _urlCache[song.id] = VideoStreamResult(cached.url, cached.headers);
       return;
     }
     try {
-      final url = await _yt.getAudioStreamUrl(song);
-      _urlCache[song.id] = url;
-      await storage.cacheUrl(song.id, url);
+      final result = await _yt.getAudioStreamUrl(song);
+      _urlCache[song.id] = result;
+      await storage.cacheStream(song.id, result.url, result.headers);
     } catch (_) {}
   }
 
@@ -298,7 +517,10 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
           .where((s) => !existingIds.contains(s.id))
           .take(20)
           .toList();
-      if (newSongs.isEmpty) return;
+      if (newSongs.isEmpty) {
+        print('📻 Radio fill: no related songs for "${seedSong.title}"');
+        return;
+      }
       _queue.addAll(newSongs);
       queue.add(_queue.map(_toMediaItem).toList());
       if (_queue.length > 1) await _prefetchUrl(_queue[1]);
@@ -340,13 +562,16 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> pause() async {
+    listeningStatsService.handlePlayerPlaying(false);
     await _player.pause();
     await _saveCurrentSession();
+    await listeningStatsService.flush();
   }
 
   @override
   Future<void> stop() async {
     await _saveCurrentSession();
+    await listeningStatsService.flush();
     await _player.stop();
     await super.stop();
   }
@@ -354,10 +579,10 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   @override
   Future<void> seek(Duration position) => _player.seek(position);
 
-  /// Next: advance; wrap ONLY on repeat-all. Never jumps into
-  /// radio-filled songs unexpectedly from a manual press.
   @override
   Future<void> skipToNext() async {
+    _markTransportAction();
+    if (_isRadioMode) return;
     if (_currentIndex + 1 < _queue.length) {
       await _playIndex(_currentIndex + 1);
     } else if (_repeatMode == AudioServiceRepeatMode.all &&
@@ -367,10 +592,13 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _prefetchNext();
   }
 
-  /// Previous: restart if >3 s in, else step back. At the very start
-  /// of the first song: restart — NEVER wrap into radio songs.
   @override
   Future<void> skipToPrevious() async {
+    _markTransportAction();
+    if (_isRadioMode) {
+      await _player.seek(Duration.zero);
+      return;
+    }
     if (_player.position.inSeconds > 3) {
       await _player.seek(Duration.zero);
       return;
@@ -385,6 +613,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> skipToQueueItem(int index) async {
+    _markTransportAction();
     if (index < 0 || index >= _queue.length) return;
     await _playIndex(index);
     _prefetchNext();
@@ -392,7 +621,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> setShuffleMode(AudioServiceShuffleMode mode) async {
-    // Shuffle the upcoming part of the queue (current song stays).
     if (mode == AudioServiceShuffleMode.all &&
         _currentIndex + 1 < _queue.length) {
       final upcoming = _queue.sublist(_currentIndex + 1);
@@ -408,8 +636,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   @override
   Future<void> setRepeatMode(AudioServiceRepeatMode mode) async {
     _repeatMode = mode;
-    // Loop modes are meaningless on a single-item player — repeat is
-    // handled in _onTrackCompleted / skipToNext instead.
     await _player.setLoopMode(LoopMode.off);
   }
 
@@ -424,6 +650,14 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     artUri: Uri.parse(s.thumbnail),
     duration: s.duration,
   );
+
+  void _broadcastAudioQuality(Song song, VideoStreamResult stream) {
+    final type = song.isFromJiosaavn ? 'AAC' : (stream.audioType ?? 'AUDIO');
+    final bitrate = song.isFromJiosaavn
+        ? '320'
+        : (stream.bitrateKbps?.toString() ?? '');
+    _audioQualityController.add({'type': type, 'bitrate': bitrate});
+  }
 
   void _broadcastState(PlaybackEvent event) {
     final playing = _player.playing;
@@ -466,6 +700,8 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   List<Song> get queueSongs => List.unmodifiable(_queue);
 
+  int get currentQueueIndex => _currentIndex;
+
   Song? get currentSong {
     if (_currentIndex < 0 || _currentIndex >= _queue.length) return null;
     return _queue[_currentIndex];
@@ -479,6 +715,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> onTaskRemoved() async {
     _saveTimer?.cancel();
     await _saveCurrentSession();
+    await listeningStatsService.flush();
     await stop();
     await super.onTaskRemoved();
   }

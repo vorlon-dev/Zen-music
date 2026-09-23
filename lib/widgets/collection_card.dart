@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../models/collection.dart';
 import '../theme/spotify_theme.dart';
+import 'wave_spinner.dart';
 
 class CollectionCard extends StatelessWidget {
   const CollectionCard({
@@ -44,6 +45,9 @@ class CollectionCard extends StatelessWidget {
                   width: size,
                   height: size,
                   color: SpotifyColors.surfaceLight,
+                  child: const Center(
+                    child: WaveSpinner(size: 20, strokeWidth: 2),
+                  ),
                 ),
                 errorWidget: (_, __, ___) => Container(
                   width: size,

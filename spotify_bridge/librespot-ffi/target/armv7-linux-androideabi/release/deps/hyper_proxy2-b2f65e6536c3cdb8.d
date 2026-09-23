@@ -1,0 +1,10 @@
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\armv7-linux-androideabi\release\deps\hyper_proxy2-b2f65e6536c3cdb8.d: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\rt.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\stream.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\tunnel.rs
+
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\armv7-linux-androideabi\release\deps\libhyper_proxy2-b2f65e6536c3cdb8.rlib: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\rt.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\stream.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\tunnel.rs
+
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\armv7-linux-androideabi\release\deps\libhyper_proxy2-b2f65e6536c3cdb8.rmeta: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\rt.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\stream.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\tunnel.rs
+
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\lib.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\rt.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\stream.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-proxy2-0.1.0\src\tunnel.rs:

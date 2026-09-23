@@ -9,16 +9,26 @@ import '../main.dart';
 import '../models/collection.dart';
 import '../models/song.dart';
 import '../services/home_service.dart';
+import '../services/listening_stats_service.dart';
 import '../theme/spotify_theme.dart';
+import '../utilities/listening_stats_utils.dart';
 import '../widgets/collection_card.dart';
+import '../widgets/listening_recap_card.dart';
 import '../widgets/marquee.dart';
 import '../widgets/section_header.dart';
+import '../widgets/skeleton.dart';
 import '../widgets/start_listening_list.dart';
+import '../widgets/wave_spinner.dart';
 import '../widgets/youtube_thumbnail.dart';
 import 'collection_screen.dart';
 import 'equalizer_screen.dart';
+import 'extensions_screen.dart';
+import 'import_spotify_screen.dart';
 import 'player_screen.dart';
+import 'radio_screen.dart';
 import 'search_screen.dart';
+import 'settings_screen.dart';
+import 'user_playlist_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -122,25 +132,20 @@ class _HomeTabState extends State<HomeTab> {
   List<Collection> _collections = [];
   List<Collection> _newAlbums = [];
 
+  // Skeletons only on cold start; pull-to-refresh runs silently with
+  // the wave row as its indicator.
   bool _loading = true;
+  bool _isRefreshing = false;
 
   @override
   void initState() {
     super.initState();
-    _loadRecent();
     _loadAll();
   }
 
-  void _loadRecent() {
-    if (!mounted) return;
-    setState(() {
-      _recentlyPlayed = storage.getPlayedHistory().take(10).toList();
-    });
-  }
-
   Future<void> _loadAll() async {
-    if (mounted) setState(() => _loading = true);
-    _loadRecent();
+    _isRefreshing = true;
+    if (mounted) setState(() {});
     try {
       // All futures created up front — they run in parallel.
       final trendingF = _homeService.getTrendingNow();
@@ -179,10 +184,18 @@ class _HomeTabState extends State<HomeTab> {
       });
     } catch (e) {
       debugPrint('Home load failed: $e');
-      if (!mounted) return;
-      setState(() => _loading = false);
+      _loading = false;
     }
     _loadRecent();
+    _isRefreshing = false;
+    if (mounted) setState(() {});
+  }
+
+  void _loadRecent() {
+    if (!mounted) return;
+    setState(() {
+      _recentlyPlayed = storage.getPlayedHistory().take(10).toList();
+    });
   }
 
   void _playSong(Song song) {
@@ -223,17 +236,29 @@ class _HomeTabState extends State<HomeTab> {
   Widget build(BuildContext context) {
     return SafeArea(
       child: RefreshIndicator(
-        color: SpotifyColors.green,
-        backgroundColor: SpotifyColors.surface,
+        color: Colors.transparent,
+        backgroundColor: Colors.transparent,
         onRefresh: _loadAll,
         child: _loading
-            ? const _LoadingView()
+            ? _buildSkeletons()
             : ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 24),
           children: [
+            if (_isRefreshing)
+              const Padding(
+                padding: EdgeInsets.all(14),
+                child: Center(child: WaveSpinner(size: 26)),
+              ),
+
             _greetingHeader(),
 
-            // ── Cards first ──
+            if (wrappedEnabled.value &&
+                listeningStatsService.hasStats &&
+                listeningStatsService.availableMonthKeys.isNotEmpty)
+              _recapSection(
+                  listeningStatsService.availableMonthKeys.first),
+
             if (_collections.isNotEmpty)
               _collectionRow(
                 'Playlists for you',
@@ -247,10 +272,8 @@ class _HomeTabState extends State<HomeTab> {
                 FluentIcons.album_24_filled,
               ),
 
-            // ── Recently played grid ──
             if (_recentlyPlayed.length >= 4) _recentlyPlayedGrid(),
 
-            // ── Personalized videos from listening history ──
             if (_personalVideos.isNotEmpty)
               _songShelf(
                 _videoShelfTitle,
@@ -258,10 +281,8 @@ class _HomeTabState extends State<HomeTab> {
                 FluentIcons.video_24_regular,
               ),
 
-            // ── Start listening ──
             if (_startListening.isNotEmpty) _startListeningSection(),
 
-            // ── Song shelves ──
             _songShelf(
               'Trending now',
               _trendingNow,
@@ -293,7 +314,63 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
-  // ── Header ──
+  Widget _buildSkeletons() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 24),
+      children: const [
+        SizedBox(height: 8),
+        SkeletonShelf(),
+        SkeletonShelf(),
+        SkeletonTile(),
+        SkeletonTile(),
+        SkeletonTile(),
+        SkeletonShelf(itemCount: 5),
+      ],
+    );
+  }
+
+  Widget _recapSection(String monthKey) {
+    final monthStats = listeningStatsService.monthStats(monthKey);
+    final songs = listeningStatsService.monthTopSongs(monthKey, limit: 3);
+    final minutes = monthDisplayMinutes(monthStats);
+    if (minutes <= 0 && songs.isEmpty) return const SizedBox.shrink();
+
+    final parts = monthKey.split('-');
+    const months = [
+      '', 'January', 'February', 'March', 'April', 'May', 'June', 'July',
+      'August', 'September', 'October', 'November', 'December'
+    ];
+    final monthName = months[int.tryParse(parts[1]) ?? 1];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(
+          title: 'Your month',
+          icon: FluentIcons.data_trending_24_filled,
+        ),
+        ListeningRecapCard(
+          periodLabel: monthName,
+          minutes: minutes,
+          songs: songs,
+          onSongTap: (i) {
+            if (i >= songs.length) return;
+            final map = songs[i];
+            final id = map['ytid']?.toString();
+            if (id == null || id.isEmpty) return;
+            _playSong(Song(
+              id: id,
+              title: map['title']?.toString() ?? '',
+              artist: map['artist']?.toString() ?? '',
+              thumbnail: map['image']?.toString() ?? '',
+              duration: Duration.zero,
+            ));
+          },
+        ),
+      ],
+    );
+  }
 
   Widget _greetingHeader() {
     return Padding(
@@ -312,6 +389,33 @@ class _HomeTabState extends State<HomeTab> {
             ),
           ),
           IconButton(
+            icon: const Icon(Icons.extension_rounded,
+                color: SpotifyColors.textSecondary),
+            tooltip: 'Extensions',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ExtensionsScreen()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.radio_rounded,
+                color: SpotifyColors.textSecondary),
+            tooltip: 'Radio',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const RadioScreen()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined,
+                color: SpotifyColors.textSecondary),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
+          ),
+          IconButton(
             icon: const Icon(
               Icons.tune_rounded,
               color: SpotifyColors.textSecondary,
@@ -326,8 +430,6 @@ class _HomeTabState extends State<HomeTab> {
       ),
     );
   }
-
-  // ── Collection carousel ──
 
   Widget _collectionRow(String title, List<Collection> items, IconData icon) {
     return Column(
@@ -351,8 +453,6 @@ class _HomeTabState extends State<HomeTab> {
       ],
     );
   }
-
-  // ── Recently played: 2-column compact tiles ──
 
   Widget _recentlyPlayedGrid() {
     return Column(
@@ -422,8 +522,6 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
-  // ── Start listening ──
-
   Widget _startListeningSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -439,8 +537,6 @@ class _HomeTabState extends State<HomeTab> {
       ],
     );
   }
-
-  // ── Song shelf: horizontal mini-cards ──
 
   Widget _songShelf(String title, List<Song> songs, IconData icon) {
     if (songs.isEmpty) return const SizedBox.shrink();
@@ -689,7 +785,7 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                       ),
                       _Controls(
                         playbackState: state,
-                        hasNext: widget.hasNext,
+                        hasNext: widget.hasNext && !audioHandler.isRadioMode,
                         totalDuration: metadata.duration ?? Duration.zero,
                       ),
                     ],
@@ -735,6 +831,9 @@ class _Artwork extends StatelessWidget {
             width: MiniPlayer._artworkSize,
             height: MiniPlayer._artworkSize,
             color: SpotifyColors.surfaceLight,
+            child: const Center(
+              child: WaveSpinner(size: 18, strokeWidth: 2),
+            ),
           ),
           errorWidget: (_, __, ___) => Container(
             width: MiniPlayer._artworkSize,
@@ -841,7 +940,7 @@ class _Controls extends StatelessWidget {
   }
 }
 
-class _CircularPlayButton extends StatelessWidget {
+class _CircularPlayButton extends StatefulWidget {
   const _CircularPlayButton({
     required this.playbackState,
     required this.totalDuration,
@@ -851,9 +950,26 @@ class _CircularPlayButton extends StatelessWidget {
   final Duration totalDuration;
 
   @override
+  State<_CircularPlayButton> createState() => _CircularPlayButtonState();
+}
+
+class _CircularPlayButtonState extends State<_CircularPlayButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _waveController = AnimationController(
+    duration: const Duration(milliseconds: 4000),
+    vsync: this,
+  )..repeat();
+
+  @override
+  void dispose() {
+    _waveController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final processingState = playbackState.processingState;
-    final isPlaying = playbackState.playing;
+    final processingState = widget.playbackState.processingState;
+    final isPlaying = widget.playbackState.playing;
     final isLoading = processingState == AudioProcessingState.loading ||
         processingState == AudioProcessingState.buffering;
     final isCompleted = processingState == AudioProcessingState.completed;
@@ -865,22 +981,28 @@ class _CircularPlayButton extends StatelessWidget {
         stream: audioHandler.positionStream,
         builder: (context, posSnap) {
           final position = posSnap.data ?? Duration.zero;
-          final progress = totalDuration.inMilliseconds == 0
+          final progress = widget.totalDuration.inMilliseconds == 0
               ? 0.0
-              : (position.inMilliseconds / totalDuration.inMilliseconds)
+              : (position.inMilliseconds /
+              widget.totalDuration.inMilliseconds)
               .clamp(0.0, 1.0);
 
           return Stack(
             alignment: Alignment.center,
             children: [
-              CustomPaint(
-                size: const Size(48, 48),
-                painter: _CircularProgressPainter(
-                  progress: progress,
-                  backgroundColor:
-                  SpotifyColors.textTertiary.withOpacity(0.25),
-                  progressColor: SpotifyColors.green,
-                  strokeWidth: 3,
+              AnimatedBuilder(
+                animation: _waveController,
+                builder: (context, _) => CustomPaint(
+                  size: const Size(48, 48),
+                  painter: WaveRingPainter(
+                    phase: _waveController.value * 2 * math.pi,
+                    startAngle: -math.pi / 2,
+                    sweepAngle: 2 * math.pi * progress.clamp(0.0, 1.0),
+                    color: SpotifyColors.green,
+                    backgroundColor:
+                    SpotifyColors.textTertiary.withOpacity(0.25),
+                    strokeWidth: 3,
+                  ),
                 ),
               ),
               if (isLoading)
@@ -922,106 +1044,6 @@ class _CircularPlayButton extends StatelessWidget {
   }
 }
 
-class _CircularProgressPainter extends CustomPainter {
-  _CircularProgressPainter({
-    required this.progress,
-    required this.backgroundColor,
-    required this.progressColor,
-    required this.strokeWidth,
-  });
-
-  final double progress;
-  final Color backgroundColor;
-  final Color progressColor;
-  final double strokeWidth;
-
-  final waveAmplitude = 1.5;
-  final waveFrequency = 12.0;
-  final animationValue = 0.0;
-
-  Path _buildWavyArcPath(Size size, double startAngle, double sweepAngle) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final baseRadius = (size.width - strokeWidth) / 2;
-    final steps = (sweepAngle.abs() * 180 / math.pi).round().clamp(4, 720);
-    final path = Path();
-
-    for (var i = 0; i <= steps; i++) {
-      final t = i / steps;
-      final angle = startAngle + sweepAngle * t;
-      final wave =
-          waveAmplitude * math.sin(waveFrequency * angle + animationValue);
-      final r = baseRadius + wave;
-      final x = cx + r * math.cos(angle);
-      final y = cy + r * math.sin(angle);
-      i == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
-    }
-    return path;
-  }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final trackPaint = Paint()
-      ..color = backgroundColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    canvas.drawPath(
-      _buildWavyArcPath(size, -math.pi / 2, 2 * math.pi),
-      trackPaint,
-    );
-
-    if (progress > 0) {
-      final progressPaint = Paint()
-        ..color = progressColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round;
-
-      canvas.drawPath(
-        _buildWavyArcPath(size, -math.pi / 2, 2 * math.pi * progress),
-        progressPaint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_CircularProgressPainter old) =>
-      old.progress != progress ||
-          old.backgroundColor != backgroundColor ||
-          old.progressColor != progressColor;
-}
-
-// ═════════════════════════════════════════════
-// LOADING VIEW
-// ═════════════════════════════════════════════
-
-class _LoadingView extends StatelessWidget {
-  const _LoadingView();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      children: const [
-        SizedBox(height: 120),
-        Center(
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(
-              color: SpotifyColors.green,
-              strokeWidth: 2.5,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 // ═════════════════════════════════════════════
 // LIBRARY TAB
 // ═════════════════════════════════════════════
@@ -1035,6 +1057,7 @@ class LibraryTab extends StatefulWidget {
 
 class _LibraryTabState extends State<LibraryTab> {
   List<Song> _played = [];
+  List<({String id, String name, int count})> _userPlaylists = [];
 
   @override
   void initState() {
@@ -1045,6 +1068,7 @@ class _LibraryTabState extends State<LibraryTab> {
   void _load() {
     setState(() {
       _played = storage.getPlayedHistory();
+      _userPlaylists = storage.getUserPlaylists();
     });
   }
 
@@ -1084,6 +1108,78 @@ class _LibraryTabState extends State<LibraryTab> {
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: Row(
+              children: [
+                const Text(
+                  'Your playlists',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: SpotifyColors.textPrimary,
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const ImportSpotifyScreen()),
+                  ).then((_) => _load()),
+                  icon: const Icon(
+                    FluentIcons.arrow_upload_24_regular,
+                    size: 16,
+                    color: SpotifyColors.green,
+                  ),
+                  label: const Text(
+                    'Import',
+                    style: TextStyle(fontSize: 13, color: SpotifyColors.green),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_userPlaylists.isNotEmpty)
+            SizedBox(
+              height: 44,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                itemCount: _userPlaylists.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, i) {
+                  final p = _userPlaylists[i];
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(22),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => UserPlaylistScreen(
+                            id: p.id, name: p.name),
+                      ),
+                    ).then((_) => _load()),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: SpotifyColors.surface,
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: Text(
+                        '${p.name} · ${p.count}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: SpotifyColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          const SizedBox(height: 8),
           Expanded(
             child: _played.isEmpty
                 ? Center(

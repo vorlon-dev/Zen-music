@@ -6,12 +6,18 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt_explode;
 import '../models/song.dart';
 import 'jiosaavn_service.dart';
 
-/// A resolved video stream: the URL plus the headers ExoPlayer MUST
-/// replay on every request.
 class VideoStreamResult {
   final String url;
   final Map<String, String> headers;
-  const VideoStreamResult(this.url, [this.headers = const {}]);
+
+  /// Stream type for the quality badge: 'opus', 'aac', 'mp3', 'flac'...
+  final String? audioType;
+
+  /// Actual bitrate in kbps (for the badge).
+  final int? bitrateKbps;
+
+  const VideoStreamResult(this.url,
+      [this.headers = const {}, this.audioType, this.bitrateKbps]);
 }
 
 class YoutubeService {
@@ -21,27 +27,44 @@ class YoutubeService {
   final _yt = yt_explode.YoutubeExplode();
   final _jiosaavn = JiosaavnService();
   final _probe = http.Client();
+  final _ytmClient = http.Client();
 
   bool _extractorInitialized = false;
 
   final Map<String, String> _videoIdCache = {};
 
+  /// 'low' | 'medium' | 'high' — caps audio bitrate selection.
+  String _audioQuality = 'high';
+  String get audioQuality => _audioQuality;
+  void setAudioQualitySetting(String q) => _audioQuality = q;
+
+  int _maxBitrateFor(String quality) =>
+      quality == 'low' ? 96000 : (quality == 'medium' ? 160000 : 1000000);
+
+  DateTime? _lastRequestTime;
+  static const _minRequestInterval = Duration(milliseconds: 1200);
+
+  Future<void> _throttle() async {
+    final now = DateTime.now();
+    if (_lastRequestTime != null) {
+      final elapsed = now.difference(_lastRequestTime!);
+      if (elapsed < _minRequestInterval) {
+        await Future.delayed(_minRequestInterval - elapsed);
+      }
+    }
+    _lastRequestTime = DateTime.now();
+  }
+
+  Future<void> _ensureExtractorInit() async {
+    if (_extractorInitialized) return;
+    await _extractor.init();
+    _extractorInitialized = true;
+  }
+
   // ═════════════════════════════════════════════
-  // CLIENTS — synced with yt-dlp master (2026-08-18), payloads
-  // copied VERBATIM from Musify's maintained youtube_explode fork
-  // (packages/youtube_explode_dart/lib/src/videos/youtube_api_client.dart).
-  //
-  // Community intel encoded here:
-  //  • androidVr  → 403s everything since 2026-08-17 (yt-dlp #17456)
-  //  • androidSdkless → CDN-blocked outright since Jan 2026
-  //  • visionOs   → yt-dlp's ONLY default tokenless client now
-  // Our installed package exposes a public constructor, so these
-  // build inline — no fork, no path dependency.
+  // CLIENTS — synced with yt-dlp master (2026-08-18)
   // ═════════════════════════════════════════════
 
-  /// THE tokenless champion (VISIONOS). Carries all anonymous traffic
-  /// for yt-dlp right now. "Made for kids" videos unavailable — chain
-  /// handles via fallbacks.
   static final yt_explode.YoutubeApiClient visionOs =
   yt_explode.YoutubeApiClient(
     {
@@ -67,7 +90,6 @@ class YoutubeService {
   static const _visionOsUa =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15';
 
-  /// yt-dlp's fallback for age-gated / embeddable-only videos.
   static final yt_explode.YoutubeApiClient webEmbedded =
   yt_explode.YoutubeApiClient(
     {
@@ -84,7 +106,6 @@ class YoutubeService {
     'https://www.youtube.com/youtubei/v1/player?prettyPrint=false',
   );
 
-  /// yt-dlp's TVHTML5 fallback pair (fresh versions from the fork).
   static final yt_explode.YoutubeApiClient tvDowngraded =
   yt_explode.YoutubeApiClient(
     {
@@ -160,8 +181,6 @@ class YoutubeService {
     'https://www.youtube.com/youtubei/v1/player?key=AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc&prettyPrint=false',
   );
 
-  /// Progressive HD chain — dead clients removed (androidVr,
-  /// androidSdkless), fresh payloads, visionOs first.
   static final List<_HdClient> _hdClients = [
     _HdClient('visionOs', visionOs, _visionOsUa),
     _HdClient('webEmbedded', webEmbedded, null),
@@ -175,11 +194,9 @@ class YoutubeService {
         'com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)'),
   ];
 
-  /// safari client's UA (for the HLS tier).
   static const _safariUa = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
       'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)';
 
-  /// Public Invidious instances (proxied 720p+ — sidesteps googlevideo).
   static const List<String> _invidiousInstances = [
     'https://yewtu.be',
     'https://inv.nadeko.net',
@@ -187,24 +204,134 @@ class YoutubeService {
     'https://invidious.privacyredirect.com',
   ];
 
-  DateTime? _lastRequestTime;
-  static const _minRequestInterval = Duration(milliseconds: 1200);
+  // ═════════════════════════════════════════════
+  // YT MUSIC RADIO (WEB_REMIX next endpoint)
+  // ═════════════════════════════════════════════
 
-  Future<void> _throttle() async {
-    final now = DateTime.now();
-    if (_lastRequestTime != null) {
-      final elapsed = now.difference(_lastRequestTime!);
-      if (elapsed < _minRequestInterval) {
-        await Future.delayed(_minRequestInterval - elapsed);
+  static const _ytmBase = 'https://music.youtube.com/youtubei/v1';
+  static const _ytmApiKey = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30';
+  static const _ytmContext = {
+    'context': {
+      'client': {
+        'clientName': 'WEB_REMIX',
+        'clientVersion': '1.20240101.01.00',
+        'hl': 'en',
+      },
+    },
+  };
+
+  Future<List<Song>> getYtmRadio(String videoId) async {
+    try {
+      final uri =
+      Uri.parse('$_ytmBase/next?key=$_ytmApiKey&prettyPrint=false');
+      final resp = await _ytmClient
+          .post(
+        uri,
+        headers: const {
+          'Content-Type': 'application/json',
+          'Referer': 'https://music.youtube.com/',
+        },
+        body: jsonEncode({
+          ..._ytmContext,
+          'videoId': videoId,
+          'params': 'wAEB',
+        }),
+      )
+          .timeout(const Duration(seconds: 12));
+
+      if (resp.statusCode != 200) {
+        print('📻 YTM radio: status ${resp.statusCode}');
+        return [];
       }
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! Map<String, dynamic>) return [];
+
+      final results = _findRenderers(decoded, 'playlistPanelVideoRenderer');
+      final songs = <Song>[];
+      final seen = <String>{};
+
+      for (final item in results) {
+        final vid = (item['videoId'] as String?) ??
+            item
+                .getMap('navigationEndpoint')
+                ?.getMap('watchEndpoint')
+                ?.getValue<String>('videoId');
+        if (vid == null || vid.isEmpty || !seen.add(vid)) continue;
+
+        final title = _runsText(item.getMap('title')) ??
+            _runsText(item.getMap('longBylineText'));
+        if (title == null || title.isEmpty) continue;
+
+        final byline = _runsText(item.getMap('longBylineText')) ??
+            _runsText(item.getMap('shortBylineText')) ??
+            'Unknown';
+        final artist = byline.split('•').first.trim();
+
+        final lengthText = _runsText(item.getMap('lengthText'));
+        Duration? duration;
+        if (lengthText != null) {
+          final parts = lengthText.trim().split(':');
+          if (parts.length == 2) {
+            final m = int.tryParse(parts[0]);
+            final s = int.tryParse(parts[1]);
+            if (m != null && s != null) {
+              duration = Duration(minutes: m, seconds: s);
+            }
+          } else if (parts.length == 3) {
+            final h = int.tryParse(parts[0]);
+            final m = int.tryParse(parts[1]);
+            final s = int.tryParse(parts[2]);
+            if (h != null && m != null && s != null) {
+              duration = Duration(hours: h, minutes: m, seconds: s);
+            }
+          }
+        }
+
+        final thumbs = item.getMap('thumbnail')?.getList('thumbnails');
+        String thumb = 'https://i.ytimg.com/vi/$vid/hqdefault.jpg';
+        if (thumbs != null && thumbs.isNotEmpty && thumbs.last is Map) {
+          final url = (thumbs.last as Map)['url']?.toString();
+          if (url != null && url.isNotEmpty) thumb = url;
+        }
+
+        songs.add(Song(
+          id: vid,
+          title: title,
+          artist: artist,
+          thumbnail: thumb,
+          duration: duration ?? Duration.zero,
+        ));
+        if (songs.length >= 25) break;
+      }
+
+      print('📻 YTM radio: ${songs.length} tracks for $videoId');
+      return songs;
+    } catch (e) {
+      print('📻 YTM radio failed: $e');
+      return [];
     }
-    _lastRequestTime = DateTime.now();
   }
 
-  Future<void> _ensureExtractorInit() async {
-    if (_extractorInitialized) return;
-    await _extractor.init();
-    _extractorInitialized = true;
+  String? _runsText(_JsonMap? node) {
+    final runs = node?.getList('runs');
+    if (runs == null || runs.isEmpty) return null;
+    return runs
+        .map((r) => r is Map ? (r['text']?.toString() ?? '') : '')
+        .join();
+  }
+
+  Iterable<_JsonMap> _findRenderers(dynamic node, String key) sync* {
+    if (node is Map) {
+      final match = node[key];
+      if (match is Map) yield _JsonMap.from(match);
+      for (final value in node.values) {
+        yield* _findRenderers(value, key);
+      }
+    } else if (node is List) {
+      for (final value in node) {
+        yield* _findRenderers(value, key);
+      }
+    }
   }
 
   // ═════════════════════════════════════════════
@@ -296,109 +423,158 @@ class YoutubeService {
   }
 
   // ═════════════════════════════════════════════
-  // AUDIO STREAM URL
+  // AUDIO STREAM — quality-capped, URL + headers + type info
   // ═════════════════════════════════════════════
 
-  Future<String> getAudioStreamUrl(Song song) async {
+  Future<VideoStreamResult> getAudioStreamUrl(Song song) async {
     await _throttle();
 
-    // Tier 1: JioSaavn 320kbps.
+    // Tier 1: JioSaavn 320kbps AAC.
     if (song.isFromJiosaavn) {
-      if (song.hasHighQuality) return song.jiosaavnStreamUrl!;
+      if (song.hasHighQuality) {
+        return VideoStreamResult(song.jiosaavnStreamUrl!, const {}, 'AAC', 320);
+      }
       final url = await _jiosaavn.fetchStreamUrl(song.jiosaavnId!);
-      if (url != null && url.isNotEmpty) return url;
+      if (url != null && url.isNotEmpty) {
+        return VideoStreamResult(url, const {}, 'AAC', 320);
+      }
     }
 
-    // Tier 2: yt_extractor.
+    // Tier 2: visionOs audio-only + UA headers, quality-capped.
+    final v = await _audioAttempt(
+      song.id,
+      _HdClient('visionOs', visionOs, _visionOsUa),
+    );
+    if (v != null) return v;
+
+    // Tier 3: yt_extractor (probed).
     try {
       await _ensureExtractorInit();
       final info = await _extractor.getStreamInfo(
         'https://www.youtube.com/watch?v=${song.id}',
       );
       final audio = info.bestAudioStream;
-      if (audio != null && audio.url.isNotEmpty) return audio.url;
+      if (audio != null && audio.url.isNotEmpty) {
+        if (await _isPlayable(audio.url, null)) {
+          print('✅ Audio: yt_extractor ok (${song.id})');
+          return VideoStreamResult(audio.url, const {}, _typeFromUrl(audio.url),
+              _kbpsFromStream(audio));
+        }
+        print('↳ yt_extractor URL gated — skipped');
+      }
     } catch (e) {
       print('yt_extractor failed: $e');
     }
 
-    // Tier 3: visionOs (yt-dlp's current tokenless default).
-    try {
-      final manifest = await _yt.videos.streams.getManifest(
-        song.id,
-        ytClients: [visionOs],
-      );
-      return manifest.audioOnly.withHighestBitrate().url.toString();
-    } catch (e) {
-      print('youtube_explode (visionOs) failed: $e');
-    }
-
-    // Tier 4: androidSdkless (kept — may survive on some networks).
-    try {
-      final manifest = await _yt.videos.streams.getManifest(
-        song.id,
-        ytClients: [yt_explode.YoutubeApiClient.androidSdkless],
-      );
-      return manifest.audioOnly.withHighestBitrate().url.toString();
-    } catch (e) {
-      print('youtube_explode (androidSdkless) failed: $e');
-    }
-
-    // Tier 5: androidVr (documented broken — last-ditch only).
-    try {
-      final manifest = await _yt.videos.streams.getManifest(
-        song.id,
-        ytClients: [yt_explode.YoutubeApiClient.androidVr],
-      );
-      return manifest.audioOnly.withHighestBitrate().url.toString();
-    } catch (e) {
-      print('youtube_explode (androidVr) failed: $e');
+    // Tier 4: legacy clients, probed (last-ditch).
+    for (final entry in [
+      _HdClient(
+        'androidSdkless',
+        yt_explode.YoutubeApiClient.androidSdkless,
+        'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip',
+      ),
+      _HdClient('androidVr', yt_explode.YoutubeApiClient.androidVr, null),
+    ]) {
+      final r = await _audioAttempt(song.id, entry);
+      if (r != null) return r;
     }
 
     throw Exception('All audio extractors failed for ${song.title}');
+  }
+
+  Future<VideoStreamResult?> _audioAttempt(
+      String videoId, _HdClient entry) async {
+    await _throttle();
+    print('🎵 Audio: trying ${entry.name} for $videoId ...');
+    try {
+      final manifest = await _yt.videos.streams.getManifest(
+        videoId,
+        ytClients: [entry.client],
+      );
+      if (manifest.audioOnly.isEmpty) {
+        print('   ↳ ${entry.name}: no audio-only streams');
+        return null;
+      }
+
+      // Quality cap: prefer streams at/under the setting; fall back to
+      // the best available if nothing fits.
+      final maxBps = _maxBitrateFor(_audioQuality);
+      final capped = manifest.audioOnly
+          .where((s) => s.bitrate.bitsPerSecond <= maxBps)
+          .toList();
+      final pool = capped.isNotEmpty ? capped : manifest.audioOnly;
+      final best = pool.withHighestBitrate();
+      final url = best.url.toString();
+
+      if (!await _isPlayable(url, entry.userAgent)) {
+        print('   ↳ ${entry.name}: URL blocked (403/network)');
+        return null;
+      }
+      final ua = entry.userAgent;
+      final headers = ua == null
+          ? const <String, String>{}
+          : <String, String>{'User-Agent': ua};
+      final kbps = best.bitrate.kiloBitsPerSecond.round();
+      print('✅ Audio: ${entry.name} ok ($videoId, ${kbps}kbps)');
+      return VideoStreamResult(
+          url, headers, _typeFromUrl(url), kbps);
+    } catch (e) {
+      print('   ↳ ${entry.name} audio failed — $e');
+      return null;
+    }
+  }
+
+
+  String _typeFromUrl(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('.flac')) return 'FLAC';
+    if (u.contains('.webm') || u.contains('opus')) return 'OPUS';
+    if (u.contains('.m4a') || u.contains('.mp4') || u.contains('aac')) {
+      return 'AAC';
+    }
+    if (u.contains('.mp3')) return 'MP3';
+    return 'AUDIO';
+  }
+
+  int? _kbpsFromStream(dynamic stream) {
+    try {
+      return stream.bitrate.kiloBitsPerSecond.round();
+    } catch (_) {
+      return null;
+    }
   }
 
   // ═════════════════════════════════════════════
   // VIDEO STREAM — Canvas backdrop
   // ═════════════════════════════════════════════
 
-  /// [preferHd] = true (default):
-  ///   1. visionOs (tokenless, yt-dlp's sole default client)
-  ///   2. HLS (safari) — different delivery path
-  ///   3. Invidious (proxied — bypasses googlevideo entirely)
-  ///   4. webEmbedded → tvDowngraded → tv → ios (yt-dlp fallbacks)
-  /// [preferHd] = false: default-client muxed (token-free 360p).
   Future<VideoStreamResult?> getVideoStreamUrl(Song song,
       {bool preferHd = true}) async {
     if (!videoEnabled) return null;
 
-    final videoId = await getVideoId(song); // handles JioSaavn + cache
+    final videoId = await getVideoId(song);
     if (videoId == null || videoId.isEmpty) {
       print('🎬 Video: no YouTube id for "${song.title}"');
       return null;
     }
 
     if (preferHd) {
-      // 1) visionOs — the community's current answer.
       final v = await _progressiveAttempt(
           videoId, _HdClient('visionOs', visionOs, _visionOsUa));
       if (v != null) return v;
 
-      // 2) HLS tier (safari client).
       final hls = await _resolveHlsStream(videoId);
       if (hls != null) return hls;
 
-      // 3) Invidious tier (proxied).
       final inv = await _resolveInvidiousStream(videoId);
       if (inv != null) return inv;
 
-      // 4) Remaining progressive fallbacks.
       for (final entry in _hdClients.skip(1)) {
         final r = await _progressiveAttempt(videoId, entry);
         if (r != null) return r;
       }
     }
 
-    // SD fallback — the token-free muxed path (usually 360p).
     await _throttle();
     print('🎬 Video: resolving SD muxed (default client) for $videoId ...');
     try {
@@ -416,9 +592,6 @@ class YoutubeService {
     }
   }
 
-  /// One progressive client attempt: manifest → mp4 video-only
-  /// 1080p → 720p → highest ≤1080 → highest overall → probe with the
-  /// client's UA → return.
   Future<VideoStreamResult?> _progressiveAttempt(
       String videoId, _HdClient entry) async {
     await _throttle();
@@ -435,9 +608,6 @@ class YoutubeService {
 
       String? url;
       if (mp4Only.isNotEmpty) {
-        // Quality ladder: 1080 → 720 → highest ≤1080 → highest overall.
-        // `dynamic` deliberately: no type-name assumptions across
-        // package versions; .videoQualityLabel/.url resolve at runtime.
         dynamic pick;
         for (final target in const [1080, 720]) {
           for (final s in mp4Only) {
@@ -488,7 +658,6 @@ class YoutubeService {
     }
   }
 
-  /// Leading resolution digits from a quality label ('1080p60' → 1080).
   static int _streamHeight(dynamic s) {
     final m = RegExp(r'^(\d+)').firstMatch('${s.videoQualityLabel}');
     return int.tryParse(m?.group(1) ?? '') ?? 0;
@@ -554,8 +723,6 @@ class YoutubeService {
     }
   }
 
-  /// Parses a master m3u8 → the variant closest to 1080p
-  /// (exact 1080 → exact 720 → highest ≤1080 → largest available).
   _HlsVariant? _pickHlsVariant(Uri masterUrl, String body) {
     final lines = body.split('\n');
     final variants = <_HlsVariant>[];
@@ -576,14 +743,12 @@ class YoutubeService {
     }
     if (variants.isEmpty) return null;
 
-    // Exact 1080 first, then exact 720.
     for (var i = 0; i < variants.length; i++) {
       if (heights[i] == 1080) return variants[i];
     }
     for (var i = 0; i < variants.length; i++) {
       if (heights[i] == 720) return variants[i];
     }
-    // Highest not exceeding 1080.
     int? bestIdx;
     for (var i = 0; i < variants.length; i++) {
       if (heights[i] <= 1080 &&
@@ -592,7 +757,6 @@ class YoutubeService {
       }
     }
     if (bestIdx != null) return variants[bestIdx];
-    // Otherwise the largest available.
     var largest = 0;
     for (var i = 1; i < variants.length; i++) {
       if (heights[i] > heights[largest]) largest = i;
@@ -731,7 +895,7 @@ class YoutubeService {
   }
 
   // ═════════════════════════════════════════════
-  // RELATED SONGS
+  // RELATED SONGS — YTM radio first, extractors second
   // ═════════════════════════════════════════════
 
   Future<List<Song>> getRelatedSongs(Song seedSong) async {
@@ -747,6 +911,15 @@ class YoutubeService {
 
     if (youtubeId == null) return [];
 
+    // Tier 1: YouTube Music radio — the official automix.
+    final radio = await getYtmRadio(youtubeId);
+    if (radio.isNotEmpty) {
+      final filtered = radio.where((s) => s.id != youtubeId).toList();
+      if (filtered.isNotEmpty) return filtered;
+      print('↳ YTM radio only contained the seed — next tier');
+    }
+
+    // Tier 2: yt_extractor related streams.
     try {
       await _ensureExtractorInit();
       final related = await _extractor.getRelatedStreams(
@@ -755,7 +928,7 @@ class YoutubeService {
       final songs = <Song>[];
       for (final item in related) {
         final vid = _extractVideoId(item.url);
-        if (vid == null) continue;
+        if (vid == null || vid == youtubeId) continue;
         songs.add(Song(
           id: vid,
           title: item.name,
@@ -764,9 +937,55 @@ class YoutubeService {
           duration: Duration(seconds: item.duration ?? 0),
         ));
       }
+      if (songs.isNotEmpty) return songs;
+      print('↳ related streams empty — falling back to search');
+    } catch (e) {
+      print('getRelatedStreams failed: $e');
+    }
+
+    // Tier 3: filtered search fallback.
+    try {
+      await _throttle();
+      final artistPart = seedSong.artist.split(',').first.trim();
+      final query = artistPart.isNotEmpty
+          ? '${seedSong.title} $artistPart'
+          : seedSong.title;
+      final results = await _yt.search.search(query);
+      final artistWords = artistPart.toLowerCase()
+          .replaceAll(RegExp(r'[^\w\s]'), ' ')
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .toSet();
+
+      final songs = <Song>[];
+      for (final v in results) {
+        if (v.id.value == youtubeId) continue;
+        final author = v.author.toLowerCase();
+        final title = v.title.toLowerCase();
+        final artistMatch =
+        artistWords.any((w) => w.length > 2 && author.contains(w));
+        final seedTitleWords = seedSong.title
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^\w\s]'), ' ')
+            .split(RegExp(r'\s+'))
+            .where((w) => w.length > 3)
+            .toList();
+        final titleMatch = seedTitleWords.any((w) => title.contains(w));
+        if (!artistMatch && !titleMatch) continue;
+
+        songs.add(Song(
+          id: v.id.value,
+          title: v.title,
+          artist: v.author,
+          thumbnail: 'https://i.ytimg.com/vi/${v.id.value}/maxresdefault.jpg',
+          duration: v.duration ?? Duration.zero,
+        ));
+        if (songs.length >= 20) break;
+      }
+      print('↳ related fallback (search): ${songs.length} relevant songs');
       return songs;
     } catch (e) {
-      print('getRelatedSongs failed: $e');
+      print('related fallback failed: $e');
       return [];
     }
   }
@@ -793,6 +1012,7 @@ class YoutubeService {
     _yt.close();
     _jiosaavn.dispose();
     _probe.close();
+    _ytmClient.close();
   }
 }
 
@@ -807,4 +1027,23 @@ class _HlsVariant {
   final String url;
   final String label;
   const _HlsVariant(this.url, this.label);
+}
+
+typedef _JsonMap = Map<String, dynamic>;
+
+extension _Read on _JsonMap {
+  _JsonMap? getMap(String key) {
+    final v = this[key];
+    return v is Map ? _JsonMap.from(v) : null;
+  }
+
+  List<dynamic>? getList(String key) {
+    final v = this[key];
+    return v is List ? v : null;
+  }
+
+  T? getValue<T>(String key) {
+    final v = this[key];
+    return v is T ? v : null;
+  }
 }

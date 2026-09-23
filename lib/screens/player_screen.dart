@@ -4,7 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
+import '../widgets/wave_spinner.dart';
 import '../main.dart';
 import '../models/song.dart';
 import '../services/youtube_service.dart';
@@ -15,6 +15,8 @@ import '../widgets/lyrics_preview_card.dart';
 import '../widgets/lyrics_view.dart';
 import '../widgets/marquee_text.dart';
 import '../widgets/queue_sheet.dart';
+import '../widgets/sleep_timer_sheet.dart';
+import '../widgets/spinner.dart';
 import '../widgets/up_next_row.dart';
 import '../widgets/video_backdrop.dart';
 import '../widgets/youtube_thumbnail.dart';
@@ -255,19 +257,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
 
           if (_videoLoading)
-            Positioned.fill(
-              child: Container(
+            const Positioned.fill(
+              child: ColoredBox(
                 color: Colors.black54,
-                child: const Center(
-                  child: SizedBox(
-                    width: 28,
-                    height: 28,
-                    child: CircularProgressIndicator(
-                      color: SpotifyColors.green,
-                      strokeWidth: 2.5,
-                    ),
-                  ),
-                ),
+                child: Center(child: WaveSpinner(size: 26)),
               ),
             ),
         ],
@@ -385,6 +378,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 fontSize: 14,
                                 color: SpotifyColors.textSecondary,
                               ),
+                            ),
+                            // ── Quality/type badge ──
+                            const SizedBox(height: 6),
+                            StreamBuilder<Map<String, String?>>(
+                              stream: audioHandler.audioQualityStream,
+                              builder: (context, snap) {
+                                final type = snap.data?['type'];
+                                final bitrate = snap.data?['bitrate'];
+                                if (type == null || type.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 7, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color:
+                                    SpotifyColors.green.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    '${type.toUpperCase()}'
+                                        '${bitrate != null && bitrate.isNotEmpty ? ' · $bitrate kbps' : ''}',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: SpotifyColors.green),
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ),
@@ -514,6 +536,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          const SleepTimerButton(),
           IconButton(
             splashRadius: 20,
             icon: const Icon(

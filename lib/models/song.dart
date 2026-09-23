@@ -5,8 +5,9 @@ class Song {
   final String thumbnail;
   final Duration duration;
   final String? jiosaavnId;
-  /// Pre-fetched 320kbps URL — extracted directly from JioSaavn's search response.
   final String? jiosaavnStreamUrl;
+  final String? audioType;
+  final int? bitrateKbps;
 
   Song({
     required this.id,
@@ -16,6 +17,8 @@ class Song {
     required this.duration,
     this.jiosaavnId,
     this.jiosaavnStreamUrl,
+    this.audioType,
+    this.bitrateKbps,
   });
 
   bool get isFromJiosaavn => jiosaavnId != null;
@@ -30,6 +33,8 @@ class Song {
     'duration': duration.inSeconds,
     'jiosaavnId': jiosaavnId,
     'jiosaavnStreamUrl': jiosaavnStreamUrl,
+    'audioType': audioType,
+    'bitrateKbps': bitrateKbps,
   };
 
   factory Song.fromJson(Map<String, dynamic> json) => Song(
@@ -40,5 +45,7 @@ class Song {
     duration: Duration(seconds: json['duration']),
     jiosaavnId: json['jiosaavnId'],
     jiosaavnStreamUrl: json['jiosaavnStreamUrl'],
+    audioType: json['audioType'] as String?,
+    bitrateKbps: (json['bitrateKbps'] as num?)?.toInt(),
   );
 }

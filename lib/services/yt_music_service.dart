@@ -23,17 +23,26 @@ class YtMusicService {
   static const _songsFilter = 'EgWKAQIIAWoMEA4QChADEAQQCRAF';
   static const _artistsFilter = 'EgWKAQIgAWoMEA4QChADEAQQCRAF';
 
+  /// Set when the last InnerTube response was rate-limited (429).
+  static bool lastSearchRateLimited = false;
+
   Future<_JsonMap?> _post(String endpoint, _JsonMap body) async {
     try {
       final uri = Uri.parse('$_base/$endpoint?key=$_apiKey&prettyPrint=false');
       final resp = await _client
-          .post(uri,
-          headers: const {
-            'Content-Type': 'application/json',
-            'Referer': 'https://music.youtube.com/',
-          },
-          body: jsonEncode(body))
+          .post(
+        uri,
+        headers: const {
+          'Content-Type': 'application/json',
+          'Referer': 'https://music.youtube.com/',
+        },
+        body: jsonEncode(body),
+      )
           .timeout(const Duration(seconds: 12));
+      if (resp.statusCode == 429) {
+        lastSearchRateLimited = true;
+        return null;
+      }
       if (resp.statusCode != 200) {
         print('YtMusic.$endpoint: status ${resp.statusCode}');
         return null;
@@ -48,6 +57,7 @@ class YtMusicService {
 
   /// Songs-shelf search — real track rows from YouTube Music.
   Future<List<Song>> searchSongs(String query, {int limit = 20}) async {
+    lastSearchRateLimited = false;
     final root = await _post('search', {
       ..._context,
       'query': query.trim(),
@@ -57,7 +67,8 @@ class YtMusicService {
 
     final songs = <Song>[];
     final seen = <String>{};
-    for (final item in findRenderers(root, 'musicResponsiveListItemRenderer')) {
+    for (final item
+    in findRenderers(root, 'musicResponsiveListItemRenderer')) {
       final videoId = _videoIdOf(item);
       if (videoId == null || !seen.add(videoId)) continue;
       final song = _songFromRow(item, videoId);
@@ -69,6 +80,7 @@ class YtMusicService {
 
   /// Canonical artist channel ids (UC...) matching a name.
   Future<List<String>> searchArtistIds(String query, {int limit = 3}) async {
+    lastSearchRateLimited = false;
     final root = await _post('search', {
       ..._context,
       'query': query.trim(),
@@ -77,7 +89,8 @@ class YtMusicService {
     if (root == null) return [];
 
     final ids = <String>[];
-    for (final item in findRenderers(root, 'musicResponsiveListItemRenderer')) {
+    for (final item
+    in findRenderers(root, 'musicResponsiveListItemRenderer')) {
       final id = item
           .getMap('navigationEndpoint')
           ?.getMap('browseEndpoint')
@@ -119,6 +132,61 @@ class YtMusicService {
       if (songs.length >= limit) break;
     }
     return songs;
+  }
+
+  /// Best single-track match for a query, validated loosely against the
+  /// expected artist/title. Used by the Spotify CSV import.
+  Future<Song?> searchSongMatch(
+      String query, {
+        String? expectedArtist,
+        String? expectedTitle,
+      }) async {
+    lastSearchRateLimited = false;
+    final root = await _post('search', {
+      ..._context,
+      'query': query.trim(),
+      'params': _songsFilter,
+    });
+    if (root == null) return null;
+
+    for (final item
+    in findRenderers(root, 'musicResponsiveListItemRenderer')) {
+      final videoId = _videoIdOf(item);
+      if (videoId == null) continue;
+
+      final song = _songFromRow(item, videoId);
+      if (song == null) continue;
+
+      final subtitle = flexColumnText(item, 1) ?? '';
+      final parts = subtitle
+          .split('•')
+          .map((p) => p.trim())
+          .where((p) => p.isNotEmpty)
+          .toList();
+      final artist = parts.isNotEmpty ? parts.first : '';
+
+      if (_looselyMatches(artist, expectedArtist) &&
+          _looselyMatches(song.title, expectedTitle)) {
+        return song;
+      }
+    }
+    return null;
+  }
+
+  bool _looselyMatches(String candidate, String? expected) {
+    if (expected == null || expected.trim().isEmpty) return true;
+    Set<String> words(String s) => s
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\s]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toSet();
+    final a = words(candidate);
+    final b = words(expected);
+    if (a.isEmpty || b.isEmpty) return true;
+    final shorter = a.length <= b.length ? a : b;
+    final longer = identical(shorter, a) ? b : a;
+    return shorter.every(longer.contains);
   }
 
   // ── row → Song ──
@@ -182,7 +250,7 @@ class YtMusicService {
     if (columns == null || columns.length <= index) return null;
     final column = columns[index];
     if (column is! Map) return null;
-    return runsText((column as _JsonMap)
+    return runsText((_JsonMap.from(column))
         .getMap('musicResponsiveListItemFlexColumnRenderer')
         ?.getMap('text'));
   }
@@ -192,7 +260,7 @@ class YtMusicService {
     if (columns == null || columns.isEmpty) return null;
     final last = columns.last;
     if (last is! Map) return null;
-    return runsText((_JsonMap.from(last as Map))
+    return runsText((_JsonMap.from(last))
         .getMap('musicResponsiveListItemFixedColumnRenderer')
         ?.getMap('text'));
   }

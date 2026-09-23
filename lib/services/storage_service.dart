@@ -8,6 +8,8 @@ class StorageService {
   static const _lastSessionBoxName = 'last_session';
   static const _urlCacheBoxName = 'url_cache';
   static const _likesBoxName = 'liked_songs';
+  static const _userPlaylistsBoxName = 'user_playlists';
+  static const _listeningStatsBoxName = 'listening_stats';
 
   static const _maxHistory = 50;
   static const _maxQueries = 10;
@@ -18,6 +20,8 @@ class StorageService {
   late Box<String> _lastSessionBox;
   late Box<String> _urlCacheBox;
   late Box<String> _likesBox;
+  late Box<String> _userPlaylistsBox;
+  late Box<String> _listeningStatsBox;
 
   /// Must be called once at startup.
   Future<void> init() async {
@@ -27,7 +31,31 @@ class StorageService {
     _lastSessionBox = await Hive.openBox<String>(_lastSessionBoxName);
     _urlCacheBox = await Hive.openBox<String>(_urlCacheBoxName);
     _likesBox = await Hive.openBox<String>(_likesBoxName);
+    _userPlaylistsBox = await Hive.openBox<String>(_userPlaylistsBoxName);
+    _listeningStatsBox = await Hive.openBox<String>(_listeningStatsBoxName);
   }
+
+  // ═════════════════════════════════════════════
+  // SETTINGS (audio quality, offline mode, update checks)
+  // ═════════════════════════════════════════════
+
+  String getAudioQuality() =>
+      _historyBox.get('audioQuality', defaultValue: 'high') ?? 'high';
+
+  Future<void> setAudioQuality(String quality) =>
+      _historyBox.put('audioQuality', quality);
+
+  bool getOfflineMode() =>
+      _historyBox.get('offlineMode', defaultValue: 'false') == 'true';
+
+  Future<void> setOfflineMode(bool value) =>
+      _historyBox.put('offlineMode', value ? 'true' : 'false');
+
+  bool getCheckUpdates() =>
+      _historyBox.get('checkUpdates', defaultValue: 'true') == 'true';
+
+  Future<void> setCheckUpdates(bool value) =>
+      _historyBox.put('checkUpdates', value ? 'true' : 'false');
 
   // ═════════════════════════════════════════════
   // LIKED SONGS
@@ -55,6 +83,72 @@ class StorageService {
   }
 
   // ═════════════════════════════════════════════
+  // USER PLAYLISTS
+  // ═════════════════════════════════════════════
+
+  Future<String> createUserPlaylist(String name) async {
+    final id = 'up_${DateTime.now().millisecondsSinceEpoch}';
+    await _userPlaylistsBox.put(
+      id,
+      jsonEncode({'name': name, 'songs': <String>[]}),
+    );
+    return id;
+  }
+
+  Future<void> addUserPlaylistSongs(String id, List<Song> songs) async {
+    final raw = _userPlaylistsBox.get(id);
+    if (raw == null) return;
+    final map = jsonDecode(raw) as Map<String, dynamic>;
+    final list = (map['songs'] as List<dynamic>? ?? []).cast<String>();
+    final existing = <String>{};
+    for (final s in list) {
+      try {
+        existing.add((jsonDecode(s) as Map<String, dynamic>)['id'] as String);
+      } catch (_) {}
+    }
+    for (final song in songs) {
+      if (existing.add(song.id)) list.add(jsonEncode(song.toJson()));
+    }
+    map['songs'] = list;
+    await _userPlaylistsBox.put(id, jsonEncode(map));
+  }
+
+  List<({String id, String name, int count})> getUserPlaylists() {
+    final out = <({String id, String name, int count})>[];
+    for (final key in _userPlaylistsBox.keys) {
+      try {
+        final map = jsonDecode(_userPlaylistsBox.get(key) as String)
+        as Map<String, dynamic>;
+        out.add((
+        id: key as String,
+        name: map['name'] as String? ?? 'Playlist',
+        count: (map['songs'] as List<dynamic>? ?? []).length,
+        ));
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  List<Song> getUserPlaylistSongs(String id) {
+    final raw = _userPlaylistsBox.get(id);
+    if (raw == null) return [];
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      final songs = <Song>[];
+      for (final s in map['songs'] as List<dynamic>? ?? []) {
+        try {
+          songs.add(Song.fromJson(jsonDecode(s as String)));
+        } catch (_) {}
+      }
+      return songs;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> deleteUserPlaylist(String id) => _userPlaylistsBox.delete(id);
+
+  // ═════════════════════════════════════════════
   // SEARCH QUERIES
   // ═════════════════════════════════════════════
 
@@ -62,14 +156,9 @@ class StorageService {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return;
 
-    // Remove existing entry if present
     final existing = _queriesBox.values.toList();
     final filtered = existing.where((q) => q != trimmed).toList();
-
-    // Insert at front
     filtered.insert(0, trimmed);
-
-    // Trim to max
     final trimmedList = filtered.take(_maxQueries).toList();
 
     await _queriesBox.clear();
@@ -94,7 +183,6 @@ class StorageService {
     final json = jsonEncode(song.toJson());
     final existing = _historyBox.values.toList();
 
-    // Remove existing same-id entry
     final filtered = existing.where((s) {
       try {
         final map = jsonDecode(s) as Map<String, dynamic>;
@@ -132,7 +220,6 @@ class StorageService {
   // LAST SESSION (playback state)
   // ═════════════════════════════════════════════
 
-  /// Save the current queue + index so we can restore on next launch.
   Future<void> saveLastSession({
     required List<Song> queue,
     required int currentIndex,
@@ -147,7 +234,6 @@ class StorageService {
     await _lastSessionBox.put('state', jsonEncode(data));
   }
 
-  /// Returns the previously saved session, or null if none.
   LastSession? getLastSession() {
     final raw = _lastSessionBox.get('state');
     if (raw == null) return null;
@@ -175,20 +261,24 @@ class StorageService {
   }
 
   // ═════════════════════════════════════════════
-  // URL CACHE
+  // STREAM CACHE (url + client headers + quality info)
   // ═════════════════════════════════════════════
 
-  /// Store a resolved stream URL for fast re-playback.
-  Future<void> cacheUrl(String songId, String url) async {
+  Future<void> cacheStream(String songId, String url,
+      Map<String, String> headers,
+      {String? audioType, int? bitrateKbps}) async {
     final data = {
       'url': url,
+      'headers': headers,
+      if (audioType != null) 'audioType': audioType,
+      if (bitrateKbps != null) 'bitrateKbps': bitrateKbps,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
     await _urlCacheBox.put(songId, jsonEncode(data));
   }
 
-  /// Returns the cached URL if it's still fresh (< 5 hours old).
-  String? getCachedUrl(String songId) {
+  ({String url, Map<String, String> headers, String? audioType, int? bitrateKbps})?
+  getCachedStream(String songId) {
     final raw = _urlCacheBox.get(songId);
     if (raw == null) return null;
     try {
@@ -197,10 +287,19 @@ class StorageService {
       final age = DateTime.now()
           .difference(DateTime.fromMillisecondsSinceEpoch(ts));
       if (age > _urlCacheTtl) {
-        _urlCacheBox.delete(songId); // expired
+        _urlCacheBox.delete(songId);
         return null;
       }
-      return map['url'] as String?;
+      final url = map['url'] as String?;
+      if (url == null || url.isEmpty) return null;
+      final headers = (map['headers'] as Map<dynamic, dynamic>? ?? {})
+          .map((k, v) => MapEntry(k.toString(), v.toString()));
+      return (
+      url: url,
+      headers: headers,
+      audioType: map['audioType'] as String?,
+      bitrateKbps: (map['bitrateKbps'] as num?)?.toInt(),
+      );
     } catch (_) {
       return null;
     }
@@ -211,6 +310,25 @@ class StorageService {
   }
 
   Future<int> getUrlCacheSize() async => _urlCacheBox.length;
+
+  // ═════════════════════════════════════════════
+  // LISTENING STATS (annual-recap data)
+  // ═════════════════════════════════════════════
+
+  Map<String, dynamic>? getListeningStats() {
+    final raw = _listeningStatsBox.get('stats');
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveListeningStats(Map<String, dynamic> stats) =>
+      _listeningStatsBox.put('stats', jsonEncode(stats));
+
+  Future<void> clearListeningStats() => _listeningStatsBox.clear();
 }
 
 class LastSession {

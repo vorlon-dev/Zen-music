@@ -1,0 +1,10 @@
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\aarch64-linux-android\release\deps\litemap-92872d26f4a41bba.d: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\map.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\store\mod.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\store\slice_impl.rs
+
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\aarch64-linux-android\release\deps\liblitemap-92872d26f4a41bba.rlib: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\map.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\store\mod.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\store\slice_impl.rs
+
+C:\Users\prata\AndroidStudioProjects\zenmusic\spotify_bridge\librespot-ffi\target\aarch64-linux-android\release\deps\liblitemap-92872d26f4a41bba.rmeta: C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\lib.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\map.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\store\mod.rs C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\store\slice_impl.rs
+
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\lib.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\map.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\store\mod.rs:
+C:\Users\prata\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\litemap-0.8.1\src\store\slice_impl.rs:

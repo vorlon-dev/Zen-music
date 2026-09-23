@@ -1,0 +1,9 @@
+cargo:rustc-env=VERGEN_BUILD_DATE=2026-09-22
+cargo:rustc-env=VERGEN_GIT_COMMIT_DATE=2026-09-11
+cargo:rustc-env=VERGEN_GIT_SHA=94c7121
+cargo:rerun-if-changed=C:/Users/prata/AndroidStudioProjects/zenmusic/spotify_bridge/deps/librespot/.git\HEAD
+cargo:rerun-if-changed=C:/Users/prata/AndroidStudioProjects/zenmusic/spotify_bridge/deps/librespot/.git\refs/heads/dev
+cargo:rerun-if-changed=build.rs
+cargo:rerun-if-env-changed=VERGEN_IDEMPOTENT
+cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH
+cargo:rustc-env=LIBRESPOT_BUILD_ID=mwXzLvPT

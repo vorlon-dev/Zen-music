@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext traffic to the local just_audio proxy -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">127.0.0.1</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <!-- System CAs -->
+            <certificates src="system" />
+            <!-- User-added CAs (helps some extensions' pinned setups) -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>
