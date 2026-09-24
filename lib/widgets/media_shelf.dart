@@ -120,6 +120,54 @@ class _NowPlayingBarsState extends State<NowPlayingBars>
   }
 }
 
+/// Play/pause morph icon — Echo's anim_play_pause motion ported:
+/// scale-bounce + crossfade between the two states. The play triangle
+/// always points right.
+class PlayPauseMorph extends StatelessWidget {
+  const PlayPauseMorph({
+    super.key,
+    required this.playing,
+    required this.onTap,
+    this.size = 22,
+    this.color,
+  });
+
+  final bool playing;
+  final VoidCallback onTap;
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? SpotifyColors.textPrimary;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedScale(
+        scale: playing ? 1.0 : 0.82,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutBack,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 260),
+          switchInCurve: Curves.easeOutBack,
+          switchOutCurve: Curves.easeIn,
+          transitionBuilder: (child, anim) => FadeTransition(
+            opacity: anim,
+            child: ScaleTransition(scale: anim, child: child),
+          ),
+          child: Icon(
+            playing
+                ? FluentIcons.pause_16_filled
+                : FluentIcons.play_16_filled,
+            key: ValueKey(playing),
+            size: size,
+            color: c,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Cover with Echo's stack-peek background layers, type badge and
 /// now-playing overlay.
 class ShelfCover extends StatelessWidget {
@@ -391,16 +439,19 @@ class ExtTrackRow extends StatelessWidget {
     required this.index,
     required this.track,
     required this.onTap,
+    this.onLongPress,
   });
 
   final int index;
   final ExtMedia track;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -578,6 +629,7 @@ class MediaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final centered = item.kind == 'Artist';
+    if (item.isVideo) return VideoCard(item: item, onTap: onTap);
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -622,7 +674,67 @@ class MediaCard extends StatelessWidget {
   }
 }
 
+/// Echo VideoViewHolder: 16:9 thumbnail card for video items.
+class VideoCard extends StatelessWidget {
+  const VideoCard({super.key, required this.item, required this.onTap});
+
+  final ShelfItem item;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 200,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                width: 200,
+                height: 112,
+                child: CoverArt(
+                  url: item.coverUrl,
+                  headers: item.coverHeaders,
+                  hex: item.coverHex,
+                  size: 200,
+                  borderRadius: 10,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: SpotifyColors.textPrimary,
+              ),
+            ),
+            if ((item.subtitle ?? '').isNotEmpty)
+              Text(
+                item.subtitle!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: SpotifyColors.textSecondary.withOpacity(0.66),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Echo's ThreeTracks card: 240dp column of three numbered track tiles.
+/// (Swipe-to-queue removed — Dismissible captured the horizontal scroll
+/// gestures of the shelf row.)
 class ThreeTracksCard extends StatelessWidget {
   const ThreeTracksCard({
     super.key,

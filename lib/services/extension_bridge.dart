@@ -7,7 +7,7 @@ class ExtensionBridge {
   static const _channel = MethodChannel('zen/extensions');
 
   /// Installed extensions: {id, name, version, description, author,
-  /// isActive}.
+  /// icon, isActive}.
   static Future<List<Map<String, dynamic>>> list() async {
     try {
       final raw = await _channel.invokeMethod<String>('list');
@@ -56,9 +56,17 @@ class ExtensionBridge {
     return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
-  /// Resolves the playable stream for a track json.
-  static Future<({String url, Map<String, String> headers, String sourceType})>
-  resolveStream(Map<String, dynamic> track) async {
+  /// Resolves the playable stream for a track json. Picks the best
+  /// source natively (lossless first, then quality).
+  static Future<
+      ({
+      String url,
+      Map<String, String> headers,
+      String sourceType,
+      int quality,
+      String qualityLabel,
+      bool lossless,
+      })> resolveStream(Map<String, dynamic> track) async {
     final raw = await _channel.invokeMethod<String>(
         'resolveStream', {'track': jsonEncode(track)});
     if (raw == null) throw Exception('Stream resolution failed');
@@ -69,6 +77,9 @@ class ExtensionBridge {
     url: map['url'] as String,
     headers: headers,
     sourceType: map['sourceType'] as String? ?? 'PROGRESSIVE',
+    quality: (map['quality'] as num?)?.toInt() ?? 0,
+    qualityLabel: map['qualityLabel'] as String? ?? '',
+    lossless: map['lossless'] == true,
     );
   }
 }

@@ -75,7 +75,7 @@ class ZenExtensionManager(private val context: Context) {
     // ── Install / list / select ──
 
     /// Installs from a plain file path (file_picker returns cache paths
-    /// that are directly readable — no ContentResolver needed).
+    //  that are directly readable — no ContentResolver needed).
     fun installFromPath(path: String): Result<Metadata> {
         val file = File(path)
         if (!file.exists()) {
@@ -160,8 +160,8 @@ class ZenExtensionManager(private val context: Context) {
     // Clients that completed onInitialize — id → instance.
     private val initializedClients = mutableMapOf<String, ExtensionClient>()
 
-    /// Returns the active extension client, re-running activation if a
-    /// previous activation failed or was lost (half-initialized extension).
+    /// Returns the active client, re-running activation if a previous
+    //  activation failed or was lost (half-initialized extension).
     private fun activeClient(): ExtensionClient {
         val cur = active
         if (cur != null) return cur.client
@@ -233,18 +233,26 @@ class ZenExtensionManager(private val context: Context) {
         return arr
     }
 
-    // ── Home feed (HomeFeedClient — shelves serialized as-is) ──
+    // ── Home feed (HomeFeedClient — paged, Dart drives continuation) ──
 
-    fun homeFeed(): String {
+    fun homeFeedPage(continuation: String?): JSONObject {
         val client = activeClient() as? HomeFeedClient
             ?: error("Extension does not provide a home feed")
 
         val feed = runBlocking { client.loadHomeFeed() }
-        val shelves: List<Shelf> = runBlocking {
-            val data = feed.getPagedData(feed.notSortTabs.firstOrNull())
-            data.pagedData.loadAll()
-        }
-        return Json.encodeToString(ListSerializer(Shelf.serializer()), shelves)
+        val pagedData = runBlocking {
+            feed.getPagedData(feed.notSortTabs.firstOrNull())
+        }.pagedData
+
+        val page = runBlocking { pagedData.loadPage(continuation) }
+        return JSONObject()
+            .put(
+                "data",
+                JSONArray(
+                    Json.encodeToString(ListSerializer(Shelf.serializer()), page.data)
+                )
+            )
+            .put("continuation", page.continuation ?: JSONObject.NULL)
     }
 
     // ── Detail pages: album / playlist / artist ──
@@ -259,9 +267,8 @@ class ZenExtensionManager(private val context: Context) {
         val result = JSONObject()
 
         // NOTE: item + tracks are encoded via EchoMediaItem.serializer()
-        // (the sealed parent) — concrete serializers like Track.serializer()
-        // omit the mediaItemType discriminator and Dart-side parsing of
-        // these payloads depends on it.
+        // (the sealed parent) — concrete serializers omit the
+        // mediaItemType discriminator and Dart parsing depends on it.
         when (item) {
             is Album -> {
                 val c = client as? AlbumClient
@@ -331,6 +338,10 @@ class ZenExtensionManager(private val context: Context) {
 
     // ── Playback bridge: track json → resolved stream json ──
 
+    // Ranks every Http source across all servers: non-DRM, non-live,
+    // highest quality first (ties → later entries, extensions list
+    // best last). Lossless sniffing is title/url-based — the contract
+    // has no codec metadata.
     fun resolveStream(trackJson: JSONObject): JSONObject {
         val client = activeClient() as? TrackClient
             ?: error("Extension does not support streaming")
@@ -354,31 +365,79 @@ class ZenExtensionManager(private val context: Context) {
             duration = if (durationMs > 0) durationMs else null,
         )
 
-        // Stage 1: populate servers.
+        // Stage 1: load all servers.
         val loaded = runBlocking { client.loadTrack(track, false) }
-        val server = loaded.servers.firstOrNull()
-            ?: error("Extension returned no servers for this track")
+        val servers = loaded.servers
+        if (servers.isEmpty()) error("Extension returned no servers for this track")
 
-        // Stage 2: resolve the media of the first server.
-        val media = runBlocking {
-            client.loadStreamableMedia(server, false)
-        }
-        val serverMedia = media as? Streamable.Media.Server
-            ?: error("Unexpected media type: ${media::class.simpleName}")
+        // Stage 2: resolve every server's media, collect Http sources.
+        data class Candidate(
+            val url: String,
+            val headers: Map<String, String>,
+            val sourceType: String,
+            val quality: Int,
+            val title: String?,
+            val lossless: Boolean,
+        )
 
-        // First Http source → url + headers + source type.
-        for (source in serverMedia.sources) {
-            val http = source as? Streamable.Source.Http ?: continue
-            val type = when (http.type) {
-                Streamable.SourceType.HLS -> "HLS"
-                Streamable.SourceType.DASH -> "DASH"
-                else -> "PROGRESSIVE"
+        val candidates = mutableListOf<Candidate>()
+        for (server in servers) {
+            val media = try {
+                runBlocking { client.loadStreamableMedia(server, false) }
+            } catch (t: Throwable) {
+                Log.w("ZenExt", "server ${server.id} failed to load: ${t.message}")
+                continue
             }
-            return JSONObject()
-                .put("url", http.request.url)
-                .put("headers", org.json.JSONObject(http.request.headers))
-                .put("sourceType", type)
+            val serverMedia = media as? Streamable.Media.Server ?: continue
+            for (source in serverMedia.sources) {
+                val http = source as? Streamable.Source.Http ?: continue
+                if (http.decryption != null) continue // DRM — unplayable here
+                if (http.isLive) continue
+                val url = http.request.url
+                val label = (http.title ?: "").lowercase()
+                val lossless = label.contains("flac") ||
+                        label.contains("lossless") ||
+                        url.lowercase().contains(".flac")
+                candidates.add(
+                    Candidate(
+                        url = url,
+                        headers = http.request.headers,
+                        sourceType = when (http.type) {
+                            Streamable.SourceType.HLS -> "HLS"
+                            Streamable.SourceType.DASH -> "DASH"
+                            Streamable.SourceType.Progressive -> "PROGRESSIVE"
+                        },
+                        quality = http.quality,
+                        title = http.title,
+                        lossless = lossless,
+                    )
+                )
+            }
         }
-        error("No Http source in the loaded media")
+        if (candidates.isEmpty()) error("No playable Http source for this track")
+
+        // Prefer-lossless: lossless first, then quality desc, then
+        // position desc (later sources win ties).
+        val indexed = candidates.withIndex().toList()
+        val best = indexed.maxWith(
+            compareBy(
+                { it.value.lossless },
+                { it.value.quality },
+                { it.index },
+            )
+        ).value
+
+        Log.i(
+            "ZenExt",
+            "resolved ${candidates.size} sources; picked q=${best.quality} " +
+                    "lossless=${best.lossless} ${best.title ?: ""}"
+        )
+        return JSONObject()
+            .put("url", best.url)
+            .put("headers", JSONObject(best.headers))
+            .put("sourceType", best.sourceType)
+            .put("quality", best.quality)
+            .put("qualityLabel", best.title ?: (if (best.lossless) "Lossless" else ""))
+            .put("lossless", best.lossless)
     }
 }

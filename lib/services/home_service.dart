@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:yt_extractor/yt_extractor.dart';
 import '../models/collection.dart';
 import '../models/song.dart';
@@ -82,8 +84,8 @@ class HomeService {
     }
   }
 
-  /// YT Music songs-shelf search — real YouTube Music content for
-  /// editorial-style queries ("top hits", "new music"...).
+  /// YT Music songs-shelf search — real track rows from YouTube Music
+  /// for editorial-style queries ("top hits", "new music"...).
   Future<List<Song>> getYtmShelf(String query, {int limit = 12}) async {
     try {
       return await _ytm.searchSongs(query, limit: limit);
@@ -91,6 +93,49 @@ class HomeService {
       print('getYtmShelf failed: $e');
       return [];
     }
+  }
+
+  // ═════════════════════════════════════════════
+  // CHART SHELF ROTATION (infinite home append)
+  // ═════════════════════════════════════════════
+
+  /// Chart-query pool for infinite home append. Ordered so adjacent
+  /// rounds feel varied (decade → mood → genre → region rotation).
+  static const chartQueries = [
+    'top hits 2010s',
+    'romantic hits',
+    'punjabi hits',
+    'top hits 2000s',
+    'party hits',
+    'tamil hits',
+    'top hits 2020s',
+    'workout hits',
+    'telugu hits',
+    'top hits 90s',
+    'chill hits',
+    'marathi hits',
+    'top hits 80s',
+    'sad songs',
+    'bhojpuri hits',
+    'top hits this month',
+    'dance hits',
+    'kannada hits',
+    'top hits 2010s bollywood',
+    'lofi hits',
+    'malayalam hits',
+    'top hits 2000s bollywood',
+    'feel good hits',
+    'bengali hits',
+  ];
+
+  int _chartCursor = 0;
+
+  /// Next chart shelf from the rotation pool. Cycles forever; callers
+  /// dedupe against already-shown content.
+  Future<List<Song>> getNextChartShelf() {
+    final q = chartQueries[_chartCursor % chartQueries.length];
+    _chartCursor++;
+    return getYtmShelf(q, limit: 15);
   }
 
   // ═════════════════════════════════════════════

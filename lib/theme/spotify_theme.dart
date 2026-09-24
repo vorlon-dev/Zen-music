@@ -1,19 +1,17 @@
 import 'package:flutter/material.dart';
 
 class SpotifyColors {
-  static const background = Color(0xFF403600);
-  static const surface = Color(0xFF4B4105);
-  static const surfaceLight = Color(0xFF574B08);
-  static const surfaceLighter = Color(0xFF63560C);
-  static const green = Color(0xFFFFDE21);
-  static const greenDark = Color(0xFFE0C41E);
-  static const textPrimary = Color(0xFFFFFFFF);
-  static const textSecondary = Color(0xFFD8D2BD);
-  static const textTertiary = Color(0xFF9A9480);
+  static const background = Color(0xFF0D0E0F);
+  static const surface = Color(0xFF151617);
+  static const surfaceLight = Color(0xFF1C1D1F);
+  static const surfaceLighter = Color(0xFF232527);
+  static const green = Color(0xFFA8C69F);
+  static const greenDark = Color(0xFF8FAE86);
+  static const textPrimary = Color(0xFFF2F0EA);
+  static const textSecondary = Color(0xFF9A9B9B);
+  static const textTertiary = Color(0xFF6C6D6D);
 }
-class ZenFonts {
-  static const String display = 'PaytoneOne';
-}
+
 class SpotifyTheme {
   static ThemeData dark() {
     final base = ThemeData.dark(useMaterial3: true);
@@ -24,8 +22,8 @@ class SpotifyTheme {
         primary: SpotifyColors.green,
         secondary: SpotifyColors.green,
         surface: SpotifyColors.surface,
-        onPrimary: Colors.black,
-        onSecondary: Colors.black,
+        onPrimary: SpotifyColors.background,
+        onSecondary: SpotifyColors.background,
         onSurface: SpotifyColors.textPrimary,
       ),
       appBarTheme: const AppBarTheme(
@@ -40,7 +38,7 @@ class SpotifyTheme {
         iconTheme: IconThemeData(color: SpotifyColors.textPrimary),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Color(0xFF322B00),
+        backgroundColor: SpotifyColors.surface,
         selectedItemColor: SpotifyColors.textPrimary,
         unselectedItemColor: SpotifyColors.textSecondary,
         type: BottomNavigationBarType.fixed,
@@ -54,10 +52,10 @@ class SpotifyTheme {
       ),
       sliderTheme: const SliderThemeData(
         trackHeight: 3,
-        activeTrackColor: SpotifyColors.textPrimary,
+        activeTrackColor: SpotifyColors.green,
         inactiveTrackColor: SpotifyColors.surfaceLighter,
-        thumbColor: SpotifyColors.textPrimary,
-        overlayColor: Color(0x33FFFFFF),
+        thumbColor: SpotifyColors.green,
+        overlayColor: Color(0x33A8C69F),
         thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
         overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
       ),

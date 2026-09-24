@@ -30,9 +30,9 @@ class ZenNavBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
 
-  // Same tone as the Round 0 nav background. Echo resolves this from
-  // ?navBarBackground — tune here if you want the pill lighter.
-  static const Color _barColor = Color(0xFF322B00);
+  // Bar = surface token; pill = one step up. Echo resolves both from
+  // theme attributes — tune here if you want the pill lighter.
+  static const Color _barColor = SpotifyColors.surface;
   static const Color _indicatorColor = SpotifyColors.surfaceLight;
 
   @override

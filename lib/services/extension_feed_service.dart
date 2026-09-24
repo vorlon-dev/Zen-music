@@ -58,8 +58,7 @@ class ExtShelf {
       if (rawList is List) {
         for (final entry in rawList) {
           // Entries of a Tracks shelf are Tracks by definition — their
-          // JSON may omit the mediaItemType tag (concrete serializer),
-          // so fall back to 'Track'.
+          // JSON may omit the mediaItemType tag, so fall back to 'Track'.
           final media = ExtMedia.fromMap(entry, fallbackKind: 'Track');
           if (media != null) items.add(media);
         }
@@ -125,6 +124,7 @@ class ExtMedia {
     this.coverHex,
     this.durationMs,
     this.isVideo = false,
+    this.trackType = '',
     required this.raw,
   });
 
@@ -137,7 +137,13 @@ class ExtMedia {
   final String? coverHex;
   final int? durationMs;
   final bool isVideo;
+  final String trackType; // Track.type: Song | Podcast | Video | …
   final Map<dynamic, dynamic> raw; // kept for playback round-trip
+
+  /// A song is a playable Track that is neither a podcast episode nor
+  /// a video — the only kind that enters feeds and queues.
+  bool get isSong =>
+      kind == 'Track' && !isVideo && (trackType.isEmpty || trackType == 'Song');
 
   static ExtMedia? fromMap(dynamic data, {String? fallbackKind}) {
     if (data is! Map) return null;
@@ -174,6 +180,7 @@ class ExtMedia {
       isVideo: trackType == 'Video' ||
           trackType == 'VideoSong' ||
           trackType == 'HorizontalVideo',
+      trackType: trackType,
       raw: data,
     );
   }
@@ -248,20 +255,35 @@ String? _extractHexImage(dynamic cover) {
 class ExtensionFeedService {
   static const _channel = MethodChannel('zen/extensions');
 
-  /// Home shelves of the currently active extension.
-  /// Throws if the extension provides no home feed.
-  Future<List<ExtShelf>> homeFeed() async {
-    final raw = await _channel.invokeMethod<String>('homeFeed');
-    if (raw == null || raw.isEmpty) return [];
-    final decoded = jsonDecode(raw) as List<dynamic>;
+  /// Home shelves page-by-page. [continuation] null = first page.
+  /// Returns the shelves plus the next continuation token (null = end).
+  Future<({List<ExtShelf> shelves, String? continuation})>
+  homeFeedPage(String? continuation) async {
+    final raw = await _channel.invokeMethod<String>(
+      'homeFeedPage',
+      {'continuation': continuation},
+    );
+    if (raw == null || raw.isEmpty) {
+      return (
+      shelves: <ExtShelf>[],
+      continuation: null,
+      );
+    }
+    final map = jsonDecode(raw) as Map<String, dynamic>;
     final shelves = <ExtShelf>[];
-    for (final entry in decoded) {
-      if (entry is Map) {
-        final shelf = ExtShelf.fromMap(entry);
-        if (shelf != null) shelves.add(shelf);
+    final data = map['data'];
+    if (data is List) {
+      for (final entry in data) {
+        if (entry is Map) {
+          final shelf = ExtShelf.fromMap(entry);
+          if (shelf != null) shelves.add(shelf);
+        }
       }
     }
-    return shelves;
+    return (
+    shelves: shelves,
+    continuation: map['continuation']?.toString(),
+    );
   }
 
   /// Loads the detail page for an album / playlist / artist item.

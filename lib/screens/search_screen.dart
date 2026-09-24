@@ -7,12 +7,14 @@ import 'package:yt_extractor/yt_extractor.dart';
 import '../main.dart';
 import '../models/collection.dart';
 import '../models/song.dart';
+import '../services/downloads_service.dart';
 import '../services/jiosaavn_service.dart';
 import '../services/yt_music_service.dart';
 import '../services/youtube_service.dart';
 import '../theme/spotify_theme.dart';
 import '../utilities/zen_transitions.dart';
 import '../widgets/media_shelf.dart';
+import '../widgets/playlist_sheets.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/wave_spinner.dart';
 import '../widgets/youtube_thumbnail.dart';
@@ -181,7 +183,7 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Echo's long-click more-menu, minimal: queue actions.
+  /// Echo's long-click more-menu: download, playlist, queue actions.
   void _songActions(Song song) {
     showModalBottomSheet(
       context: context,
@@ -194,6 +196,35 @@ class _SearchScreenState extends State<SearchScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.download_rounded,
+                  color: SpotifyColors.textPrimary),
+              title: const Text('Download',
+                  style: TextStyle(color: SpotifyColors.textPrimary)),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final ok = await DownloadsService().download(song);
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(ok
+                        ? 'Downloaded — plays offline'
+                        : 'Download failed'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.playlist_add_rounded,
+                  color: SpotifyColors.textPrimary),
+              title: const Text('Add to playlist',
+                  style: TextStyle(color: SpotifyColors.textPrimary)),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                showAddToPlaylistSheet(context, song);
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.play_arrow_rounded,
                   color: SpotifyColors.textPrimary),

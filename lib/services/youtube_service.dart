@@ -135,7 +135,6 @@ class YoutubeService {
           'clientName': 'TVHTML5',
           'clientVersion': '7.20260707.07.00',
           'hl': 'en',
-          'timeZone': 'UTC',
           'gl': 'US',
           'utcOffsetMinutes': 0,
           'originalUrl': 'https://www.youtube.com/tv',
@@ -943,14 +942,14 @@ class YoutubeService {
       print('getRelatedStreams failed: $e');
     }
 
-    // Tier 3: filtered search fallback.
+    // Tier 3: filtered music search fallback.
     try {
-      await _throttle();
+      await _ensureExtractorInit();
+      final page = await _extractor.search(
+        '${seedSong.title} ${seedSong.artist.split(',').first.trim()}',
+        filter: SearchFilter.musicSongs,
+      );
       final artistPart = seedSong.artist.split(',').first.trim();
-      final query = artistPart.isNotEmpty
-          ? '${seedSong.title} $artistPart'
-          : seedSong.title;
-      final results = await _yt.search.search(query);
       final artistWords = artistPart.toLowerCase()
           .replaceAll(RegExp(r'[^\w\s]'), ' ')
           .split(RegExp(r'\s+'))
@@ -958,10 +957,11 @@ class YoutubeService {
           .toSet();
 
       final songs = <Song>[];
-      for (final v in results) {
-        if (v.id.value == youtubeId) continue;
-        final author = v.author.toLowerCase();
-        final title = v.title.toLowerCase();
+      for (final item in page.items) {
+        final vid = _extractVideoId(item.url);
+        if (vid == null || vid == youtubeId) continue;
+        final author = (item.uploaderName ?? '').toLowerCase();
+        final title = item.name.toLowerCase();
         final artistMatch =
         artistWords.any((w) => w.length > 2 && author.contains(w));
         final seedTitleWords = seedSong.title
@@ -974,15 +974,15 @@ class YoutubeService {
         if (!artistMatch && !titleMatch) continue;
 
         songs.add(Song(
-          id: v.id.value,
-          title: v.title,
-          artist: v.author,
-          thumbnail: 'https://i.ytimg.com/vi/${v.id.value}/maxresdefault.jpg',
-          duration: v.duration ?? Duration.zero,
+          id: vid,
+          title: item.name,
+          artist: item.uploaderName ?? 'Unknown',
+          thumbnail: 'https://i.ytimg.com/vi/$vid/maxresdefault.jpg',
+          duration: Duration(seconds: item.duration ?? 0),
         ));
         if (songs.length >= 20) break;
       }
-      print('↳ related fallback (search): ${songs.length} relevant songs');
+      print('↳ related fallback (music search): ${songs.length} songs');
       return songs;
     } catch (e) {
       print('related fallback failed: $e');

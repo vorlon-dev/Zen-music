@@ -45,11 +45,12 @@ class MainActivity : AudioServiceActivity() {
                         extensionManager.select(call.argument<String>("id") ?: "")
                     )
                     "deselect" -> result.success(extensionManager.clearActive())
-                    "homeFeed" -> {
+                    "homeFeedPage" -> {
+                        val continuation = call.argument<String>("continuation")
                         Thread {
                             try {
-                                val json = extensionManager.homeFeed()
-                                mainHandler.post { result.success(json) }
+                                val json = extensionManager.homeFeedPage(continuation)
+                                mainHandler.post { result.success(json.toString()) }
                             } catch (t: Throwable) {
                                 mainHandler.post {
                                     result.error("HOME_FEED_FAILED", t.message, null)

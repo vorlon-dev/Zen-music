@@ -78,6 +78,30 @@ class YtMusicService {
     return songs;
   }
 
+  /// Generic songs-shelf for chart-style queries ("top hits 2010s",
+  /// "punjabi hits", "romantic hits"...). Same row parsing as
+  /// searchSongs, minus the rate-limit flag juggling.
+  Future<List<Song>> getChartShelf(String query, {int limit = 15}) async {
+    final root = await _post('search', {
+      ..._context,
+      'query': query.trim(),
+      'params': _songsFilter,
+    });
+    if (root == null) return [];
+
+    final songs = <Song>[];
+    final seen = <String>{};
+    for (final item
+    in findRenderers(root, 'musicResponsiveListItemRenderer')) {
+      final videoId = _videoIdOf(item);
+      if (videoId == null || !seen.add(videoId)) continue;
+      final song = _songFromRow(item, videoId);
+      if (song != null) songs.add(song);
+      if (songs.length >= limit) break;
+    }
+    return songs;
+  }
+
   /// Canonical artist channel ids (UC...) matching a name.
   Future<List<String>> searchArtistIds(String query, {int limit = 3}) async {
     lastSearchRateLimited = false;

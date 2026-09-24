@@ -4,7 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/song.dart';
-import '../services/extension_bridge.dart';
+import '../services/downloads_service.dart';
 import '../services/listening_stats_service.dart';
 import '../services/storage_service.dart';
 import '../services/youtube_service.dart';
@@ -419,7 +419,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   Future<List<Song>> getRelatedForUI(Song song) async {
-    if (song.isFromExtension) return [];
     try {
       return await _yt.getRelatedSongs(song);
     } catch (e) {
@@ -432,19 +431,11 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // ═════════════════════════════════════════════
 
   Future<VideoStreamResult> _getStreamUrl(Song song) async {
-    // Extension tracks resolve through the native bridge, never through
-    // the YouTube chain. 'ext:' prefix keeps ids from colliding with
-    // default-source ids (a YTM extension id IS a YouTube id).
-    // Memory cache only — extension URLs are often shorter-lived than
-    // the storage stream cache TTL.
-    if (song.isFromExtension) {
-      final extKey = 'ext:${song.id}';
-      final mem = _urlCache[extKey];
-      if (mem != null) return mem;
-      final raw = jsonDecode(song.extRaw!) as Map<String, dynamic>;
-      final resolved = await ExtensionBridge.resolveStream(raw);
-      final result = VideoStreamResult(resolved.url, resolved.headers);
-      _urlCache[extKey] = result;
+    // Tier 0: offline download — zero network.
+    final localPath = await DownloadsService().localPath(song.id);
+    if (localPath != null) {
+      final result = VideoStreamResult('file://$localPath', const {});
+      _urlCache[song.id] = result;
       return result;
     }
 
@@ -487,13 +478,9 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       );
       if (generation != _loadGeneration) return;
       await play();
-      // Extension plays stay out of stats/history — stats replay is
-      // YouTube-id-keyed and extension ids cannot replay there.
-      if (!song.isFromExtension) {
-        listeningStatsService.handlePlayerPlaying(true,
-            currentSong: songToStatsMap(song));
-        await storage.savePlayedSong(song);
-      }
+      listeningStatsService.handlePlayerPlaying(true,
+          currentSong: songToStatsMap(song));
+      await storage.savePlayedSong(song);
       await _saveCurrentSession();
     } catch (e) {
       print('Failed to play ${song.title}: $e');
@@ -513,14 +500,8 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   Future<void> _prefetchUrl(Song song) async {
-    if (song.isFromExtension) {
-      final extKey = 'ext:${song.id}';
-      if (_urlCache.containsKey(extKey)) return;
-      try {
-        final raw = jsonDecode(song.extRaw!) as Map<String, dynamic>;
-        final resolved = await ExtensionBridge.resolveStream(raw);
-        _urlCache[extKey] = VideoStreamResult(resolved.url, resolved.headers);
-      } catch (_) {}
+    if (await DownloadsService().localPath(song.id) != null) {
+      // Downloaded — playback will resolve locally; nothing to prefetch.
       return;
     }
     if (_urlCache.containsKey(song.id)) return;
@@ -541,7 +522,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // ═════════════════════════════════════════════
 
   Future<void> _loadRadioFill(Song seedSong) async {
-    if (seedSong.isFromExtension) return;
     if (_isAppending) return;
     _isAppending = true;
     try {
@@ -568,8 +548,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   Future<void> _appendRelatedSongs() async {
     if (_isAppending || _queue.isEmpty) return;
-    // Never append YouTube related songs to an extension queue.
-    if (_queue.last.isFromExtension) return;
     _isAppending = true;
     try {
       final seed = _queue.last;

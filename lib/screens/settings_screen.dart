@@ -7,11 +7,14 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../models/song.dart';
+import '../services/extension_bridge.dart';
 import '../services/listening_stats_service.dart';
 import '../services/spotify_bridge.dart';
 import '../theme/spotify_theme.dart';
 import '../utilities/zen_transitions.dart';
+import '../widgets/source_picker_sheet.dart';
 import 'equalizer_screen.dart';
+import 'extensions_screen.dart';
 import 'import_spotify_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -28,6 +31,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _audioQuality = 'high';
   bool _offlineMode = false;
   bool _checkUpdates = true;
+  List<Map<String, dynamic>> _extensions = [];
+  String? _activeSourceId;
 
   @override
   void initState() {
@@ -35,10 +40,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _load();
   }
 
+  String get _activeSourceName {
+    if (_activeSourceId == null) return 'Default — built-in sources';
+    for (final e in _extensions) {
+      if (e['id']?.toString() == _activeSourceId) {
+        return e['name']?.toString() ?? 'Extension';
+      }
+    }
+    return 'Extension';
+  }
+
   Future<void> _load() async {
     final connected = await SpotifyBridge.hasCachedCredentials();
     final cache = await storage.getUrlCacheSize();
     final history = storage.getPlayedHistory().length;
+    final extensions = await ExtensionBridge.list();
+    String? activeId;
+    for (final e in extensions) {
+      if (e['isActive'] == true) activeId = e['id']?.toString();
+    }
     if (!mounted) return;
     setState(() {
       _spotifyConnected = connected;
@@ -47,6 +67,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _audioQuality = storage.getAudioQuality();
       _offlineMode = storage.getOfflineMode();
       _checkUpdates = storage.getCheckUpdates();
+      _extensions = extensions;
+      _activeSourceId = activeId;
     });
   }
 
@@ -54,6 +76,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  Future<void> _openSourcePicker() async {
+    await showSourcePickerSheet(
+      context: context,
+      extensions: _extensions,
+      activeId: _activeSourceId,
+      onSelect: (id) async {
+        final ok = id == null
+            ? await ExtensionBridge.deselect()
+            : await ExtensionBridge.select(id);
+        if (!ok) {
+          _toast('Could not switch source');
+          return;
+        }
+        await _load();
+        _toast('Source: ${_activeSourceName.split(' —').first}');
+      },
+      onOpenManager: () async {
+        await pushSharedAxisY(context, const ExtensionsScreen());
+        _load();
+      },
     );
   }
 
@@ -241,6 +286,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
+          _category('Sources', Icons.extension_rounded, [
+            _prefRow(
+              Icons.music_note_rounded,
+              'Music source',
+              _activeSourceName,
+              _openSourcePicker,
+            ),
+            _prefRow(
+              Icons.extension_rounded,
+              'Manage extensions',
+              'Install & configure source extensions',
+                  () async {
+                await pushSharedAxisY(context, const ExtensionsScreen());
+                _load();
+              },
+            ),
+          ]),
           _category('Playback', FluentIcons.options_24_regular, [
             _prefRow(
               FluentIcons.options_24_regular,
