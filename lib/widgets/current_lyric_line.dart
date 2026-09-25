@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../services/appearance_prefs.dart';
 import '../services/lyrics_service.dart';
 import '../theme/spotify_theme.dart';
 
@@ -8,6 +9,7 @@ import '../theme/spotify_theme.dart';
 /// now, updating as playback moves through the song. Tapping it opens
 /// the full lyrics screen. Shows nothing at all if no lyrics are found,
 /// so it never leaves an empty box behind.
+/// Text position and size follow the Appearance settings live.
 class CurrentLyricLine extends StatefulWidget {
   final String title;
   final String artist;
@@ -46,6 +48,7 @@ class _CurrentLyricLineState extends State<CurrentLyricLine> {
   @override
   void initState() {
     super.initState();
+    AppearancePrefs.load();
     _load();
   }
 
@@ -148,27 +151,42 @@ class _CurrentLyricLineState extends State<CurrentLyricLine> {
     final line = _currentLine;
     if (line == null || line.isEmpty) return const SizedBox.shrink();
 
-    return InkWell(
-      onTap: widget.onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(28, 0, 28, 20),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
-          child: Text(
-            line,
-            key: ValueKey(line),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 19,
-              fontWeight: FontWeight.w600,
-              height: 1.3,
-              color: SpotifyColors.textPrimary,
+    return ListenableBuilder(
+      listenable: Listenable.merge(
+          [AppearancePrefs.lyricsPosition, AppearancePrefs.lyricsTextSize]),
+      builder: (context, _) {
+        final align = switch (AppearancePrefs.lyricsPosition.value) {
+          'center' => TextAlign.center,
+          'right' => TextAlign.right,
+          _ => TextAlign.left,
+        };
+        return InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(28, 0, 28, 20),
+            child: SizedBox(
+              width: double.infinity,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: Text(
+                  line,
+                  key: ValueKey(line),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: align,
+                  style: TextStyle(
+                    fontSize: AppearancePrefs.lyricsTextSize.value,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                    color: SpotifyColors.textPrimary,
+                  ),
+                ),
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

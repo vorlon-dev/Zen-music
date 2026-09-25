@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../models/song.dart';
+import '../services/appearance_prefs.dart';
 import '../services/extension_bridge.dart';
 import '../services/listening_stats_service.dart';
 import '../services/spotify_bridge.dart';
@@ -51,6 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _load() async {
+    await AppearancePrefs.load();
     final connected = await SpotifyBridge.hasCachedCredentials();
     final cache = await storage.getUrlCacheSize();
     final history = storage.getPlayedHistory().length;
@@ -271,6 +273,407 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // ═══════════════════════════════════════════
+  // APPEARANCE HELPERS — generic pickers & dialogs
+  // ═══════════════════════════════════════════
+
+  void _showPickerSheet({
+    required String title,
+    required List<({String value, String label, IconData icon})> items,
+    required String current,
+    required ValueChanged<String> onSelect,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: SpotifyColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (_) => SafeArea(
+        child: ListView.builder(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
+          itemCount: items.length + 1,
+          itemBuilder: (context, i) {
+            if (i == 0) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(24, 6, 24, 10),
+                child: Text(title,
+                    style: const TextStyle(
+                        color: SpotifyColors.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700)),
+              );
+            }
+            final item = items[i - 1];
+            return ListTile(
+              leading:
+              Icon(item.icon, color: SpotifyColors.textSecondary),
+              title: Text(item.label,
+                  style:
+                  const TextStyle(color: SpotifyColors.textPrimary)),
+              trailing: current == item.value
+                  ? const Icon(Icons.check_rounded,
+                  color: SpotifyColors.green)
+                  : null,
+              onTap: () {
+                Navigator.pop(context);
+                onSelect(item.value);
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showSliderPrefDialog({
+    required String title,
+    required double initial,
+    required double min,
+    required double max,
+    required int divisions,
+    required String Function(double) label,
+    double? resetTo,
+    required ValueChanged<double> onOk,
+  }) async {
+    var temp = initial;
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: SpotifyColors.surface,
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: Text(title,
+              style: const TextStyle(
+                  color: SpotifyColors.textPrimary,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label(temp),
+                  style: const TextStyle(
+                      color: SpotifyColors.green,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700)),
+              Slider(
+                value: temp.clamp(min, max),
+                min: min,
+                max: max,
+                divisions: divisions,
+                activeColor: SpotifyColors.green,
+                onChanged: (v) => setDialogState(() => temp = v),
+              ),
+            ],
+          ),
+          // NOTE: never put Spacer/Expanded inside actions — actions renders
+          // in an OverflowBar, and Flexible crashes there.
+          actions: [
+            if (resetTo != null)
+              TextButton(
+                  onPressed: () => setDialogState(() => temp = resetTo),
+                  child: const Text('Reset',
+                      style: TextStyle(color: SpotifyColors.textSecondary))),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Cancel',
+                        style:
+                        TextStyle(color: SpotifyColors.textSecondary))),
+                TextButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      onOk(temp);
+                    },
+                    child: const Text('OK',
+                        style: TextStyle(
+                            color: SpotifyColors.green,
+                            fontWeight: FontWeight.w700))),
+              ],
+            ),
+          ],
+          actionsAlignment: MainAxisAlignment.spaceBetween,
+        ),
+      ),
+    );
+  }
+
+  // ── Appearance rows (read the live notifiers) ──
+
+  Widget _appearanceCategory() {
+    return _category(
+        'Appearance & Player', Icons.palette_rounded, [
+      _prefRow(
+        Icons.gradient_rounded,
+        'Player background',
+        AppearancePrefs.playerBackground.value == 'gradient'
+            ? 'Gradient'
+            : AppearancePrefs.playerBackground.value == 'blur'
+            ? 'Blurred artwork'
+            : 'Solid black',
+            () => _showPickerSheet(
+          title: 'Player background',
+          current: AppearancePrefs.playerBackground.value,
+          items: const [
+            (value: 'gradient', label: 'Gradient', icon: Icons.gradient_rounded),
+            (value: 'solid', label: 'Solid black', icon: Icons.crop_square_rounded),
+            (value: 'blur', label: 'Blurred artwork', icon: Icons.blur_on_rounded),
+          ],
+          onSelect: (v) async {
+            await AppearancePrefs.setPlayerBackground(v);
+            setState(() {});
+          },
+        ),
+      ),
+      _prefRow(
+        Icons.linear_scale_rounded,
+        'Slider style',
+        switch (AppearancePrefs.sliderStyle.value) {
+          'wavy' => 'Wavy',
+          'bar' => 'Bar (Material)',
+          _ => 'Slim',
+        },
+            () => _showPickerSheet(
+          title: 'Progress slider style',
+          current: AppearancePrefs.sliderStyle.value,
+          // Exactly three styles — one entry each.
+          items: const [
+            (value: 'slim', label: 'Slim', icon: Icons.linear_scale_rounded),
+            (value: 'wavy', label: 'Wavy', icon: Icons.waves_rounded),
+            (value: 'bar', label: 'Bar (Material)', icon: Icons.align_horizontal_left_rounded),
+          ],
+          onSelect: (v) async {
+            await AppearancePrefs.setSliderStyle(v);
+            setState(() {});
+          },
+        ),
+      ),
+      _prefRow(
+        Icons.picture_in_picture_rounded,
+        'Mini-player background',
+        AppearancePrefs.miniPlayerBackground.value == 'surface'
+            ? 'Surface'
+            : AppearancePrefs.miniPlayerBackground.value == 'blur'
+            ? 'Blurred artwork'
+            : 'Gradient',
+            () => _showPickerSheet(
+          title: 'Mini-player background',
+          current: AppearancePrefs.miniPlayerBackground.value,
+          items: const [
+            (value: 'surface', label: 'Surface', icon: Icons.square_rounded),
+            (value: 'blur', label: 'Blurred artwork', icon: Icons.blur_on_rounded),
+            (value: 'gradient', label: 'Gradient', icon: Icons.gradient_rounded),
+          ],
+          onSelect: (v) async {
+            await AppearancePrefs.setMiniPlayerBackground(v);
+            setState(() {});
+          },
+        ),
+      ),
+      _prefRow(
+        Icons.rounded_corner_rounded,
+        'Thumbnail corner radius',
+        '${AppearancePrefs.thumbRadius.value.round()}dp',
+            () => _showSliderPrefDialog(
+          title: 'Thumbnail corner radius',
+          initial: AppearancePrefs.thumbRadius.value,
+          min: 0,
+          max: 24,
+          divisions: 24,
+          resetTo: 14,
+          label: (v) => '${v.round()}dp',
+          onOk: (v) async {
+            await AppearancePrefs.setThumbRadius(v);
+            setState(() {});
+          },
+        ),
+      ),
+      _switchRow(
+        Icons.visibility_off_rounded,
+        'Hide player thumbnail',
+        'Player shows only text and controls',
+        AppearancePrefs.hideThumbnail.value,
+            (v) async {
+          await AppearancePrefs.setHideThumbnail(v);
+          setState(() {});
+        },
+      ),
+      _switchRow(
+        Icons.high_quality_rounded,
+        'Show quality badge',
+        'AAC / OPUS · bitrate on the player',
+        AppearancePrefs.showQualityBadge.value,
+            (v) async {
+          await AppearancePrefs.setShowQualityBadge(v);
+          setState(() {});
+        },
+      ),
+      _prefRow(
+        Icons.format_align_left_rounded,
+        'Lyrics text position',
+        AppearancePrefs.lyricsPosition.value == 'left'
+            ? 'Left'
+            : AppearancePrefs.lyricsPosition.value == 'center'
+            ? 'Center'
+            : 'Right',
+            () => _showPickerSheet(
+          title: 'Lyrics text position',
+          current: AppearancePrefs.lyricsPosition.value,
+          items: const [
+            (value: 'left', label: 'Left', icon: Icons.format_align_left_rounded),
+            (value: 'center', label: 'Center', icon: Icons.format_align_center_rounded),
+            (value: 'right', label: 'Right', icon: Icons.format_align_right_rounded),
+          ],
+          onSelect: (v) async {
+            await AppearancePrefs.setLyricsPosition(v);
+            setState(() {});
+          },
+        ),
+      ),
+      _prefRow(
+        Icons.format_size_rounded,
+        'Lyrics text size',
+        '${AppearancePrefs.lyricsTextSize.value.round()}sp',
+            () => _showSliderPrefDialog(
+          title: 'Lyrics text size',
+          initial: AppearancePrefs.lyricsTextSize.value,
+          min: 16,
+          max: 36,
+          divisions: 20,
+          resetTo: 19,
+          label: (v) => '${v.round()}sp',
+          onOk: (v) async {
+            await AppearancePrefs.setLyricsTextSize(v);
+            setState(() {});
+          },
+        ),
+      ),
+      _prefRow(
+        Icons.format_line_spacing_rounded,
+        'Lyrics line spacing',
+        '${AppearancePrefs.lyricsLineSpacing.value.toStringAsFixed(1)}x',
+            () => _showSliderPrefDialog(
+          title: 'Lyrics line spacing',
+          initial: AppearancePrefs.lyricsLineSpacing.value,
+          min: 1.0,
+          max: 4.0,
+          divisions: 30,
+          resetTo: 1.3,
+          label: (v) => '${v.toStringAsFixed(1)}x',
+          onOk: (v) async {
+            await AppearancePrefs.setLyricsLineSpacing(v);
+            setState(() {});
+          },
+        ),
+      ),
+      _switchRow(
+        Icons.fullscreen_rounded,
+        'Hide status bar on lyrics',
+        'Immersive lyrics view',
+        AppearancePrefs.hideStatusBarOnLyrics.value,
+            (v) async {
+          await AppearancePrefs.setHideStatusBarOnLyrics(v);
+          setState(() {});
+        },
+      ),
+      _switchRow(
+        Icons.screen_lock_portrait_rounded,
+        'Keep screen on',
+        'While the player is open',
+        AppearancePrefs.keepScreenOn.value,
+            (v) async {
+          await AppearancePrefs.setKeepScreenOn(v);
+          setState(() {});
+        },
+      ),
+      _switchRow(
+        Icons.vibration_rounded,
+        'Haptics',
+        'Subtle feedback on transport controls',
+        AppearancePrefs.haptics.value,
+            (v) async {
+          await AppearancePrefs.setHaptics(v);
+          setState(() {});
+        },
+      ),
+      _prefRow(
+        Icons.auto_awesome,
+        'Ambient art scale',
+        '${(AppearancePrefs.ambientArtScale.value * 100).round()}%',
+            () => _showSliderPrefDialog(
+          title: 'Ambient art scale',
+          initial: AppearancePrefs.ambientArtScale.value,
+          min: 0.4,
+          max: 1.0,
+          divisions: 12,
+          resetTo: 0.85,
+          label: (v) => '${(v * 100).round()}%',
+          onOk: (v) async {
+            await AppearancePrefs.setAmbientArtScale(v);
+            setState(() {});
+          },
+        ),
+      ),
+      _switchRow(
+        Icons.title_rounded,
+        'Ambient: show title',
+        'Song title under the artwork',
+        AppearancePrefs.ambientShowTitle.value,
+            (v) async {
+          await AppearancePrefs.setAmbientShowTitle(v);
+          setState(() {});
+        },
+      ),
+      _switchRow(
+        Icons.mic_rounded,
+        'Ambient: show artist',
+        'Artist name under the artwork',
+        AppearancePrefs.ambientShowArtist.value,
+            (v) async {
+          await AppearancePrefs.setAmbientShowArtist(v);
+          setState(() {});
+        },
+      ),
+      _switchRow(
+        Icons.lyrics_rounded,
+        'Ambient: show lyrics',
+        'Lyrics pane beside the artwork',
+        AppearancePrefs.ambientShowLyrics.value,
+            (v) async {
+          await AppearancePrefs.setAmbientShowLyrics(v);
+          setState(() {});
+        },
+      ),
+      _prefRow(
+        Icons.tab_rounded,
+        'Default open tab',
+        switch (AppearancePrefs.defaultTab.value) {
+          1 => 'Search',
+          2 => 'Library',
+          _ => 'Home',
+        },
+            () => _showPickerSheet(
+          title: 'Default open tab',
+          current: '${AppearancePrefs.defaultTab.value}',
+          items: const [
+            (value: '0', label: 'Home', icon: Icons.home_rounded),
+            (value: '1', label: 'Search', icon: Icons.search_rounded),
+            (value: '2', label: 'Library', icon: Icons.library_music_rounded),
+          ],
+          onSelect: (v) async {
+            await AppearancePrefs.setDefaultTab(int.tryParse(v) ?? 0);
+            setState(() {});
+            _toast('Applies on next app start');
+          },
+        ),
+      ),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -286,6 +689,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
+          _appearanceCategory(),
           _category('Sources', Icons.extension_rounded, [
             _prefRow(
               Icons.music_note_rounded,

@@ -8,6 +8,7 @@ import '../main.dart';
 import '../models/collection.dart';
 import '../models/song.dart';
 import '../services/downloads_service.dart';
+import '../services/home_service.dart';
 import '../services/jiosaavn_service.dart';
 import '../services/yt_music_service.dart';
 import '../services/youtube_service.dart';
@@ -19,6 +20,7 @@ import '../widgets/skeleton.dart';
 import '../widgets/wave_spinner.dart';
 import '../widgets/youtube_thumbnail.dart';
 import 'collection_screen.dart';
+import 'new_release_screen.dart';
 import 'player_screen.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -34,6 +36,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final _ytm = YtMusicService();
   final _jiosaavn = JiosaavnService();
   final _youtube = YoutubeService();
+  final _homeService = HomeService();
 
   List<Song> _songResults = [];
   List<Song> _videoResults = [];
@@ -41,6 +44,15 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Collection> _albumResults = [];
   List<String> _suggestions = [];
   List<String> _history = [];
+
+  // Echo search-source toggle: 'online' (YouTube Music + JioSaavn) or
+  // 'library' (liked songs, downloads, played history).
+  String _source = 'online';
+  List<Song> _librarySongs = [];
+
+  // Echo explore idle content: new-release albums grid.
+  List<Collection> _newAlbums = [];
+  bool _albumsLoading = true;
 
   // Echo quick-search overlay: true while the full-screen search view
   // is expanded over the results.
@@ -52,6 +64,10 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _searching = false;
   bool _hasSearchedOnce = false;
 
+  // Echo's URL handling: a pasted YouTube link plays directly.
+  static final _ytUrlVideo = RegExp(
+      r'(?:youtu\.be\/|watch\?v=|shorts\/|embed\/)([A-Za-z0-9_-]{11})');
+
   @override
   void initState() {
     super.initState();
@@ -59,6 +75,8 @@ class _SearchScreenState extends State<SearchScreen> {
     _searchBar.addListener(() {
       if (mounted) setState(() {});
     });
+    _loadExplore();
+    _loadLibrary();
   }
 
   @override
@@ -66,7 +84,36 @@ class _SearchScreenState extends State<SearchScreen> {
     _searchBar.dispose();
     _inputNode.dispose();
     _debounce?.cancel();
+    _homeService.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadExplore() async {
+    try {
+      final albums = await _homeService.getNewReleaseAlbums();
+      if (!mounted) return;
+      setState(() {
+        _newAlbums = albums;
+        _albumsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _albumsLoading = false);
+    }
+  }
+
+  Future<void> _loadLibrary() async {
+    final liked = storage.getLikedSongs();
+    final played = storage.getPlayedHistory();
+    final downloads = await DownloadsService().downloadedSongs();
+    if (!mounted) return;
+    // Dedupe by id, liked first.
+    final seen = <String>{};
+    final merged = <Song>[];
+    for (final s in [...liked, ...downloads, ...played]) {
+      if (seen.add(s.id)) merged.add(s);
+    }
+    setState(() => _librarySongs = merged);
   }
 
   Future<void> _submitSearch([String? query]) async {
@@ -84,6 +131,23 @@ class _SearchScreenState extends State<SearchScreen> {
     if (mounted) _inputNode.unfocus();
   }
 
+  /// Echo's onSearch: a YouTube URL plays the video directly instead of
+  /// running a text search.
+  bool _tryPlayFromUrl(String query) {
+    final m = _ytUrlVideo.firstMatch(query);
+    if (m == null) return false;
+    final id = m.group(1)!;
+    final song = Song(
+      id: id,
+      title: 'YouTube video',
+      artist: '',
+      thumbnail: 'https://i.ytimg.com/vi/$id/hqdefault.jpg',
+      duration: Duration.zero,
+    );
+    _playWithRadio(song);
+    return true;
+  }
+
   Future<void> _search() async {
     final query = _searchBar.text.trim();
     final requestId = ++_latestSearchRequest;
@@ -96,6 +160,35 @@ class _SearchScreenState extends State<SearchScreen> {
         _albumResults = [];
         _suggestions = [];
         _hasSearchedOnce = false;
+      });
+      return;
+    }
+
+    // URL paste → direct play, no results page (Echo parity).
+    if (_tryPlayFromUrl(query)) {
+      return;
+    }
+
+    // Library source: filter the local catalog, no network.
+    if (_source == 'library') {
+      final q = query.toLowerCase();
+      final matches = _librarySongs
+          .where((s) =>
+      s.title.toLowerCase().contains(q) ||
+          s.artist.toLowerCase().contains(q))
+          .toList();
+      _history
+        ..remove(query)
+        ..insert(0, query);
+      storage.saveQuery(query);
+      if (!mounted) return;
+      setState(() {
+        _songResults = matches;
+        _videoResults = [];
+        _playlistResults = [];
+        _albumResults = [];
+        _searching = false;
+        _hasSearchedOnce = true;
       });
       return;
     }
@@ -164,12 +257,28 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
 
+    // Library source: live local matches, no network.
+    if (_source == 'library') {
+      if (mounted) setState(() {});
+      return;
+    }
+
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       final songs = await _ytm.searchSongs(query, limit: 8);
       if (!mounted || requestId != _latestSuggestionRequest) return;
       if (_searchBar.text != query) return;
       setState(() => _suggestions = songs.map((s) => s.title).toList());
     });
+  }
+
+  /// Echo source toggle: online ↔ library. Refreshes the local catalog
+  /// when switching to library.
+  void _toggleSource() {
+    setState(() => _source = _source == 'online' ? 'library' : 'online');
+    if (_source == 'library') {
+      _loadLibrary();
+      _suggestions = [];
+    }
   }
 
   /// Plays the tapped song and builds a RADIO queue of related songs
@@ -281,6 +390,14 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
+  void _removeHistoryItem(String q) {
+    setState(() => _history.remove(q));
+    storage.clearQueries();
+    for (final query in _history.reversed) {
+      storage.saveQuery(query);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasResults = _songResults.isNotEmpty ||
@@ -302,8 +419,12 @@ class _SearchScreenState extends State<SearchScreen> {
           SafeArea(
             child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                // Echo: the bar morphs from inset to full-bleed.
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 245),
+                  curve: Curves.fastOutSlowIn,
+                  padding: EdgeInsets.fromLTRB(
+                      _expanded ? 0 : 20, _expanded ? 0 : 12, _expanded ? 0 : 20, 8),
                   child: _searchBarView(expanded: false),
                 ),
                 Expanded(
@@ -311,7 +432,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       ? _resultsView()
                       : (_searching && _hasSearchedOnce
                       ? _skeletonResults()
-                      : _idleView()),
+                      : _idleExplore()),
                 ),
               ],
             ),
@@ -322,7 +443,7 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  // ── Echo M3 search bar (56dp, full-rounded, surface fill) ──
+  // ── Echo M3 search bar (56dp, full-rounded, morphing padding) ──
 
   Widget _searchBarView({required bool expanded}) {
     final hasText = _searchBar.text.isNotEmpty;
@@ -335,12 +456,15 @@ class _SearchScreenState extends State<SearchScreen> {
           if (mounted) _inputNode.requestFocus();
         });
       },
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 245),
+        curve: Curves.fastOutSlowIn,
         height: 56,
         padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(
           color: SpotifyColors.surface,
-          borderRadius: BorderRadius.circular(28),
+          borderRadius:
+          BorderRadius.circular(expanded ? 0 : 28),
         ),
         child: Row(
           children: [
@@ -367,7 +491,10 @@ class _SearchScreenState extends State<SearchScreen> {
                 style: const TextStyle(
                     color: SpotifyColors.textPrimary, fontSize: 16),
                 decoration: InputDecoration(
-                  hintText: 'Songs, artists, albums...',
+                  // Echo: the hint names the active source.
+                  hintText: _source == 'library'
+                      ? 'Search your library'
+                      : 'Songs, artists, albums...',
                   hintStyle:
                   const TextStyle(color: SpotifyColors.textTertiary),
                   border: InputBorder.none,
@@ -395,13 +522,29 @@ class _SearchScreenState extends State<SearchScreen> {
                 icon: const Icon(Icons.close_rounded,
                     color: SpotifyColors.textSecondary),
               ),
+            // Echo: source toggle icon (online ↔ library).
+            IconButton(
+              onPressed: _toggleSource,
+              tooltip: _source == 'library'
+                  ? 'Search online'
+                  : 'Search your library',
+              icon: Icon(
+                _source == 'library'
+                    ? Icons.library_music_rounded
+                    : Icons.public_rounded,
+                color: _source == 'library'
+                    ? SpotifyColors.green
+                    : SpotifyColors.textSecondary,
+                size: 22,
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  // ── Echo quick-search overlay (suggestions + history) ──
+  // ── Echo quick-search overlay (suggestions / history / library) ──
 
   Widget _quickSearchOverlay() {
     return Positioned.fill(
@@ -410,8 +553,10 @@ class _SearchScreenState extends State<SearchScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 245),
+                curve: Curves.fastOutSlowIn,
+                padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
                 child: _searchBarView(expanded: true),
               ),
               Expanded(child: _quickList()),
@@ -423,6 +568,68 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _quickList() {
+    // Library source: live local matches as tappable songs.
+    if (_source == 'library') {
+      final q = _searchBar.text.trim().toLowerCase();
+      if (q.isEmpty) {
+        return Center(
+          child: Text(
+            'Search your liked songs, downloads and history',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: SpotifyColors.textTertiary.withOpacity(0.8),
+              fontSize: 14,
+            ),
+          ),
+        );
+      }
+      final matches = _librarySongs
+          .where((s) =>
+      s.title.toLowerCase().contains(q) ||
+          s.artist.toLowerCase().contains(q))
+          .take(20)
+          .toList();
+      if (matches.isEmpty) {
+        return Center(
+          child: Text(
+            'No matches in your library',
+            style: TextStyle(
+              color: SpotifyColors.textTertiary.withOpacity(0.8),
+              fontSize: 14,
+            ),
+          ),
+        );
+      }
+      return ListView.builder(
+        padding: const EdgeInsets.only(top: 4),
+        itemCount: matches.length,
+        itemBuilder: (context, i) {
+          final song = matches[i];
+          return ListTile(
+            leading: YoutubeThumbnail(
+              videoId: song.id,
+              imageUrl: song.thumbnail,
+              width: 44,
+              height: 44,
+              borderRadius: 8,
+            ),
+            title: Text(song.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: SpotifyColors.textPrimary, fontSize: 14)),
+            subtitle: Text(song.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: SpotifyColors.textSecondary, fontSize: 12)),
+            onTap: () => _playWithRadio(song),
+            onLongPress: () => _songActions(song),
+          );
+        },
+      );
+    }
+
     final items = _suggestions.isNotEmpty ? _suggestions : _history;
     if (items.isEmpty) {
       return Center(
@@ -462,15 +669,127 @@ class _SearchScreenState extends State<SearchScreen> {
           onTap: () => _submitSearch(items[i]),
           onLongPress: isSuggestion
               ? null
-              : () {
-            setState(() => _history.remove(items[i]));
-            storage.clearQueries();
-            for (final q in _history.reversed) {
-              storage.saveQuery(q);
-            }
-          },
+              : () => _removeHistoryItem(items[i]),
         );
       },
+    );
+  }
+
+  // ── Echo explore idle view: recent searches + new releases grid ──
+
+  Widget _idleExplore() {
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        if (_history.isNotEmpty) ...[
+          const ShelfHeaderBar(title: 'Recent searches'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final q in _history.take(10))
+                  InputChip(
+                    label: Text(q,
+                        style: const TextStyle(
+                            color: SpotifyColors.textPrimary,
+                            fontSize: 12.5)),
+                    backgroundColor: SpotifyColors.surface,
+                    side: BorderSide(
+                        color: Colors.white.withOpacity(0.06)),
+                    onPressed: () => _submitSearch(q),
+                    onDeleted: () => _removeHistoryItem(q),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        // Header opens Echo's full NewReleaseScreen.
+        InkWell(
+          onTap: () =>
+              pushSharedAxisY(context, const NewReleaseScreen()),
+          child: const ShelfHeaderBar(title: 'New releases'),
+        ),
+        if (_albumsLoading)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: WaveSpinner(size: 24)),
+          )
+        else if (_newAlbums.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              'Nothing here right now',
+              style: TextStyle(
+                  color: SpotifyColors.textTertiary.withOpacity(0.8),
+                  fontSize: 13),
+            ),
+          )
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 14,
+              crossAxisSpacing: 14,
+              childAspectRatio: 0.78,
+            ),
+            itemCount: _newAlbums.length.clamp(0, 8),
+            itemBuilder: (context, i) {
+              final album = _newAlbums[i];
+              return InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => _openCollection(album),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: album.imageUrl.isNotEmpty
+                            ? Image.network(
+                          album.imageUrl,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: SpotifyColors.surfaceLight,
+                            child: const Icon(Icons.album_rounded,
+                                size: 40,
+                                color: SpotifyColors.textTertiary),
+                          ),
+                        )
+                            : Container(
+                          color: SpotifyColors.surfaceLight,
+                          child: const Icon(Icons.album_rounded,
+                              size: 40,
+                              color: SpotifyColors.textTertiary),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(album.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: SpotifyColors.textPrimary)),
+                    Text(album.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: SpotifyColors.textSecondary)),
+                  ],
+                ),
+              );
+            },
+          ),
+      ],
     );
   }
 
@@ -489,25 +808,13 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  Widget _idleView() {
-    return Center(
-      child: Text(
-        'Search for songs, artists, playlists',
-        style: TextStyle(
-          color: SpotifyColors.textTertiary.withOpacity(0.8),
-          fontSize: 14,
-        ),
-      ),
-    );
-  }
-
   Widget _resultsView() {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
         if (_songResults.isNotEmpty)
           ThreeTracksRow(
-            title: 'Songs',
+            title: _source == 'library' ? 'In your library' : 'Songs',
             items: [
               for (final s in _songResults.take(20)) ShelfItem.fromSong(s)
             ],

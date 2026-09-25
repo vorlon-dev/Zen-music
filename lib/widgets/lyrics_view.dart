@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_lyric/flutter_lyric.dart';
-import 'package:flutter_lyric/utils/lyric_lrc_to_qrc.dart'; // Added: Correct import for utility
+import 'package:flutter_lyric/utils/lyric_lrc_to_qrc.dart';
+import '../services/appearance_prefs.dart';
 import '../services/lyrics_service.dart';
 import '../theme/spotify_theme.dart';
 
@@ -34,12 +35,11 @@ class _LyricsViewState extends State<LyricsView> {
 
   bool _loading = true;
   bool _found = false;
-  bool _synced = false;
-  bool _isUserScrubbing = false;
 
   @override
   void initState() {
     super.initState();
+    AppearancePrefs.load();
     _loadLyrics();
 
     widget.positionStream.listen((pos) {
@@ -48,13 +48,6 @@ class _LyricsViewState extends State<LyricsView> {
 
     _lyricController.setOnTapLineCallback((position) {
       widget.onSeek?.call(position);
-    });
-
-    _lyricController.registerEvent(LyricEvent.stopSelection, (_) {
-      if (mounted) setState(() => _isUserScrubbing = true);
-    });
-    _lyricController.registerEvent(LyricEvent.resumeActiveLine, (_) {
-      if (mounted) setState(() => _isUserScrubbing = false);
     });
   }
 
@@ -89,10 +82,6 @@ class _LyricsViewState extends State<LyricsView> {
       setState(() {
         _loading = false;
         _found = true;
-        // "Synced" here means the source actually gave us real timestamps,
-        // not our own 5-second-per-line estimate — that distinction is
-        // what the badge in the footer communicates.
-        _synced = hasTimedLyrics;
       });
     } else {
       setState(() {
@@ -200,163 +189,119 @@ class _LyricsViewState extends State<LyricsView> {
 
     return Stack(
       children: [
-        LyricView(
-          controller: _lyricController,
-          style: LyricStyles.default1.copyWith(
-            // ── Idle line ──
-            textStyle: TextStyle(
-              fontSize: 19,
-              color: SpotifyColors.textPrimary.withOpacity(0.55),
-              fontWeight: FontWeight.w600,
-              height: 1.45,
-            ),
-            // ── Currently playing line ──
-            activeStyle: const TextStyle(
-              fontSize: 24,
-              color: SpotifyColors.textPrimary,
-              fontWeight: FontWeight.w700,
-              height: 1.4,
-            ),
-            // ── Translation line (unused for now, but styled) ──
-            translationStyle: const TextStyle(
-              fontSize: 14,
-              color: SpotifyColors.textTertiary,
-              fontWeight: FontWeight.w400,
-            ),
-            lineGap: 22,
-            translationLineGap: 6,
-            contentPadding: const EdgeInsets.fromLTRB(24, 110, 24, 110),
-            // ── Progress highlight ──
-            activeHighlightColor: SpotifyColors.green.withOpacity(0.15),
-            // ── Alignment ──
-            textAlign: TextAlign.left, // Corrected from lineTextAlign
-            contentAlignment: CrossAxisAlignment.start,
-            activeAnchorPosition: 0.4,
-            // ── Smooth scroll & switch animation ──
-            scrollCurve: Curves.easeOutCubic,
-            enableSwitchAnimation: true,
-            switchEnterDuration: const Duration(milliseconds: 400),
-            switchExitDuration: const Duration(milliseconds: 300),
-          ),
-          width: double.infinity,
-          height: double.infinity,
+        // Text size, line spacing and alignment follow the Appearance
+        // settings live.
+        ListenableBuilder(
+          listenable: Listenable.merge([
+            AppearancePrefs.lyricsTextSize,
+            AppearancePrefs.lyricsLineSpacing,
+            AppearancePrefs.lyricsPosition,
+          ]),
+          builder: (context, _) {
+            final size = AppearancePrefs.lyricsTextSize.value;
+            final gap = AppearancePrefs.lyricsLineSpacing.value;
+            final pos = AppearancePrefs.lyricsPosition.value;
+            final textAlign = switch (pos) {
+              'center' => TextAlign.center,
+              'right' => TextAlign.right,
+              _ => TextAlign.left,
+            };
+            final contentAlign = switch (pos) {
+              'center' => CrossAxisAlignment.center,
+              'right' => CrossAxisAlignment.end,
+              _ => CrossAxisAlignment.start,
+            };
+            return LyricView(
+              controller: _lyricController,
+              style: LyricStyles.default1.copyWith(
+                // ── Idle line ──
+                textStyle: TextStyle(
+                  fontSize: size,
+                  color: SpotifyColors.textPrimary.withOpacity(0.55),
+                  fontWeight: FontWeight.w600,
+                  height: 1.45,
+                ),
+                // ── Currently playing line ──
+                activeStyle: TextStyle(
+                  fontSize: size + 5,
+                  color: SpotifyColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  height: 1.4,
+                ),
+                // ── Translation line (unused for now, but styled) ──
+                translationStyle: const TextStyle(
+                  fontSize: 14,
+                  color: SpotifyColors.textTertiary,
+                  fontWeight: FontWeight.w400,
+                ),
+                lineGap: 17 * gap,
+                translationLineGap: 6,
+                contentPadding: const EdgeInsets.fromLTRB(24, 110, 24, 110),
+                // ── Progress highlight ──
+                activeHighlightColor: SpotifyColors.green.withOpacity(0.15),
+                // ── Alignment (from Appearance settings) ──
+                textAlign: textAlign,
+                contentAlignment: contentAlign,
+                activeAnchorPosition: 0.4,
+                // ── Smooth scroll & switch animation ──
+                scrollCurve: Curves.easeOutCubic,
+                enableSwitchAnimation: true,
+                switchEnterDuration: const Duration(milliseconds: 400),
+                switchExitDuration: const Duration(milliseconds: 300),
+              ),
+              width: double.infinity,
+              height: double.infinity,
+            );
+          },
         ),
 
-        // ── "Back to current line" hint when user is scrubbing ──
-        if (_isUserScrubbing)
-          Positioned(
-            bottom: 84,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 9,
-                ),
-                decoration: BoxDecoration(
-                  color: SpotifyColors.surfaceLight,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: Colors.white.withOpacity(0.08),
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.arrow_downward_rounded,
-                      size: 14,
-                      color: SpotifyColors.textPrimary.withOpacity(0.85),
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      'Back to current line',
-                      style: TextStyle(
-                        color: SpotifyColors.textPrimary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
         // ── Pinned song identity strip ──
-        // Stays fixed at the bottom while lyrics scroll underneath it,
-        // same as Spotify's lyrics screen. The checkmark only appears
-        // when the lyrics we loaded are genuinely time-synced — it's a
-        // real signal, not decoration.
+        // Title and artist only — no gradient overlay, no badge.
         Positioned(
           left: 0,
           right: 0,
           bottom: 0,
           child: IgnorePointer(
             ignoring: true,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(24, 32, 20, 18),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.0),
-                    Colors.black.withOpacity(0.55),
-                  ],
-                ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            color: SpotifyColors.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          widget.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: SpotifyColors.textPrimary.withOpacity(0.6),
-                          ),
+                  Text(
+                    widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: SpotifyColors.textPrimary,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black54,
+                          blurRadius: 8,
+                          offset: Offset(0, 1),
                         ),
                       ],
                     ),
                   ),
-                  if (_synced) ...[
-                    const SizedBox(width: 12),
-                    Tooltip(
-                      message: 'Synced lyrics',
-                      child: Container(
-                        width: 26,
-                        height: 26,
-                        decoration: const BoxDecoration(
-                          color: SpotifyColors.green,
-                          shape: BoxShape.circle,
+                  const SizedBox(height: 3),
+                  Text(
+                    widget.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: SpotifyColors.textPrimary.withOpacity(0.6),
+                      shadows: const [
+                        Shadow(
+                          color: Colors.black54,
+                          blurRadius: 8,
+                          offset: Offset(0, 1),
                         ),
-                        child: const Icon(
-                          Icons.check_rounded,
-                          size: 16,
-                          color: Colors.black,
-                        ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),

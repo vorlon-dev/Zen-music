@@ -27,6 +27,41 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // Bumped on every load; stale loads (rapid skips) are abandoned.
   int _loadGeneration = 0;
 
+  // Listen Together: when true this device follows a remote host —
+  // failed loads and natural completions must not auto-advance, and the
+  // host's change_track is the only source of queue movement.
+  bool followRemote = false;
+
+  // Set when a remote-controlled load failed (no stream URL available).
+  // Listen Together clears it on the next successful load and uses it to
+  // retry once the host's shared URL arrives.
+  String? lastFailedSongId;
+
+  // Fired when a remote-controlled load fails (Listen Together guest).
+  void Function(String songId)? onRemoteLoadFailed;
+
+  // Listen Together guest lockout: when true, user-initiated transport
+  // and queue mutations are ignored. Host-driven calls are wrapped in
+  // runRemote() and bypass the guard.
+  bool hostControlsPlayback = false;
+  bool _remoteApplying = false;
+
+  /// Runs a host-driven mutation with the guest lockout bypassed.
+  Future<T> runRemote<T>(Future<T> Function() action) async {
+    _remoteApplying = true;
+    try {
+      return await action();
+    } finally {
+      _remoteApplying = false;
+    }
+  }
+
+  bool get _lockoutActive => hostControlsPlayback && !_remoteApplying;
+
+  // Fired after a locally-initiated seek (Listen Together host broadcast
+  // hooks in here; guests ignore it via their own guard).
+  void Function(Duration position)? onLocalSeek;
+
   // Timestamp of the last USER-driven transport action (skip, queue jump,
   // new queue). The natural-completion handler ignores completions that
   // land right after a manual action — otherwise a manual skip AND the
@@ -34,6 +69,9 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   DateTime _lastTransportActionAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   final Map<String, VideoStreamResult> _urlCache = {};
+  // Songs whose cached URL failed to load — bypassed until a fresh
+  // resolve or a new host-seeded URL overwrites them.
+  final Set<String> _staleStreamIds = {};
   Timer? _saveTimer;
   void setAudioQualitySetting(String quality) {
     _yt.setAudioQualitySetting(quality);
@@ -229,6 +267,10 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
     listeningStatsService.finishListeningSession(countCurrentTick: true);
 
+    // Guard 3: remote-controlled queue (Listen Together guest) — the host
+    // broadcasts the next change_track; local advance would fight it.
+    if (followRemote) return;
+
     if (_sleepAtEndOfSong) {
       _sleepAtEndOfSong = false;
       _notifySleepTimer(null);
@@ -343,7 +385,17 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // PUBLIC API
   // ═════════════════════════════════════════════
 
+  /// Listen Together: guests preload the host's resolved stream here —
+  /// straight into the memory cache (plus persistent cache) so the next
+  /// load is instant, with no Hive round-trip on the load path.
+  void seedStreamUrl(String id, String url, Map<String, String> headers) {
+    _staleStreamIds.remove(id);
+    _urlCache[id] = VideoStreamResult(url, headers);
+    unawaited(storage.cacheStream(id, url, headers));
+  }
+
   Future<void> setQueue(List<Song> songs, {int startIndex = 0}) async {
+    if (_lockoutActive) return;
     _markTransportAction();
     await _exitRadioMode();
     _queue = List<Song>.from(songs);
@@ -354,6 +406,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   Future<void> startRadio(Song seedSong) async {
+    if (_lockoutActive) return;
     _markTransportAction();
     await _exitRadioMode();
     _queue = [seedSong];
@@ -365,12 +418,14 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   Future<void> addToQueue(Song song) async {
+    if (_lockoutActive) return;
     _queue.add(song);
     queue.add(_queue.map(_toMediaItem).toList());
     await _prefetchUrl(song);
   }
 
   Future<void> playNext(Song song) async {
+    if (_lockoutActive) return;
     final insertAt = _currentIndex + 1;
     _queue.insert(insertAt, song);
     queue.add(_queue.map(_toMediaItem).toList());
@@ -378,6 +433,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   Future<void> removeFromQueue(int index) async {
+    if (_lockoutActive) return;
     if (index < 0 || index >= _queue.length) return;
     _queue.removeAt(index);
     if (index < _currentIndex) _currentIndex--;
@@ -385,6 +441,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   Future<void> reorderQueue(int oldIndex, int newIndex) async {
+    if (_lockoutActive) return;
     if (oldIndex < 0 ||
         oldIndex >= _queue.length ||
         newIndex < 0 ||
@@ -409,6 +466,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   Future<void> clearQueue() async {
+    if (_lockoutActive) return;
     _queue.clear();
     _urlCache.clear();
     _currentIndex = 0;
@@ -442,12 +500,22 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     final mem = _urlCache[song.id];
     if (mem != null) return mem;
 
-    final cached = storage.getCachedStream(song.id);
+    // Stale ids skip the persistent cache — its URL already failed once.
+    final cached = _staleStreamIds.contains(song.id)
+        ? null
+        : storage.getCachedStream(song.id);
     if (cached != null) {
       print('💾 URL cache hit for ${song.title}');
       final result = VideoStreamResult(cached.url, cached.headers);
       _urlCache[song.id] = result;
       return result;
+    }
+
+    // Remote-controlled queue: songs rebuilt from room metadata carry no
+    // source info — without the host's shared URL they cannot resolve.
+    // Fail fast instead of burning the whole extractor chain.
+    if (followRemote && song.id.length != 11) {
+      throw Exception('no stream hint for ${song.id}');
     }
 
     final result = await _yt.getAudioStreamUrl(song);
@@ -465,27 +533,68 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     final mediaItem = _toMediaItem(song);
     this.mediaItem.add(mediaItem);
 
+    // Kill the previous track's audio immediately. If setUrl failed later,
+    // the old song used to keep playing — never fall back to it.
     try {
-      final stream = await _getStreamUrl(song);
-      _broadcastAudioQuality(song, stream);
-      // A newer skip started while we were resolving — abandon this
-      // load so the wrong song never wins the race.
+      await _player.stop();
+    } catch (_) {}
+
+    // Up to 5 attempts: transient network hiccups retry the SAME URL,
+    // late attempts force a fresh resolve (caches bypassed) so a dead
+    // cached URL can never strand us on the previous track.
+    const maxAttempts = 5;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       if (generation != _loadGeneration) return;
-      await _player.setUrl(
-        stream.url,
-        headers: stream.headers.isNotEmpty ? stream.headers : null,
-        tag: mediaItem,
-      );
-      if (generation != _loadGeneration) return;
-      await play();
-      listeningStatsService.handlePlayerPlaying(true,
-          currentSong: songToStatsMap(song));
-      await storage.savePlayedSong(song);
-      await _saveCurrentSession();
-    } catch (e) {
-      print('Failed to play ${song.title}: $e');
-      if (generation == _loadGeneration && _currentIndex + 1 < _queue.length) {
-        await _playIndex(_currentIndex + 1);
+      try {
+        VideoStreamResult stream;
+        if (attempt == 1) {
+          stream = await _getStreamUrl(song);
+        } else {
+          // Fresh attempt: drop the memoized result; from attempt 4 on,
+          // also bypass the persistent cache for this song.
+          _urlCache.remove(song.id);
+          if (attempt >= 4) _staleStreamIds.add(song.id);
+          stream = await _getStreamUrl(song);
+        }
+        _broadcastAudioQuality(song, stream);
+        if (generation != _loadGeneration) return;
+        await _player.setUrl(
+          stream.url,
+          headers: stream.headers.isNotEmpty ? stream.headers : null,
+          tag: mediaItem,
+        );
+        if (generation != _loadGeneration) return;
+        await play();
+        lastFailedSongId = null;
+        _staleStreamIds.remove(song.id);
+        listeningStatsService.handlePlayerPlaying(true,
+            currentSong: songToStatsMap(song));
+        await storage.savePlayedSong(song);
+        await _saveCurrentSession();
+        return;
+      } catch (e) {
+        if (generation != _loadGeneration) return;
+        if (attempt < maxAttempts) {
+          print('🔁 Load attempt $attempt/$maxAttempts failed for '
+              '${song.title} — retrying');
+          await Future.delayed(Duration(milliseconds: 120 * attempt));
+          continue;
+        }
+        print('Failed to play ${song.title} after $maxAttempts attempts: $e');
+        if (generation == _loadGeneration) {
+          // Remote-controlled queue: never self-advance on failure — the
+          // host decides what plays next. Flag it so Listen Together can
+          // retry when a fresh stream URL becomes available.
+          if (followRemote) {
+            lastFailedSongId = song.id;
+            final cb = onRemoteLoadFailed;
+            if (cb != null) cb(song.id);
+            return;
+          }
+          if (_currentIndex + 1 < _queue.length) {
+            await _playIndex(_currentIndex + 1);
+          }
+        }
       }
     }
   }
@@ -494,7 +603,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     if (_currentIndex + 1 < _queue.length) {
       await _prefetchUrl(_queue[_currentIndex + 1]);
     }
-    if (_currentIndex >= _queue.length - 2) {
+    if (!followRemote && _currentIndex >= _queue.length - 2) {
       _appendRelatedSongs();
     }
   }
@@ -510,6 +619,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       _urlCache[song.id] = VideoStreamResult(cached.url, cached.headers);
       return;
     }
+    if (followRemote) return; // host shares resolved URLs; don't re-resolve
     try {
       final result = await _yt.getAudioStreamUrl(song);
       _urlCache[song.id] = result;
@@ -572,10 +682,14 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // ═════════════════════════════════════════════
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() async {
+    if (_lockoutActive) return;
+    await _player.play();
+  }
 
   @override
   Future<void> pause() async {
+    if (_lockoutActive) return;
     listeningStatsService.handlePlayerPlaying(false);
     await _player.pause();
     await _saveCurrentSession();
@@ -591,10 +705,16 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) async {
+    if (_lockoutActive) return;
+    await _player.seek(position);
+    final cb = onLocalSeek;
+    if (cb != null) cb(position);
+  }
 
   @override
   Future<void> skipToNext() async {
+    if (_lockoutActive) return;
     _markTransportAction();
     if (_isRadioMode) return;
     if (_currentIndex + 1 < _queue.length) {
@@ -608,6 +728,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> skipToPrevious() async {
+    if (_lockoutActive) return;
     _markTransportAction();
     if (_isRadioMode) {
       await _player.seek(Duration.zero);
@@ -627,6 +748,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   @override
   Future<void> skipToQueueItem(int index) async {
+    if (_lockoutActive) return;
     _markTransportAction();
     if (index < 0 || index >= _queue.length) return;
     await _playIndex(index);

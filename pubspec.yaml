@@ -57,6 +57,9 @@ dependencies:
   video_player: ^2.9.2
   fluentui_system_icons: ^1.1.273
   file_picker: ^13.1.0
+  wakelock_plus: ^1.8.0
+  palette_generator: ^0.3.3+7
+  volume_controller: ^3.7.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

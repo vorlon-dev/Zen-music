@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -11,13 +12,18 @@ import '../main.dart';
 import '../models/song.dart';
 
 /// Listen Together client for the metroserver protocol.
-/// Wire format pinned to the deployed server source:
-///   binary WS frames = protobuf Envelope{1:type str, 2:payload bytes, 3:compressed bool}
-///   payloads = raw protobuf, gzip when compressed=true
-///   handshake: connect → client_capabilities → server_capabilities
-/// Outgoing payloads are hand-encoded against pinned field numbers;
-/// incoming payloads are hand-decoded with a minimal proto wire reader.
-/// No generated protobuf code.
+/// Wire: protobuf Envelope{1:type, 2:payload, 3:compressed} from frame one.
+/// Latency model:
+///   - host broadcasts change_track the moment its load STARTS (mediaItem),
+///     so guests buffer in parallel instead of waiting for the host;
+///   - host attaches its resolved stream URL to the current TrackInfo
+///     (album field, "zen1|url|||headers"); guests seed it into the
+///     handler's memory cache — zero extraction, zero Hive round-trip;
+///   - guest applies are CHAIN-FREE: play/pause land instantly even while
+///     a load is in flight;
+///   - host streams a 3s position heartbeat; guests drift-correct (1s);
+///   - failed loads retry the same URL 5x in the handler, then auto
+///     re-sync — never falling back to the previous track.
 class ListenTogetherService {
   ListenTogetherService._();
   static final ListenTogetherService instance = ListenTogetherService._();
@@ -27,14 +33,15 @@ class ListenTogetherService {
   static const _pingInterval = Duration(seconds: 25);
   static const _pongTimeout = Duration(seconds: 75);
   static const _maxReconnectAttempts = 5;
-  static const _driftToleranceMs = 1500;
+  static const _driftToleranceMs = 1000;
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _wsSub;
   Timer? _pingTimer;
   Timer? _reconnectTimer;
+  Timer? _posSyncTimer;
   StreamSubscription<bool>? _playingSub;
-  StreamSubscription<Song?>? _songSub;
+  StreamSubscription<MediaItem?>? _songSub;
   StreamSubscription<Duration>? _posSub;
 
   bool _userDisconnect = false;
@@ -48,9 +55,15 @@ class ListenTogetherService {
   String? _lastBroadcastSongId;
   int _lastPositionMs = 0;
 
-  // Guest-side apply chain: remote actions run strictly one after
-  // another, so a 'play' can never race ahead of its 'change_track' load.
-  Future<void> _applyChain = Future<void>.value();
+  // ── Guest desired-state machine (chain-free applies) ──
+  int _loadSeq = 0; // bumps on every guest load; stale loads discarded
+  bool? _desiredPlaying; // latest remote play state
+  int _pendingSeekMs = 0; // position to apply after the load completes
+  int _lastResyncAt = 0; // throttle for request_sync on failed loads
+
+  // Host-side send chain: the hint lookup is async; the chain keeps
+  // change_track → play ordering stable.
+  Future<void> _sendChain = Future<void>.value();
 
   String? _userId;
   String? _sessionToken;
@@ -86,6 +99,21 @@ class ListenTogetherService {
     _userDisconnect = false;
     _setPhase(LtPhase.connecting);
 
+    // Host: broadcast local seeks so guests follow scrubbing.
+    audioHandler.onLocalSeek = (pos) {
+      if (_isHost && isInRoom && _applyingRemote == 0) {
+        _sendAction('seek',
+            trackId: audioHandler.currentSong?.id,
+            positionMs: pos.inMilliseconds);
+      }
+    };
+
+    // Guest: a load failed (no URL yet) — ask the server for a re-sync;
+    // the reply carries the host's resolved URL and triggers a retry.
+    audioHandler.onRemoteLoadFailed = (songId) {
+      if (!_isHost && isInRoom) _requestResync(songId);
+    };
+
     final channel = IOWebSocketChannel.connect(
       Uri.parse(_wsUrl),
       headers: const {'User-Agent': _clientVersion},
@@ -98,11 +126,11 @@ class ListenTogetherService {
     );
 
     // Capabilities must be the first message (server enforces this).
-    _send('client_capabilities', {
-      'supports_protobuf': true,
-      'supports_compression': true,
-      'client_version': _clientVersion,
-    });
+    final w = PbWriter();
+    w.boolField(1, true);
+    w.boolField(2, true);
+    w.stringField(3, _clientVersion);
+    _sendRaw('client_capabilities', w.toBytes());
 
     _startPing();
   }
@@ -122,6 +150,8 @@ class ListenTogetherService {
     _pingTimer = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _posSyncTimer?.cancel();
+    _posSyncTimer = null;
     _playingSub?.cancel();
     _playingSub = null;
     _songSub?.cancel();
@@ -142,6 +172,13 @@ class ListenTogetherService {
     _lastBroadcastSongId = null;
     _pendingCreate = null;
     _pendingJoin = null;
+    _loadSeq++;
+    _desiredPlaying = null;
+    _pendingSeekMs = 0;
+    audioHandler.followRemote = false;
+    audioHandler.hostControlsPlayback = false;
+    audioHandler.onLocalSeek = null;
+    audioHandler.onRemoteLoadFailed = null;
   }
 
   // ═══════════════════════════════════════════
@@ -203,8 +240,56 @@ class ListenTogetherService {
           {'suggestion_id': suggestionId, 'reason': reason ?? ''});
 
   // ═══════════════════════════════════════════
-  // SEND — envelope + hand-encoded payloads
+  // STREAM HINTS + GUEST MODE
   // ═══════════════════════════════════════════
+
+  /// Host: reads the handler's persistent stream cache for this song.
+  /// Pure local Hive read — no network.
+  Future<String?> _hintAlbumFor(String songId) async {
+    try {
+      final cached = storage.getCachedStream(songId);
+      if (cached == null) return null;
+      final url = cached.url;
+      if (url.isEmpty || url.startsWith('file://')) return null;
+      final h = jsonEncode(cached.headers);
+      return 'zen1|$url|||$h';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _applyFollowRemote() {
+    audioHandler.followRemote = isInRoom && !_isHost;
+    // Guest lockout: user-initiated transport is ignored by the handler;
+    // host-driven calls bypass the guard via runRemote().
+    audioHandler.hostControlsPlayback = isInRoom && !_isHost;
+  }
+
+  /// Runs a host-driven playback mutation with the guest lockout bypassed.
+  Future<T> _remote<T>(Future<T> Function() action) =>
+      audioHandler.runRemote(action);
+
+  void _requestResync(String songId) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastResyncAt < 3000) return;
+    _lastResyncAt = now;
+    print('🎧 LT: stream missing for $songId — requesting re-sync');
+    _send('request_sync', null);
+  }
+
+  // ═══════════════════════════════════════════
+  // SEND
+  // ═══════════════════════════════════════════
+
+  void _sendRaw(String type, Uint8List payloadBytes) {
+    final channel = _channel;
+    if (channel == null) return;
+    try {
+      channel.sink.add(PbCodec.encodeEnvelope(type, payloadBytes));
+    } catch (e) {
+      print('🎧 LT: send failed [$type]: $e');
+    }
+  }
 
   void _send(String type, Map<String, dynamic>? payloadJson) {
     final channel = _channel;
@@ -212,13 +297,6 @@ class ListenTogetherService {
 
     final Uint8List payloadBytes;
     switch (type) {
-      case 'client_capabilities':
-        final w = PbWriter();
-        w.boolField(1, true);
-        w.boolField(2, true);
-        w.stringField(3, _clientVersion);
-        payloadBytes = w.toBytes();
-        break;
       case 'create_room':
         final w = PbWriter();
         w.stringField(1, '${payloadJson?['username'] ?? ''}');
@@ -329,7 +407,57 @@ class ListenTogetherService {
         break;
     }
 
-    channel.sink.add(PbCodec.encodeEnvelope(type, payloadBytes));
+    _sendRaw(type, payloadBytes);
+  }
+
+  /// Ordered async sender. Only the CURRENT track carries the resolved
+  /// stream URL — the queue stays metadata-only, keeping the payload
+  /// small and the send fast. Guests seed the URL into their memory
+  /// cache so the load is instant.
+  Future<void> _sendActionAsync(String action,
+      {String? trackId,
+        int positionMs = 0,
+        Song? track,
+        List<Song>? queue,
+        bool insertNext = false,
+        String? queueTitle}) async {
+    Map<String, dynamic>? trackMap;
+    if (track != null) {
+      final albumHint = await _hintAlbumFor(track.id);
+      trackMap = {
+        'id': track.id,
+        'title': track.title,
+        'artist': track.artist,
+        'thumbnail': track.thumbnail,
+        'duration': track.duration.inMilliseconds,
+        if (albumHint != null) 'album': albumHint,
+      };
+    }
+    final queueMaps = queue == null
+        ? null
+        : [
+      for (final s in queue)
+        {
+          'id': s.id,
+          'title': s.title,
+          'artist': s.artist,
+          'thumbnail': s.thumbnail,
+          'duration': s.duration.inMilliseconds,
+        }
+    ];
+    print('🎧 LT: send $action${(trackId != null && trackId.isNotEmpty) ? ' track=$trackId' : ''}');
+    _send('playback_action', {
+      'action': action,
+      if (trackId != null && trackId.isNotEmpty) 'track_id': trackId,
+      'position': positionMs,
+      if (trackMap != null) 'track': trackMap,
+      if (insertNext) 'insert_next': true,
+      if (queueMaps != null) 'queue': queueMaps,
+      if (queueTitle != null && queueTitle.isNotEmpty)
+        'queue_title': queueTitle,
+      'server_time': _serverNow(),
+      'captured_at_server_time': _serverNow(),
+    });
   }
 
   void _sendAction(String action,
@@ -339,34 +467,15 @@ class ListenTogetherService {
         List<Song>? queue,
         bool insertNext = false,
         String? queueTitle}) {
-    _send('playback_action', {
-      'action': action,
-      if (trackId != null) 'track_id': trackId,
-      'position': positionMs,
-      if (track != null)
-        'track': {
-          'id': track.id,
-          'title': track.title,
-          'artist': track.artist,
-          'thumbnail': track.thumbnail,
-          'duration': track.duration.inMilliseconds,
-        },
-      if (insertNext) 'insert_next': true,
-      if (queue != null)
-        'queue': [
-          for (final s in queue)
-            {
-              'id': s.id,
-              'title': s.title,
-              'artist': s.artist,
-              'thumbnail': s.thumbnail,
-              'duration': s.duration.inMilliseconds,
-            },
-        ],
-      if (queueTitle != null) 'queue_title': queueTitle,
-      'server_time': _serverNow(),
-      'captured_at_server_time': _serverNow(),
-    });
+    _sendChain = _sendChain.then((_) => _sendActionAsync(
+      action,
+      trackId: trackId,
+      positionMs: positionMs,
+      track: track,
+      queue: queue,
+      insertNext: insertNext,
+      queueTitle: queueTitle,
+    ));
   }
 
   Map<String, dynamic> _trackMap(Song s) => {
@@ -399,29 +508,50 @@ class ListenTogetherService {
   // ═══════════════════════════════════════════
 
   void _onData(dynamic data) {
+    if (data is String) {
+      _onJsonFrame(data);
+      return;
+    }
     Uint8List bytes;
     if (data is Uint8List) {
       bytes = data;
     } else if (data is List<int>) {
       bytes = Uint8List.fromList(data);
     } else {
-      return; // text frames are not part of the protocol
+      return;
+    }
+    if (bytes.length >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b) {
+      try {
+        bytes = Uint8List.fromList(gzip.decode(bytes));
+      } catch (e) {
+        print('🎧 LT: gzip decode failed: $e');
+        return;
+      }
+    }
+    if (bytes.isNotEmpty && bytes[0] == 0x7b) {
+      try {
+        _onJsonFrame(utf8.decode(bytes));
+      } catch (_) {}
+      return;
     }
 
-    final env = PbCodec.decodeEnvelope(bytes);
+    Envelope env;
+    try {
+      env = PbCodec.decodeEnvelope(bytes);
+    } catch (e) {
+      print('🎧 LT: envelope decode failed: $e');
+      return;
+    }
     var payload = env.payload;
     if (env.compressed && payload.isNotEmpty) {
       try {
         payload = Uint8List.fromList(gzip.decode(payload));
       } catch (e) {
-        print('🎧 LT: gzip decode failed for ${env.type} '
-            '(${payload.length}B): $e');
+        print('🎧 LT: gzip decode failed for ${env.type}: $e');
         return;
       }
     }
 
-    // Per-message isolation: a malformed frame must never kill the
-    // socket or strand the UI mid-join.
     try {
       _dispatch(env.type, payload);
     } catch (e) {
@@ -431,57 +561,44 @@ class ListenTogetherService {
           .join(' ');
       print('🎧 LT: failed to parse "${env.type}" (${payload.length}B) '
           'hex[$hex]: $e');
-
-      // Room-entry fallbacks: the envelope type itself is reliable even
-      // when payload parsing desyncs. Enter the room; the server will
-      // re-deliver state via sync_state / sync_playback.
       switch (env.type) {
-        case 'room_created':
-          var code = '';
-          try {
-            final r = PbReader(payload);
-            if (r.hasNext()) {
-              final t = r.readTag();
-              if (t.$1 == 1 && t.$2 == 2) {
-                code = utf8.decode(r.readBytesRaw());
-              }
-            }
-          } catch (_) {}
-          _sessionToken ??= '';
-          _roomCode = code;
-          _isHost = true;
-          _room = LtRoomSnapshot(
-            roomCode: code,
-            hostId: _userId ?? '',
-            users: [
-              LtUser(
-                  userId: _userId ?? '',
-                  username: _username,
-                  isHost: true,
-                  isConnected: true)
-            ],
-            isPlaying: false,
-            positionMs: 0,
-            queue: const [],
-          );
-          roomNotifier.value = _room;
-          _setPhase(LtPhase.inRoom);
-          _rebindHostBroadcast();
-          _pendingCreate?.complete(code.isNotEmpty ? code : 'unknown');
-          _pendingCreate = null;
-          break;
         case 'join_approved':
           _isHost = false;
+          _applyFollowRemote();
           _setPhase(LtPhase.inRoom);
           _pendingJoin?.complete(true);
           _pendingJoin = null;
-          // Ask the server for the current state — it answers with
-          // sync_state, which re-establishes queue + position.
           _send('request_sync', null);
           break;
         default:
           break;
       }
+    }
+  }
+
+  void _onJsonFrame(String text) {
+    Map<String, dynamic> p;
+    String type;
+    try {
+      final msg = jsonDecode(text);
+      if (msg is! Map) return;
+      type = msg['type']?.toString() ?? '';
+      final raw = msg['payload'];
+      p = raw is Map ? Map<String, dynamic>.from(raw) : const {};
+    } catch (e) {
+      print('🎧 LT: json frame parse failed: $e');
+      return;
+    }
+    switch (type) {
+      case 'server_capabilities':
+        _handshaken = true;
+        _setPhase(LtPhase.connected);
+        break;
+      case 'pong':
+        _lastPongAt = DateTime.now().millisecondsSinceEpoch;
+        break;
+      default:
+        break;
     }
   }
 
@@ -516,6 +633,7 @@ class ListenTogetherService {
         );
         roomNotifier.value = _room;
         _setPhase(LtPhase.inRoom);
+        _applyFollowRemote();
         _rebindHostBroadcast();
         _pendingCreate?.complete(roomCode);
         _pendingCreate = null;
@@ -533,12 +651,10 @@ class ListenTogetherService {
         final state = parseRoomState(stateBytes);
         if (state != null) {
           _applyRoomState(state);
-          // Load the room's track right away — a guest joining mid-song
-          // hears it immediately, no waiting for sync_state.
           unawaited(_adoptRoomState(state));
         }
         _setPhase(LtPhase.inRoom);
-        // Pull authoritative state — re-aligns position/play state.
+        _applyFollowRemote();
         _send('request_sync', null);
         _pendingJoin?.complete(true);
         _pendingJoin = null;
@@ -560,6 +676,7 @@ class ListenTogetherService {
         final p = readUserIdName(payload);
         _patchUser(p.$1, p.$2, isHost: false, connected: true);
         _events.add(LtUserEvent(p.$1, p.$2, LtUserEventKind.joined));
+        if (_isHost) _resendCurrentTrack();
         break;
       case 'user_left':
         final p = readUserIdName(payload);
@@ -578,13 +695,13 @@ class ListenTogetherService {
         if (_isHost) break;
         final action = parsePlaybackAction(payload);
         print('🎧 LT: sync_playback ${action.action} track=${action.trackId}');
-        _enqueueApply(() => _applyPlaybackAction(action));
+        unawaited(_applyPlaybackAction(action));
         break;
       case 'sync_state':
         if (_isHost) break;
         final st = parseSyncState(payload);
         print('🎧 LT: sync_state track=${st.track?['id']} playing=${st.isPlaying}');
-        _enqueueApply(() => _applySyncState(st));
+        unawaited(_applySyncState(st));
         break;
       case 'buffer_wait':
         final r = PbReader(payload);
@@ -601,6 +718,7 @@ class ListenTogetherService {
         final hostName = r.readString(2);
         _isHost = hostId == _userId;
         _patchHost(hostId);
+        _applyFollowRemote();
         _events.add(LtHostChangedEvent(hostId, hostName));
         _rebindHostBroadcast();
         break;
@@ -667,147 +785,168 @@ class ListenTogetherService {
         final state = parseRoomState(stateBytes);
         if (state != null) _applyRoomState(state);
         _setPhase(LtPhase.inRoom);
+        _applyFollowRemote();
         _rebindHostBroadcast();
+        if (!isHost) unawaited(_adoptRoomState(state));
         break;
       default:
         break;
     }
   }
 
-  void _enqueueApply(Future<void> Function() task) {
-    _applyChain = _applyChain.then((_) async {
-      try {
-        await task();
-      } catch (e) {
-        print('🎧 ListenTogether apply failed: $e');
+  // ═══════════════════════════════════════════
+  // GUEST APPLICATION — chain-free.
+  // play/pause/seek apply INSTANTLY; loads run in the background guarded
+  // by _loadSeq. All host-driven calls bypass the guest lockout.
+  // ═══════════════════════════════════════════
+
+  Future<void> _adoptRoomState(LtRoomSnapshot? state) async {
+    if (state == null) return;
+    final track = state.currentTrack;
+    if (track == null || track.id.isEmpty) return;
+    if (audioHandler.currentSong?.id == track.id &&
+        audioHandler.lastFailedSongId != track.id) {
+      return;
+    }
+    _desiredPlaying = state.isPlaying;
+    _pendingSeekMs = effectivePosition(
+        state.positionMs, state.lastUpdateMs, state.isPlaying);
+    var queue = state.queue;
+    var index = queue.indexWhere((s) => s.id == track.id);
+    if (index < 0) {
+      queue = [track, ...queue];
+      index = 0;
+    }
+    print('🎧 LT: adopting room track ${track.id} "${track.title}"');
+    _send('buffer_ready', {'track_id': track.id});
+    await _remote(() async {
+      _flushStreamSeeds();
+      await audioHandler.setQueue(queue, startIndex: index);
+      if (!state.isPlaying) {
+        await audioHandler.pause();
+      } else {
+        await audioHandler.play();
       }
     });
   }
 
-  // ═══════════════════════════════════════════
-  // GUEST APPLICATION
-  // ═══════════════════════════════════════════
-
-  Future<void> _adoptRoomState(LtRoomSnapshot state) async {
-    final track = state.currentTrack;
-    if (track == null || track.id.isEmpty) return;
-    if (audioHandler.currentSong?.id == track.id) return;
-    _applyingRemote++;
-    try {
-      var queue = state.queue;
-      var index = queue.indexWhere((s) => s.id == track.id);
-      if (index < 0) {
-        queue = [track, ...queue];
-        index = 0;
-      }
-      print('🎧 LT: adopting room track ${track.id} "${track.title}"');
-      await audioHandler.setQueue(queue, startIndex: index);
-      if (!state.isPlaying) await audioHandler.pause();
-      _send('buffer_ready', {'track_id': track.id});
-    } catch (e) {
-      print('🎧 LT: adopt room state failed: $e');
-    } finally {
-      _applyingRemote--;
-    }
-  }
-
   Future<void> _applyPlaybackAction(LtPlaybackAction p) async {
-    _applyingRemote++;
-    try {
-      switch (p.action) {
-        case 'play':
-          await _ensureTrack(p);
-          final target =
-          effectivePosition(p.positionMs, p.capturedAtServerTime, true);
-          await _seekIfNeeded(target);
-          await audioHandler.play();
-          break;
-        case 'pause':
-          await _ensureTrack(p);
-          final target =
-          effectivePosition(p.positionMs, p.capturedAtServerTime, false);
-          await _seekIfNeeded(target);
-          await audioHandler.pause();
-          break;
-        case 'seek':
-          await _ensureTrack(p);
-          await audioHandler.seek(Duration(milliseconds: p.positionMs));
-          break;
-        case 'change_track':
-          await _applyTrackChange(p, autoplay: true);
-          break;
-        case 'skip_next':
-        case 'skip_prev':
-          break; // the follow-up change_track carries the real track
-        case 'sync_queue':
-        case 'queue_add':
-        case 'queue_remove':
-        case 'queue_clear':
-          await _applyQueue(p.queue);
-          break;
-        default:
-          break;
-      }
-    } catch (e) {
-      print('🎧 ListenTogether apply failed: $e');
-      // Never leave the server's buffer gate waiting on a failed apply.
-      if (p.trackId.isNotEmpty) {
-        _send('buffer_ready', {'track_id': p.trackId});
-      }
-    } finally {
-      _applyingRemote--;
+    switch (p.action) {
+      case 'play':
+        _desiredPlaying = true;
+        _patchIsPlaying(true);
+        final target =
+        effectivePosition(p.positionMs, p.capturedAtServerTime, true);
+        if (target > 0) _pendingSeekMs = target;
+        unawaited(_ensureTrack(p));
+        await _remote(() => audioHandler.play());
+        break;
+      case 'pause':
+        _desiredPlaying = false;
+        _patchIsPlaying(false);
+        unawaited(_ensureTrack(p));
+        await _remote(() => audioHandler.pause());
+        break;
+      case 'seek':
+        _pendingSeekMs = p.positionMs;
+        final curId = audioHandler.currentSong?.id;
+        if (curId != null && curId == p.trackId && p.positionMs > 0) {
+          try {
+            await _remote(() =>
+                audioHandler.seek(Duration(milliseconds: p.positionMs)));
+            _pendingSeekMs = 0;
+          } catch (_) {}
+        }
+        break;
+      case 'position':
+      // Host heartbeat (3s) — drift-correct silently.
+        final curId = audioHandler.currentSong?.id;
+        if (curId == null || curId != p.trackId) break;
+        _patchIsPlaying(true);
+        final target =
+        effectivePosition(p.positionMs, p.capturedAtServerTime, true);
+        await _seekIfNeeded(target);
+        break;
+      case 'change_track':
+        await _applyTrackChange(p, autoplay: true);
+        break;
+      case 'skip_next':
+      case 'skip_prev':
+        break; // the follow-up change_track carries the real track
+      case 'sync_queue':
+      case 'queue_add':
+      case 'queue_remove':
+      case 'queue_clear':
+        await _applyQueue(p.queue);
+        break;
+      default:
+        break;
     }
   }
 
   Future<void> _applySyncState(LtSyncState p) async {
-    _applyingRemote++;
-    try {
-      final trackId = p.track?['id']?.toString() ?? '';
-      final currentId = audioHandler.currentSong?.id ?? '';
-      if (trackId.isNotEmpty && currentId != trackId) {
-        final song = mapToSong(p.track!);
-        final queue = [for (final t in p.queue) mapToSong(t)];
-        var index = queue.indexWhere((s) => s.id == trackId);
-        if (index < 0) {
-          queue.insert(0, song);
-          index = 0;
-        }
-        print('🎧 LT: loading track ${song.id} "${song.title}"');
-        await audioHandler.setQueue(queue, startIndex: index);
-        if (!p.isPlaying) await audioHandler.pause();
-        _patchCurrentTrack(song);
-        _send('buffer_ready', {'track_id': trackId});
+    final trackId = p.track?['id']?.toString() ?? '';
+    final currentId = audioHandler.currentSong?.id ?? '';
+    final needsLoad = trackId.isNotEmpty &&
+        (currentId != trackId || audioHandler.lastFailedSongId == trackId);
+    _desiredPlaying = p.isPlaying;
+    if (needsLoad && p.track != null) {
+      final song = mapToSong(p.track!);
+      var queue = [for (final t in p.queue) mapToSong(t)];
+      var index = queue.indexWhere((s) => s.id == trackId);
+      if (index < 0) {
+        queue.insert(0, song);
+        index = 0;
       }
-      final target = effectivePosition(p.positionMs, p.lastUpdate, p.isPlaying);
+      print('🎧 LT: loading track ${song.id} "${song.title}"');
+      _pendingSeekMs =
+          effectivePosition(p.positionMs, p.lastUpdate, p.isPlaying);
+      _startGuestLoad(queue, index);
+      _patchIsPlaying(p.isPlaying);
+    } else {
+      final target =
+      effectivePosition(p.positionMs, p.lastUpdate, p.isPlaying);
       await _seekIfNeeded(target);
       if (p.isPlaying) {
-        await audioHandler.play();
+        await _remote(() => audioHandler.play());
       } else {
-        await audioHandler.pause();
+        await _remote(() => audioHandler.pause());
       }
-    } catch (e) {
-      print('🎧 ListenTogether sync failed: $e');
-    } finally {
-      _applyingRemote--;
+      _patchIsPlaying(p.isPlaying);
     }
   }
 
   Future<void> _applyTrackChange(LtPlaybackAction p,
       {required bool autoplay}) async {
-    final track = p.track;
+    var track = p.track;
+    // Fallback: payload missing the track — recover it from the queue.
+    if (track == null && p.trackId.isNotEmpty && p.queue.isNotEmpty) {
+      for (final t in p.queue) {
+        if ('${t['id'] ?? ''}' == p.trackId) {
+          track = t;
+          print('🎧 LT: track payload missing — recovered from queue');
+          break;
+        }
+      }
+    }
     if (track == null) return;
     final song = mapToSong(track);
-    if (audioHandler.currentSong?.id == song.id) {
-      // Already on this track — never restart it; just align play state.
+    _desiredPlaying = autoplay;
+    _patchIsPlaying(autoplay);
+
+    final previouslyFailed = audioHandler.lastFailedSongId == song.id;
+    if (audioHandler.currentSong?.id == song.id && !previouslyFailed) {
+      // Already on this track — align play state only, never restart.
       if (autoplay) {
-        await audioHandler.play();
+        await _remote(() => audioHandler.play());
       } else {
-        await audioHandler.pause();
+        await _remote(() => audioHandler.pause());
       }
       _patchCurrentTrack(song);
       _send('buffer_ready', {'track_id': song.id});
       return;
     }
+
     var queue = [for (final t in p.queue) mapToSong(t)];
     var index = queue.indexWhere((s) => s.id == song.id);
     if (index < 0) {
@@ -815,16 +954,43 @@ class ListenTogetherService {
       index = 0;
     }
     print('🎧 LT: loading track ${song.id} "${song.title}"');
-    await audioHandler.setQueue(queue, startIndex: index);
-    // The host switched songs — mirror its play state explicitly.
-    // setQueue alone must not be relied on to start playback.
-    if (autoplay) {
-      await audioHandler.play();
-    } else {
-      await audioHandler.pause();
-    }
-    _patchCurrentTrack(song);
+    // Release the buffer gate immediately — lowest room latency.
     _send('buffer_ready', {'track_id': song.id});
+    _startGuestLoad(queue, index);
+    _patchCurrentTrack(song);
+  }
+
+  /// Kicks off a background load. Never blocks the apply path: later
+  /// play/pause commands land instantly and win via _desiredPlaying.
+  void _startGuestLoad(List<Song> queue, int index) {
+    final seq = ++_loadSeq;
+    unawaited(() async {
+      try {
+        await audioHandler.runRemote(() async {
+          _flushStreamSeeds();
+          await audioHandler.setQueue(queue, startIndex: index);
+        });
+      } catch (e) {
+        print('🎧 LT: guest load error: $e');
+        return;
+      }
+      if (seq != _loadSeq || !isInRoom) return;
+      // Apply any position that was pending for this track.
+      final seekTo = _pendingSeekMs;
+      _pendingSeekMs = 0;
+      if (seekTo > 500) {
+        try {
+          await _remote(
+                  () => audioHandler.seek(Duration(milliseconds: seekTo)));
+        } catch (_) {}
+      }
+      // A failed load stays flagged — ask the server for a fresh sync
+      // (its reply carries the host's resolved URL) and retry.
+      final failedId = audioHandler.lastFailedSongId;
+      if (failedId != null && audioHandler.currentSong?.id == failedId) {
+        _requestResync(failedId);
+      }
+    }());
   }
 
   Future<void> _applyQueue(List<Map<String, dynamic>> protoQueue) async {
@@ -833,21 +999,30 @@ class ListenTogetherService {
     final currentId = audioHandler.currentSong?.id;
     var index = queue.indexWhere((s) => s.id == currentId);
     if (index < 0) index = 0;
-    await audioHandler.setQueue(queue, startIndex: index);
+    await audioHandler.runRemote(() async {
+      _flushStreamSeeds();
+      await audioHandler.setQueue(queue, startIndex: index);
+    });
   }
 
   Future<void> _ensureTrack(LtPlaybackAction p) async {
     final trackId = p.trackId;
     if (trackId.isEmpty) return;
-    if (audioHandler.currentSong?.id == trackId) return;
-    await _applyTrackChange(p, autoplay: false);
+    if (audioHandler.currentSong?.id == trackId &&
+        audioHandler.lastFailedSongId != trackId) {
+      return;
+    }
+    await _applyTrackChange(p, autoplay: _desiredPlaying ?? false);
   }
 
   Future<void> _seekIfNeeded(int targetMs) async {
     if (targetMs <= 0) return;
     final current = _lastPositionMs;
     if ((current - targetMs).abs() > _driftToleranceMs) {
-      await audioHandler.seek(Duration(milliseconds: targetMs));
+      try {
+        await _remote(
+                () => audioHandler.seek(Duration(milliseconds: targetMs)));
+      } catch (_) {}
     }
   }
 
@@ -867,7 +1042,8 @@ class ListenTogetherService {
     _playingSub?.cancel();
     _songSub?.cancel();
     _posSub?.cancel();
-    // Guests track position too, so drift correction compares real values.
+    _posSyncTimer?.cancel();
+    _posSyncTimer = null;
     _posSub = audioHandler.positionStream.listen((p) {
       _lastPositionMs = p.inMilliseconds;
     });
@@ -879,6 +1055,7 @@ class ListenTogetherService {
       if (!_isHost || _applyingRemote > 0) return;
       if (playing == _lastPlaying) return;
       _lastPlaying = playing;
+      _patchIsPlaying(playing);
       _sendAction(
         playing ? 'play' : 'pause',
         trackId: audioHandler.currentSong?.id,
@@ -886,10 +1063,20 @@ class ListenTogetherService {
       );
     });
 
-    _songSub = audioHandler.currentSongStream.listen((song) {
-      if (!_isHost || _applyingRemote > 0 || song == null) return;
-      if (song.id == _lastBroadcastSongId) return;
-      _lastBroadcastSongId = song.id;
+    // Fire change_track the moment the load STARTS (mediaItem is added
+    // before stream resolution) — guests begin buffering in parallel
+    // with the host, which is the single biggest sync win.
+    _songSub = audioHandler.mediaItem.listen((item) {
+      if (!_isHost || _applyingRemote > 0 || item == null) return;
+      if (item.id == _lastBroadcastSongId) return;
+      _lastBroadcastSongId = item.id;
+      final song = Song(
+        id: item.id,
+        title: item.title,
+        artist: item.artist ?? 'Unknown',
+        thumbnail: item.artUri?.toString() ?? '',
+        duration: item.duration ?? Duration.zero,
+      );
       _sendAction(
         'change_track',
         trackId: song.id,
@@ -910,32 +1097,56 @@ class ListenTogetherService {
       );
     });
 
-    // If the host already had a song loaded before the room existed, the
-    // current-song stream may never fire again — push it once now.
-    final current = audioHandler.currentSong;
-    if (current != null && current.id != _lastBroadcastSongId) {
-      _lastBroadcastSongId = current.id;
-      _sendAction(
-        'change_track',
-        trackId: current.id,
-        track: current,
-        queue: audioHandler.queueSongs,
-        queueTitle: 'Listen Together',
-      );
-      _patchCurrentTrack(current);
-      final playing = audioHandler.playbackState.value.playing;
-      _lastPlaying = playing;
-      _sendAction(
-        playing ? 'play' : 'pause',
-        trackId: current.id,
-        positionMs: _lastPositionMs,
-      );
+    // Position heartbeat — keeps every seek bar aligned without
+    // waiting for play/pause events.
+    _posSyncTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!_isHost || !isInRoom) return;
+      final cur = audioHandler.currentSong;
+      if (cur == null) return;
+      if (!audioHandler.playbackState.value.playing) return;
+      _sendAction('position', trackId: cur.id, positionMs: _lastPositionMs);
+    });
+  }
+
+  /// Kotlin-reference parity: introduce the current track to newcomers.
+  void _resendCurrentTrack() {
+    final cur = audioHandler.currentSong;
+    if (cur == null) return;
+    _lastBroadcastSongId = cur.id;
+    _sendAction(
+      'change_track',
+      trackId: cur.id,
+      track: cur,
+      queue: audioHandler.queueSongs,
+      queueTitle: 'Listen Together',
+    );
+    _patchCurrentTrack(cur);
+    if (audioHandler.playbackState.value.playing) {
+      _lastPlaying = true;
+      _sendAction('play', trackId: cur.id, positionMs: _lastPositionMs);
     }
   }
 
   // ═══════════════════════════════════════════
   // ROOM STATE HELPERS
   // ═══════════════════════════════════════════
+
+  void _patchIsPlaying(bool playing) {
+    final r = _room;
+    if (r == null) return;
+    if (r.isPlaying == playing) return;
+    _room = LtRoomSnapshot(
+      roomCode: r.roomCode,
+      hostId: r.hostId,
+      users: r.users,
+      currentTrack: r.currentTrack,
+      isPlaying: playing,
+      positionMs: r.positionMs,
+      lastUpdateMs: r.lastUpdateMs,
+      queue: r.queue,
+    );
+    roomNotifier.value = _room;
+  }
 
   void _patchCurrentTrack(Song song) {
     final r = _room;
@@ -1151,6 +1362,8 @@ class LtPlaybackAction {
   String trackId = '';
   int positionMs = 0;
   Map<String, dynamic>? track;
+  bool insertNext = false;
+  String? queueTitle;
   final List<Map<String, dynamic>> queue = [];
   int serverTime = 0;
   int capturedAtServerTime = 0;
@@ -1214,198 +1427,51 @@ class LtSuggestionApprovedEvent extends LtEvent {
 }
 
 // ═══════════════════════════════════════════
-// PROTO WIRE — writer + reader + envelope codec
-// (hand-rolled against the pinned field numbers; no generated code)
+// STREAM SEEDS — guests capture the host's resolved URLs from the
+// "zen1|" album hint and push them straight into the handler's memory
+// cache, so playback is an instant memory hit with zero extractor work.
 // ═══════════════════════════════════════════
 
-class PbWriter {
-  final _data = BytesBuilder(copy: false);
+final _pendingStreamSeeds =
+<String, ({String url, Map<String, String> headers})>{};
 
-  void _tag(int field, int wireType) => _varint((field << 3) | wireType);
-
-  void _varint(int value) {
-    var v = value & 0xFFFFFFFFFFFFFFFF;
-    while (v > 0x7F) {
-      _data.addByte((v & 0x7F) | 0x80);
-      v >>= 7;
-    }
-    _data.addByte(v);
+void _noteTrackHint(Map<String, dynamic> t) {
+  final album = t['album']?.toString() ?? '';
+  if (!album.startsWith('zen1|')) return;
+  final parts = album.split('|');
+  if (parts.length < 4) return;
+  final url = parts[1];
+  final id = t['id']?.toString() ?? '';
+  if (url.isEmpty || id.isEmpty || url.startsWith('file://')) return;
+  Map<String, String> headers = const {};
+  if (parts.length > 4) {
+    try {
+      final decoded = jsonDecode(parts.sublist(4).join('|'));
+      if (decoded is Map) {
+        headers = {
+          for (final e in decoded.entries)
+            e.key.toString(): e.value.toString(),
+        };
+      }
+    } catch (_) {}
   }
-
-  void _bytes(List<int> bytes) {
-    _varint(bytes.length);
-    _data.add(bytes);
-  }
-
-  void stringField(int field, String value) {
-    if (value.isEmpty) return;
-    _tag(field, 2);
-    _bytes(utf8.encode(value));
-  }
-
-  void boolField(int field, bool value) {
-    if (!value) return; // proto3 default — omitted
-    _tag(field, 0);
-    _varint(1);
-  }
-
-  void int64Field(int field, int value) {
-    if (value == 0) return;
-    _tag(field, 0);
-    _varint(value);
-  }
-
-  void floatField(int field, double value) {
-    _tag(field, 5);
-    // fixed32 = 4 raw little-endian bytes, NO length prefix
-    final b = ByteData(4)..setFloat32(0, value, Endian.little);
-    _data.add(b.buffer.asUint8List());
-  }
-
-  void messageField(int field, List<int> inner) {
-    _tag(field, 2);
-    _bytes(inner);
-  }
-
-  Uint8List toBytes() => _data.takeBytes();
+  _pendingStreamSeeds[id] = (url: url, headers: headers);
 }
 
-class PbCodec {
-  // Envelope: 1 type(str) 2 payload(bytes) 3 compressed(bool)
-  static Uint8List encodeEnvelope(String type, Uint8List payload) {
-    final w = PbWriter();
-    w.stringField(1, type);
-    if (payload.isNotEmpty) w.messageField(2, payload);
-    return w.toBytes();
-  }
-
-  static ({String type, Uint8List payload, bool compressed}) decodeEnvelope(
-      Uint8List data) {
-    final r = PbReader(data);
-    var type = '';
-    var payload = Uint8List(0);
-    var compressed = false;
-    while (r.hasNext()) {
-      final t = r.readTag();
-      switch (t.$1) {
-        case 1:
-          type = utf8.decode(r.readBytesRaw());
-        case 2:
-          payload = r.readBytesRaw();
-        case 3:
-          compressed = r.readIntField() != 0;
-        default:
-          r.skip(t.$2);
-      }
-    }
-    return (type: type, payload: payload, compressed: compressed);
+void _flushStreamSeeds() {
+  if (_pendingStreamSeeds.isEmpty) return;
+  final seeds = Map.of(_pendingStreamSeeds);
+  _pendingStreamSeeds.clear();
+  for (final e in seeds.entries) {
+    try {
+      audioHandler.seedStreamUrl(e.key, e.value.url, e.value.headers);
+    } catch (_) {}
   }
 }
 
-class PbReader {
-  PbReader(this._data);
-  final Uint8List _data;
-  int _pos = 0;
-
-  bool hasNext() => _pos < _data.length;
-
-  (int, int) readTag() {
-    final key = _varint();
-    return (key >> 3, key & 7);
-  }
-
-  int _varint() {
-    var result = 0;
-    var shift = 0;
-    while (true) {
-      if (_pos >= _data.length) {
-        throw const FormatException('proto varint overrun');
-      }
-      final b = _data[_pos++];
-      result |= (b & 0x7f) << shift;
-      if ((b & 0x80) == 0) break;
-      shift += 7;
-      if (shift > 63) throw const FormatException('proto varint too long');
-    }
-    return result;
-  }
-
-  Uint8List readBytesRaw() {
-    final len = _varint();
-    if (len < 0 || _pos + len > _data.length) {
-      throw const FormatException('proto length overrun');
-    }
-    final out = Uint8List.fromList(_data.sublist(_pos, _pos + len));
-    _pos += len;
-    return out;
-  }
-
-  String readString(int field) {
-    final saved = _pos;
-    while (hasNext()) {
-      final t = readTag();
-      if (t.$1 == field) {
-        if (t.$2 != 2) throw const FormatException('wire mismatch');
-        return utf8.decode(readBytesRaw());
-      }
-      skip(t.$2);
-    }
-    _pos = saved;
-    return '';
-  }
-
-  int readInt(int field) {
-    final saved = _pos;
-    while (hasNext()) {
-      final t = readTag();
-      if (t.$1 == field) {
-        if (t.$2 != 0) throw const FormatException('wire mismatch');
-        return _varint();
-      }
-      skip(t.$2);
-    }
-    _pos = saved;
-    return 0;
-  }
-
-  Uint8List readBytes(int field) {
-    final saved = _pos;
-    while (hasNext()) {
-      final t = readTag();
-      if (t.$1 == field) {
-        if (t.$2 != 2) throw const FormatException('wire mismatch');
-        return readBytesRaw();
-      }
-      skip(t.$2);
-    }
-    _pos = saved;
-    return Uint8List(0);
-  }
-
-  bool readBool(int field) => readInt(field) != 0;
-
-  int readIntField() => _varint();
-
-  int readRawVarint() => _varint();
-
-  void skip(int wireType) {
-    switch (wireType) {
-      case 0:
-        _varint();
-      case 1:
-        _pos += 8;
-      case 2:
-        final len = _varint();
-        _pos += len;
-      case 5:
-        _pos += 4;
-      default:
-        throw FormatException('unsupported wire type $wireType');
-    }
-  }
-}
-
-// ── shared payload parsers (used by the service above) ──
+// ═══════════════════════════════════════════
+// PARSERS
+// ═══════════════════════════════════════════
 
 LtPlaybackAction parsePlaybackAction(Uint8List payload) {
   final r = PbReader(payload);
@@ -1421,8 +1487,12 @@ LtPlaybackAction parsePlaybackAction(Uint8List payload) {
         p.positionMs = r.readRawVarint();
       case 4:
         p.track = parseTrackInfo(r.readBytesRaw());
+      case 5:
+        p.insertNext = r.readRawVarint() != 0;
       case 6:
         p.queue.add(parseTrackInfo(r.readBytesRaw()));
+      case 7:
+        p.queueTitle = utf8.decode(r.readBytesRaw());
       case 9:
         p.serverTime = r.readRawVarint();
       case 11:
@@ -1564,10 +1634,210 @@ LtUser? parseUserInfo(Uint8List bytes) {
   return (a, b);
 }
 
-Song mapToSong(Map<String, dynamic> t) => Song(
-  id: '${t['id'] ?? ''}',
-  title: '${t['title'] ?? 'Unknown'}',
-  artist: '${t['artist'] ?? 'Unknown'}',
-  thumbnail: '${t['thumbnail'] ?? ''}',
-  duration: Duration(milliseconds: ((t['duration'] as num?) ?? 0).toInt()),
-);
+Song mapToSong(Map<String, dynamic> t) {
+  _noteTrackHint(t);
+  return Song(
+    id: '${t['id'] ?? ''}',
+    title: '${t['title'] ?? 'Unknown'}',
+    artist: '${t['artist'] ?? 'Unknown'}',
+    thumbnail: '${t['thumbnail'] ?? ''}',
+    duration: Duration(milliseconds: ((t['duration'] as num?) ?? 0).toInt()),
+  );
+}
+
+// ═══════════════════════════════════════════
+// PROTO WIRE — writer + reader + envelope codec
+// ═══════════════════════════════════════════
+
+class Envelope {
+  Envelope(this.type, this.payload, this.compressed);
+  final String type;
+  final Uint8List payload;
+  final bool compressed;
+}
+
+class PbWriter {
+  final _data = BytesBuilder(copy: false);
+
+  void _tag(int field, int wireType) => _varint((field << 3) | wireType);
+
+  void _varint(int value) {
+    var v = value & 0xFFFFFFFFFFFFFFFF;
+    while (v > 0x7F) {
+      _data.addByte((v & 0x7F) | 0x80);
+      v >>= 7;
+    }
+    _data.addByte(v);
+  }
+
+  void _bytes(List<int> bytes) {
+    _varint(bytes.length);
+    _data.add(bytes);
+  }
+
+  void stringField(int field, String value) {
+    if (value.isEmpty) return;
+    _tag(field, 2);
+    _bytes(utf8.encode(value));
+  }
+
+  void boolField(int field, bool value) {
+    if (!value) return; // proto3 default — omitted
+    _tag(field, 0);
+    _varint(1);
+  }
+
+  void int64Field(int field, int value) {
+    if (value == 0) return;
+    _tag(field, 0);
+    _varint(value);
+  }
+
+  void floatField(int field, double value) {
+    _tag(field, 5);
+    // fixed32 = 4 raw little-endian bytes, NO length prefix
+    final b = ByteData(4)..setFloat32(0, value, Endian.little);
+    _data.add(b.buffer.asUint8List());
+  }
+
+  void messageField(int field, List<int> inner) {
+    _tag(field, 2);
+    _bytes(inner);
+  }
+
+  Uint8List toBytes() => _data.takeBytes();
+}
+
+class PbCodec {
+  // Envelope: 1 type(str) 2 payload(bytes) 3 compressed(bool)
+  static Uint8List encodeEnvelope(String type, Uint8List payload) {
+    final w = PbWriter();
+    w.stringField(1, type);
+    if (payload.isNotEmpty) w.messageField(2, payload);
+    return w.toBytes();
+  }
+
+  static Envelope decodeEnvelope(Uint8List data) {
+    final r = PbReader(data);
+    var type = '';
+    var payload = Uint8List(0);
+    var compressed = false;
+    while (r.hasNext()) {
+      final t = r.readTag();
+      switch (t.$1) {
+        case 1:
+          type = utf8.decode(r.readBytesRaw());
+        case 2:
+          payload = r.readBytesRaw();
+        case 3:
+          compressed = r.readIntField() != 0;
+        default:
+          r.skip(t.$2);
+      }
+    }
+    return Envelope(type, payload, compressed);
+  }
+}
+
+class PbReader {
+  PbReader(this._data);
+  final Uint8List _data;
+  int _pos = 0;
+
+  bool hasNext() => _pos < _data.length;
+
+  (int, int) readTag() {
+    final key = _varint();
+    return (key >> 3, key & 7);
+  }
+
+  int _varint() {
+    var result = 0;
+    var shift = 0;
+    while (true) {
+      if (_pos >= _data.length) {
+        throw const FormatException('proto varint overrun');
+      }
+      final b = _data[_pos++];
+      result |= (b & 0x7f) << shift;
+      if ((b & 0x80) == 0) break;
+      shift += 7;
+      if (shift > 63) throw const FormatException('proto varint too long');
+    }
+    return result;
+  }
+
+  Uint8List readBytesRaw() {
+    final len = _varint();
+    if (len < 0 || _pos + len > _data.length) {
+      throw const FormatException('proto length overrun');
+    }
+    final out = Uint8List.fromList(_data.sublist(_pos, _pos + len));
+    _pos += len;
+    return out;
+  }
+
+  String readString(int field) {
+    final saved = _pos;
+    while (hasNext()) {
+      final t = readTag();
+      if (t.$1 == field) {
+        if (t.$2 != 2) throw const FormatException('wire mismatch');
+        return utf8.decode(readBytesRaw());
+      }
+      skip(t.$2);
+    }
+    _pos = saved;
+    return '';
+  }
+
+  int readInt(int field) {
+    final saved = _pos;
+    while (hasNext()) {
+      final t = readTag();
+      if (t.$1 == field) {
+        if (t.$2 != 0) throw const FormatException('wire mismatch');
+        return _varint();
+      }
+      skip(t.$2);
+    }
+    _pos = saved;
+    return 0;
+  }
+
+  Uint8List readBytes(int field) {
+    final saved = _pos;
+    while (hasNext()) {
+      final t = readTag();
+      if (t.$1 == field) {
+        if (t.$2 != 2) throw const FormatException('wire mismatch');
+        return readBytesRaw();
+      }
+      skip(t.$2);
+    }
+    _pos = saved;
+    return Uint8List(0);
+  }
+
+  bool readBool(int field) => readInt(field) != 0;
+
+  int readIntField() => _varint();
+
+  int readRawVarint() => _varint();
+
+  void skip(int wireType) {
+    switch (wireType) {
+      case 0:
+        _varint();
+      case 1:
+        _pos += 8;
+      case 2:
+        final len = _varint();
+        _pos += len;
+      case 5:
+        _pos += 4;
+      default:
+        throw FormatException('unsupported wire type $wireType');
+    }
+  }
+}

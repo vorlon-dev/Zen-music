@@ -32,6 +32,9 @@ class YoutubeService {
   bool _extractorInitialized = false;
 
   final Map<String, String> _videoIdCache = {};
+  // In-flight video-id resolutions — concurrent callers for the same
+  // song share one lookup instead of duplicating the whole search.
+  final Map<String, Future<String?>> _videoIdInFlight = {};
 
   /// 'low' | 'medium' | 'high' — caps audio bitrate selection.
   String _audioQuality = 'high';
@@ -57,7 +60,8 @@ class YoutubeService {
 
   Future<void> _ensureExtractorInit() async {
     if (_extractorInitialized) return;
-    await _extractor.init();
+    // A hung init must never stall the whole resolution chain.
+    await _extractor.init().timeout(const Duration(seconds: 12));
     _extractorInitialized = true;
   }
 
@@ -236,7 +240,7 @@ class YoutubeService {
           'params': 'wAEB',
         }),
       )
-          .timeout(const Duration(seconds: 12));
+          .timeout(const Duration(seconds: 6));
 
       if (resp.statusCode != 200) {
         print('📻 YTM radio: status ${resp.statusCode}');
@@ -355,8 +359,9 @@ class YoutubeService {
 
     try {
       await _ensureExtractorInit();
-      final page =
-      await _extractor.search(query, filter: SearchFilter.musicSongs);
+      final page = await _extractor
+          .search(query, filter: SearchFilter.musicSongs)
+          .timeout(const Duration(seconds: 8));
       for (final item in page.items) {
         final vid = _extractVideoId(item.url);
         if (vid == null) continue;
@@ -378,7 +383,8 @@ class YoutubeService {
 
   Future<List<Song>> _youtubeVideoSearch(String query) async {
     try {
-      final results = await _yt.search.search(query);
+      final results =
+      await _yt.search.search(query).timeout(const Duration(seconds: 8));
       final songs = <Song>[];
       for (final v in results) {
         songs.add(Song(
@@ -449,9 +455,9 @@ class YoutubeService {
     // Tier 3: yt_extractor (probed).
     try {
       await _ensureExtractorInit();
-      final info = await _extractor.getStreamInfo(
-        'https://www.youtube.com/watch?v=${song.id}',
-      );
+      final info = await _extractor
+          .getStreamInfo('https://www.youtube.com/watch?v=${song.id}')
+          .timeout(const Duration(seconds: 8));
       final audio = info.bestAudioStream;
       if (audio != null && audio.url.isNotEmpty) {
         if (await _isPlayable(audio.url, null)) {
@@ -489,7 +495,7 @@ class YoutubeService {
       final manifest = await _yt.videos.streams.getManifest(
         videoId,
         ytClients: [entry.client],
-      );
+      ).timeout(const Duration(seconds: 10));
       if (manifest.audioOnly.isEmpty) {
         print('   ↳ ${entry.name}: no audio-only streams');
         return null;
@@ -577,7 +583,9 @@ class YoutubeService {
     await _throttle();
     print('🎬 Video: resolving SD muxed (default client) for $videoId ...');
     try {
-      final manifest = await _yt.videos.streams.getManifest(videoId);
+      final manifest = await _yt.videos.streams
+          .getManifest(videoId)
+          .timeout(const Duration(seconds: 10));
       if (manifest.muxed.isEmpty) {
         print('🎬 Video: no muxed streams for $videoId');
         return null;
@@ -599,7 +607,7 @@ class YoutubeService {
       final manifest = await _yt.videos.streams.getManifest(
         videoId,
         ytClients: [entry.client],
-      );
+      ).timeout(const Duration(seconds: 10));
 
       final mp4Only = manifest.videoOnly
           .where((s) => s.container == yt_explode.StreamContainer.mp4)
@@ -673,7 +681,7 @@ class YoutubeService {
       final manifest = await _yt.videos.streams.getManifest(
         videoId,
         ytClients: [yt_explode.YoutubeApiClient.safari],
-      );
+      ).timeout(const Duration(seconds: 10));
       final hls = manifest.hls;
       if (hls.isEmpty) {
         print('   ↳ safari: no HLS streams');
@@ -685,7 +693,7 @@ class YoutubeService {
         try {
           final resp = await _probe
               .get(playlistUrl)
-              .timeout(const Duration(seconds: 8));
+              .timeout(const Duration(seconds: 5));
           if (resp.statusCode != 200) {
             print('   ↳ HLS playlist status ${resp.statusCode} — next');
             continue;
@@ -772,7 +780,8 @@ class YoutubeService {
       print('🎬 Video: trying Invidious $base for $videoId ...');
       try {
         final uri = Uri.parse('$base/api/v1/videos/$videoId?local=true');
-        final resp = await _probe.get(uri).timeout(const Duration(seconds: 8));
+        final resp =
+        await _probe.get(uri).timeout(const Duration(seconds: 5));
         if (resp.statusCode != 200) {
           print('   ↳ $base status ${resp.statusCode} — next instance');
           continue;
@@ -838,7 +847,7 @@ class YoutubeService {
       if (ua != null) headers['User-Agent'] = ua;
       final resp = await _probe
           .get(Uri.parse(url), headers: headers)
-          .timeout(const Duration(seconds: 6));
+          .timeout(const Duration(seconds: 4));
       return resp.statusCode == 200 || resp.statusCode == 206;
     } catch (_) {
       return false;
@@ -856,14 +865,28 @@ class YoutubeService {
     final cached = _videoIdCache[song.id];
     if (cached != null) return cached;
 
+    // Concurrent callers (radio fill + related + player UI) share one
+    // lookup instead of duplicating the whole search chain.
+    final inFlight = _videoIdInFlight[song.id];
+    if (inFlight != null) return inFlight;
+
+    final future = _resolveVideoId(song);
+    _videoIdInFlight[song.id] = future;
+    try {
+      return await future;
+    } finally {
+      _videoIdInFlight.remove(song.id);
+    }
+  }
+
+  Future<String?> _resolveVideoId(Song song) async {
     final query = '${song.title} ${song.artist}';
 
     try {
       await _ensureExtractorInit();
-      final page = await _extractor.search(
-        query,
-        filter: SearchFilter.musicVideos,
-      );
+      final page = await _extractor
+          .search(query, filter: SearchFilter.musicVideos)
+          .timeout(const Duration(seconds: 8));
       for (final item in page.items) {
         final vid = _extractVideoId(item.url);
         if (vid != null) {
@@ -878,7 +901,8 @@ class YoutubeService {
 
     try {
       await _throttle();
-      final results = await _yt.search.search(query);
+      final results =
+      await _yt.search.search(query).timeout(const Duration(seconds: 8));
       if (results.isNotEmpty) {
         final vid = results.first.id.value;
         _videoIdCache[song.id] = vid;
@@ -921,9 +945,9 @@ class YoutubeService {
     // Tier 2: yt_extractor related streams.
     try {
       await _ensureExtractorInit();
-      final related = await _extractor.getRelatedStreams(
-        'https://www.youtube.com/watch?v=$youtubeId',
-      );
+      final related = await _extractor
+          .getRelatedStreams('https://www.youtube.com/watch?v=$youtubeId')
+          .timeout(const Duration(seconds: 8));
       final songs = <Song>[];
       for (final item in related) {
         final vid = _extractVideoId(item.url);
@@ -945,10 +969,12 @@ class YoutubeService {
     // Tier 3: filtered music search fallback.
     try {
       await _ensureExtractorInit();
-      final page = await _extractor.search(
+      final page = await _extractor
+          .search(
         '${seedSong.title} ${seedSong.artist.split(',').first.trim()}',
         filter: SearchFilter.musicSongs,
-      );
+      )
+          .timeout(const Duration(seconds: 8));
       final artistPart = seedSong.artist.split(',').first.trim();
       final artistWords = artistPart.toLowerCase()
           .replaceAll(RegExp(r'[^\w\s]'), ' ')

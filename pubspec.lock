@@ -704,6 +704,30 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  package_info_plus:
+    dependency: transitive
+    description:
+      name: package_info_plus
+      sha256: "127e1751e37ffb2ff4658beeaca77bad0c27bf5f932bd3a501c2296926d4b481"
+      url: "https://pub.dev"
+    source: hosted
+    version: "10.2.1"
+  package_info_plus_platform_interface:
+    dependency: transitive
+    description:
+      name: package_info_plus_platform_interface
+      sha256: db762cb2f4f25ee60fb6359773861b0f199e00b90d237bd85a76a1e806b46ef4
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.1.0"
+  palette_generator:
+    dependency: "direct main"
+    description:
+      name: palette_generator
+      sha256: "4420f7ccc3f0a4a906144e73f8b6267cd940b64f57a7262e95cb8cec3a8ae0ed"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.3+7"
   palette_generator_master:
     dependency: "direct main"
     description:
@@ -1197,6 +1221,30 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "15.3.0"
+  volume_controller:
+    dependency: "direct main"
+    description:
+      name: volume_controller
+      sha256: a77534cf64fab42c47b7fc7a9fdc85fb8566c9477790bd1de53e3ed7991f0c94
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.7.1"
+  wakelock_plus:
+    dependency: "direct main"
+    description:
+      name: wakelock_plus
+      sha256: "22b3e7e937721de70e63c85e7139f4ac781dc22863b9262431a53ac030eb074b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.8.0"
+  wakelock_plus_platform_interface:
+    dependency: transitive
+    description:
+      name: wakelock_plus_platform_interface
+      sha256: "764c25504562abc8ac3406f5d175f126b276e6ba916c7c2675690b73368ca384"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.7.0"
   watcher:
     dependency: transitive
     description:

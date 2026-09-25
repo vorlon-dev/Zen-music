@@ -180,7 +180,6 @@ class StorageService {
   // ═════════════════════════════════════════════
 
   Future<void> savePlayedSong(Song song) async {
-    final json = jsonEncode(song.toJson());
     final existing = _historyBox.values.toList();
 
     final filtered = existing.where((s) {
@@ -192,7 +191,13 @@ class StorageService {
       }
     }).toList();
 
-    filtered.insert(0, json);
+    // Stamp the current play time (used by the History screen's date
+    // groups); previously saved entries keep their original stamp.
+    final entry = jsonEncode({
+      ...song.toJson(),
+      'playedAt': DateTime.now().millisecondsSinceEpoch,
+    });
+    filtered.insert(0, entry);
     final trimmed = filtered.take(_maxHistory).toList();
 
     await _historyBox.clear();
@@ -210,6 +215,43 @@ class StorageService {
       } catch (_) {}
     }
     return songs;
+  }
+
+  /// History with play timestamps (History screen date groups).
+  /// Newest first. Entries saved before this field existed return
+  /// playedAt: null (they land in the "Earlier" bucket).
+  List<({Song song, DateTime? playedAt})> getPlayedHistoryDetailed() {
+    final out = <({Song song, DateTime? playedAt})>[];
+    for (final raw in _historyBox.values) {
+      try {
+        final map = jsonDecode(raw) as Map<String, dynamic>;
+        final song = Song.fromJson(map);
+        final ts = (map['playedAt'] as num?)?.toInt();
+        out.add((
+        song: song,
+        playedAt: ts == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(ts),
+        ));
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  /// Removes a single song from the played history.
+  Future<void> removePlayedSong(String songId) async {
+    final existing = _historyBox.values.toList();
+    final kept = <String>[];
+    for (final s in existing) {
+      try {
+        final map = jsonDecode(s) as Map<String, dynamic>;
+        if (map['id'] != songId) kept.add(s);
+      } catch (_) {}
+    }
+    await _historyBox.clear();
+    for (var i = 0; i < kept.length; i++) {
+      await _historyBox.put(i.toString(), kept[i]);
+    }
   }
 
   Future<void> clearHistory() async {
