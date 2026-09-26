@@ -21,9 +21,13 @@ import '../models/song.dart';
 ///     handler's memory cache — zero extraction, zero Hive round-trip;
 ///   - guest applies are CHAIN-FREE: play/pause land instantly even while
 ///     a load is in flight;
-///   - host streams a 3s position heartbeat; guests drift-correct (1s);
+///   - guest drift-correction: periodic request_sync (a VALID protocol
+///     message — the server rejects unknown actions like a raw 'position'
+///     heartbeat); the sync_state reply re-aligns position;
 ///   - failed loads retry the same URL 5x in the handler, then auto
 ///     re-sync — never falling back to the previous track.
+/// Guest lockout: all host-driven calls go through audioHandler.runRemote();
+/// user-initiated transport is ignored by the handler while in a room.
 class ListenTogetherService {
   ListenTogetherService._();
   static final ListenTogetherService instance = ListenTogetherService._();
@@ -39,7 +43,7 @@ class ListenTogetherService {
   StreamSubscription<dynamic>? _wsSub;
   Timer? _pingTimer;
   Timer? _reconnectTimer;
-  Timer? _posSyncTimer;
+  Timer? _guestSyncTimer;
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<MediaItem?>? _songSub;
   StreamSubscription<Duration>? _posSub;
@@ -150,8 +154,8 @@ class ListenTogetherService {
     _pingTimer = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
-    _posSyncTimer?.cancel();
-    _posSyncTimer = null;
+    _guestSyncTimer?.cancel();
+    _guestSyncTimer = null;
     _playingSub?.cancel();
     _playingSub = null;
     _songSub?.cancel();
@@ -263,6 +267,22 @@ class ListenTogetherService {
     // Guest lockout: user-initiated transport is ignored by the handler;
     // host-driven calls bypass the guard via runRemote().
     audioHandler.hostControlsPlayback = isInRoom && !_isHost;
+    _applyGuestSyncTimer();
+  }
+
+  /// Guest drift correction: periodic request_sync (a valid protocol
+  /// message) — the server answers with sync_state, which re-aligns
+  /// position and play state. The server rejects unknown actions like a
+  /// raw 'position' heartbeat, so this is the sanctioned path.
+  void _applyGuestSyncTimer() {
+    _guestSyncTimer?.cancel();
+    _guestSyncTimer = null;
+    if (!isInRoom || _isHost) return;
+    _guestSyncTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (!isInRoom || _isHost) return;
+      if (!audioHandler.playbackState.value.playing) return;
+      _send('request_sync', null);
+    });
   }
 
   /// Runs a host-driven playback mutation with the guest lockout bypassed.
@@ -859,7 +879,8 @@ class ListenTogetherService {
         }
         break;
       case 'position':
-      // Host heartbeat (3s) — drift-correct silently.
+      // Non-protocol action (never sent by us anymore); kept for
+      // forward-compatibility if a future server supports it.
         final curId = audioHandler.currentSong?.id;
         if (curId == null || curId != p.trackId) break;
         _patchIsPlaying(true);
@@ -1042,8 +1063,6 @@ class ListenTogetherService {
     _playingSub?.cancel();
     _songSub?.cancel();
     _posSub?.cancel();
-    _posSyncTimer?.cancel();
-    _posSyncTimer = null;
     _posSub = audioHandler.positionStream.listen((p) {
       _lastPositionMs = p.inMilliseconds;
     });
@@ -1097,15 +1116,31 @@ class ListenTogetherService {
       );
     });
 
-    // Position heartbeat — keeps every seek bar aligned without
-    // waiting for play/pause events.
-    _posSyncTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (!_isHost || !isInRoom) return;
-      final cur = audioHandler.currentSong;
-      if (cur == null) return;
-      if (!audioHandler.playbackState.value.playing) return;
-      _sendAction('position', trackId: cur.id, positionMs: _lastPositionMs);
-    });
+    // If the host already had a song loaded before the room existed, the
+    // current-song stream may never fire again — push it once now.
+    final current = audioHandler.currentSong;
+    if (current != null && current.id != _lastBroadcastSongId) {
+      _lastBroadcastSongId = current.id;
+      _sendAction(
+        'change_track',
+        trackId: current.id,
+        track: current,
+        queue: audioHandler.queueSongs,
+        queueTitle: 'Listen Together',
+      );
+      _patchCurrentTrack(current);
+      final playing = audioHandler.playbackState.value.playing;
+      _lastPlaying = playing;
+      _sendAction(
+        playing ? 'play' : 'pause',
+        trackId: current.id,
+        positionMs: _lastPositionMs,
+      );
+    }
+
+    // NOTE: no raw 'position' heartbeat here — the server rejects
+    // unknown actions. Guests drift-correct via periodic request_sync
+    // instead (see _applyGuestSyncTimer).
   }
 
   /// Kotlin-reference parity: introduce the current track to newcomers.

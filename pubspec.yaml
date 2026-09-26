@@ -22,7 +22,7 @@ dependencies:
   audio_session: ^0.1.21
   # WebView for YouTube embed video mode
   webview_flutter: ^4.10.0
-
+  record: ^7.1.1
   # ─────────────────────────────────────────────
   # 📝 Lyrics
   # ─────────────────────────────────────────────
@@ -60,6 +60,8 @@ dependencies:
   wakelock_plus: ^1.8.0
   palette_generator: ^0.3.3+7
   volume_controller: ^3.7.1
+  package_info_plus: ^10.2.1
+  url_launcher: ^6.3.2
 dev_dependencies:
   flutter_test:
     sdk: flutter

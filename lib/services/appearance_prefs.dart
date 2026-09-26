@@ -33,6 +33,8 @@ class AppearancePrefs {
   static final ambientShowTitle = ValueNotifier<bool>(false);
   static final ambientShowArtist = ValueNotifier<bool>(false);
   static final ambientShowLyrics = ValueNotifier<bool>(true);
+  // Apple Music animated canvas on the player.
+  static final canvasEnabled = ValueNotifier<bool>(true);
 
   static Future<void> load() async {
     if (_loaded) return;
@@ -54,6 +56,7 @@ class AppearancePrefs {
     ambientShowTitle.value = p.getBool('ap_amb_title') ?? false;
     ambientShowArtist.value = p.getBool('ap_amb_artist') ?? false;
     ambientShowLyrics.value = p.getBool('ap_amb_lyrics') ?? true;
+    canvasEnabled.value = p.getBool('ap_canvas') ?? true;
     _loaded = true;
   }
 
@@ -153,5 +156,10 @@ class AppearancePrefs {
   static Future<void> setAmbientShowLyrics(bool v) async {
     ambientShowLyrics.value = v;
     await _write('ap_amb_lyrics', v);
+  }
+
+  static Future<void> setCanvasEnabled(bool v) async {
+    canvasEnabled.value = v;
+    await _write('ap_canvas', v);
   }
 }

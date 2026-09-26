@@ -22,6 +22,7 @@ import '../widgets/youtube_thumbnail.dart';
 import 'collection_screen.dart';
 import 'new_release_screen.dart';
 import 'player_screen.dart';
+import 'recognize_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -522,6 +523,14 @@ class _SearchScreenState extends State<SearchScreen> {
                 icon: const Icon(Icons.close_rounded,
                     color: SpotifyColors.textSecondary),
               ),
+            // Song recognition entry (Shazam-style).
+            IconButton(
+              onPressed: () =>
+                  pushSharedAxisY(context, const RecognizeScreen()),
+              tooltip: 'Recognize a song',
+              icon: const Icon(Icons.graphic_eq_rounded,
+                  color: SpotifyColors.textSecondary, size: 22),
+            ),
             // Echo: source toggle icon (online ↔ library).
             IconButton(
               onPressed: _toggleSource,
@@ -706,7 +715,6 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
           const SizedBox(height: 8),
         ],
-        // Header opens Echo's full NewReleaseScreen.
         InkWell(
           onTap: () =>
               pushSharedAxisY(context, const NewReleaseScreen()),

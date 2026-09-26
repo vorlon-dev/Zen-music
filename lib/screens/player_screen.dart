@@ -14,6 +14,7 @@ import '../widgets/wave_spinner.dart';
 import '../main.dart';
 import '../models/song.dart';
 import '../services/appearance_prefs.dart';
+import '../services/apple_canvas_service.dart';
 import '../services/downloads_service.dart';
 import '../services/listen_together_service.dart';
 import '../services/youtube_service.dart';
@@ -58,6 +59,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _resolvingFor;
   bool _videoTriedSd = false;
 
+  // Apple Music canvas (animated artwork background).
+  String? _canvasUrl;
+  String? _canvasForSongId;
+  final Set<String> _canvasFailed = {};
+
   List<Song> _relatedSongs = [];
   String? _relatedForId;
   bool _lyricsSynced = false;
@@ -77,6 +83,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (_lyricsSynced) setState(() => _lyricsSynced = false);
       _loadRelated();
       if (_showVideo) _resolveVideoFor(song);
+      _resolveCanvas(song);
     });
 
     // WAKELOCK — keep screen on while the player is open (if enabled).
@@ -86,6 +93,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // Re-apply the immersive mode live when the setting is toggled while
     // lyrics are already open.
     AppearancePrefs.hideStatusBarOnLyrics.addListener(_applySystemUi);
+    AppearancePrefs.canvasEnabled.addListener(_onCanvasPrefChanged);
   }
 
   void _applyKeepScreenOn() {
@@ -116,6 +124,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     AppearancePrefs.keepScreenOn.removeListener(_applyKeepScreenOn);
     AppearancePrefs.hideStatusBarOnLyrics.removeListener(_applySystemUi);
+    AppearancePrefs.canvasEnabled.removeListener(_onCanvasPrefChanged);
     WakelockPlus.disable(); // WAKELOCK
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _songSub?.cancel();
@@ -130,6 +139,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final related = await audioHandler.getRelatedForUI(song);
     if (!mounted) return;
     setState(() => _relatedSongs = related);
+  }
+
+  // ── Apple Music canvas ──
+
+  void _onCanvasPrefChanged() {
+    if (!mounted) return;
+    if (!AppearancePrefs.canvasEnabled.value) {
+      if (_canvasUrl != null) {
+        setState(() {
+          _canvasUrl = null;
+          _canvasForSongId = null;
+        });
+      }
+    } else {
+      final song = audioHandler.currentSong;
+      if (song != null) _resolveCanvas(song);
+    }
+  }
+
+  Future<void> _resolveCanvas(Song song) async {
+    if (!AppearancePrefs.canvasEnabled.value ||
+        song.thumbnail.isEmpty ||
+        _canvasFailed.contains(song.id)) {
+      return;
+    }
+    if (_canvasForSongId == song.id) return;
+    _canvasForSongId = song.id;
+    final canvas = await AppleCanvasService.instance
+        .getBySongArtist(song.title, song.artist);
+    if (!mounted) return;
+    if (audioHandler.currentSong?.id != song.id) return; // song changed
+    if (canvas == null || canvas.animated.isEmpty) {
+      _canvasFailed.add(song.id);
+      setState(() => _canvasUrl = null);
+      return;
+    }
+    setState(() => _canvasUrl = canvas.animated);
   }
 
   Future<void> _toggleVideo(Song song) async {
@@ -267,6 +313,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 onUnavailable: _onVideoUnavailable,
               ),
             )
+          else if (_canvasUrl != null)
+            Positioned.fill(
+              // Apple Music animated canvas — a short native loop, so the
+              // whole asset loops (no 15 s clip window). Falls back via
+              // onUnavailable if the stream can't play.
+              child: VideoBackdrop(
+                key: ValueKey(_canvasUrl),
+                streamUrl: _canvasUrl!,
+                playing: controller.isPlaying,
+                httpHeaders: const {},
+                shortLoop: true,
+                onUnavailable: (reason) {
+                  print('AppleCanvas: playback unavailable ($reason)');
+                  if (!mounted) return;
+                  final id = audioHandler.currentSong?.id;
+                  if (id != null) _canvasFailed.add(id);
+                  setState(() => _canvasUrl = null);
+                },
+              ),
+            )
           else
             Positioned.fill(
               // Player background style: gradient | solid | blur.
@@ -296,7 +362,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
 
-          if (_showVideo)
+          if (_showVideo || _canvasUrl != null)
             Positioned.fill(
               child: IgnorePointer(
                 child: Container(

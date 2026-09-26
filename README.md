@@ -1,193 +1,99 @@
-# 🎵 ZenMusic
+# <img src="screenshots/logo.png" alt="ZenMusic Logo" width="40" align="center"/> ZenMusic
 
-A multi-source Flutter music player with a Listen Together mode
+A modern Android music player with multi-source streaming, synced lyrics, offline playback and Listen Together.
 
-![Status](https://img.shields.io/badge/status-under%20development-orange)
-![Platform](https://img.shields.io/badge/platform-Flutter-blue)
-![License](https://img.shields.io/badge/license-GPL--3.0-green)
+## Table of Contents
+- [Overview](#overview)
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [Installation](#installation)
+- [Resources & Credits](#resources--credits)
+- [Contributing](#contributing)
+- [Legal](#legal)
 
-> ⚠️ **UNDER ACTIVE DEVELOPMENT**
-> This project is still in development. Features may change, break, or disappear between commits. Anything you build from this source is at your own risk — see the [Disclaimer](#️-disclaimer) at the bottom.
+## Overview
 
-## 📖 About
+ZenMusic is a Flutter-based music player for Android. It streams from multiple sources (JioSaavn and YouTube Music), supports offline downloads, real-time synchronized lyrics, and lets you listen together with friends in perfect sync.
 
-ZenMusic is an Android music player built with Flutter that streams from multiple sources — YouTube, YouTube Music and JioSaavn — behind one clean, dark interface. It grew out of a simple question: what if one app could do everything?
+> [!IMPORTANT]
+> This app is still in development. Features may change and you may run into bugs. Updates are delivered through GitHub Releases — download the latest APK from the [Releases Page](../../releases).
 
-Right now you can:
+## Screenshots
 
-- Stream songs from YouTube / YT Music / JioSaavn with automatic fallback between sources
-- Download songs and play them completely offline
-- **Listen Together** — create a room, share the code, and everyone hears the same song at the same moment, in perfect sync
-- Like songs, build playlists, and keep a listening history with a monthly recap
-- View synced lyrics with word-level highlighting
-- Install community extensions (`.eapk`) to add entirely new music sources at runtime — the same extension system used by [Echo](https://github.com/brahmkshatriya/echo)
-- Fine-tune playback with a system equalizer, sleep timer, audio quality settings and more
+| Home Screen | Player | Lyrics |
+|---|---|---|
+| ![Home Screen](screenshots/home.png) | ![Player](screenshots/player.png) | ![Lyrics](screenshots/lyrics.png) |
 
-Everything streams on demand. ZenMusic does not host, store or distribute any music — see the [Disclaimer](#️-disclaimer).
+| Listen Together | Search | Library |
+|---|---|---|
+| ![Listen Together](screenshots/listen_together.png) | ![Search](screenshots/library.png) | ![Library](screenshots/library.png) |
 
-## ✨ Features
+## Features
 
-### 🎧 Playback
-- Multi-source streaming: YouTube · YouTube Music · JioSaavn (320 kbps)
-- Automatic source fallback — if one extractor fails, the next takes over
-- Background playback with a full media notification and lock-screen controls
-- Radio mode: every song seeds an endless related-songs queue
-- Shuffle, repeat (one/all), queue management with drag & reorder
-- Audio quality settings (low / medium / high)
-- System equalizer support (Android)
+- **Multi-Source Streaming** — JioSaavn (320 kbps AAC) and YouTube Music, with source extensions.
+- **Listen Together** — Create a room, share the code, and listen in perfect sync. The host controls playback for everyone.
+- **Synced Lyrics** — Time-synchronized lyrics with adjustable size, spacing and alignment.
+- **Offline Downloads** — Download songs and play them without a network connection.
+- **Song Recognition** — Identify music playing around you and play it instantly.
+- **Ambient Mode** — Landscape player with an animated glow background built from the album art.
+- **Sleep Timer & Equalizer** — System equalizer with bass and treble controls, sleep timer with end-of-song option.
+- **Appearance Settings** — Player background styles, three progress slider styles, thumbnail radius, haptics and more.
+- **Import from Spotify** — Bring your playlists over from a CSV export.
+- **OTA Updates** — The app checks GitHub Releases and tells you when a new version is out.
 
-### 📥 Offline
-- Download any song with a single tap and a live progress ring
-- Downloaded tracks play with zero network access
-- A dedicated Downloads shelf in your library, with per-song and clear-all deletion
+## Installation
 
-### 🌐 Listen Together
-- Create a room and share an 8-character code
-- Everyone hears the same track at the same moment — play, pause, seek and skip are mirrored live, with server-time drift correction
-- Host controls: approve or reject join requests, remove users
-- Guests can suggest tracks (suggestions land with the host)
-- Automatic reconnection with a 15-minute session grace window
-- Powered by a self-hosted [metroserver](https://github.com/MetrolistGroup/metroserver) instance
+Download the latest APK from the [Releases Page](../../releases) and install it on your Android device.
 
-### 🧩 Extensions
-- Install community `.eapk` extensions to add new sources
-- Extensions run in a native `DexClassLoader` host implementing the [Echo](https://github.com/brahmkshatriya/echo) extension contract
-- Per-extension home feeds, detail pages, search, streaming and host-approval flow
-
-### 📝 Lyrics
-- Time-synced lyrics with smooth word-level highlighting ([LRCLIB](https://lrclib.net/))
-- Automatic fallback to estimated timing for plain-text lyrics
-- A "synced" badge tells you which is which
-
-### 🎨 Interface
-- Dark, Spotify-inspired UI rebuilt in the design language of [Echo Nightly](https://github.com/brahmkshatriya/echo)
-- Animated wave seek bar, morphing play/pause button, "now playing" visualizer badges
-- Shared-axis page transitions and animated navigation
-- Paytone One display typography
-
-### 📊 Extras
-- Listening statistics with a monthly recap card
-- Search across songs, videos, playlists and albums from multiple sources in parallel
-- Backup & restore (liked songs + playlists → JSON)
-- Update checks
-
-<!--
-Screenshots
-Add 2–4 images here (home, player, listen together) once available.
-Place them in a screenshots/ folder and reference them like:
-![Home](screenshots/home.png) ![Player](screenshots/player.png)
--->
-
-## 🚧 Roadmap
-
-- [x] Multi-source streaming & fallback
-- [x] Extension system (install / select / home feed / detail / search / stream)
-- [x] Listen Together (rooms, host approval, sync, reconnect)
-- [x] Offline downloads
-- [x] Liked songs & playlists
-- [x] Lyrics (synced + plain)
-- [ ] Playlist management (rename, reorder, remove songs)
-- [ ] Listen Together: track suggestions UI polish
-- [ ] iOS support
-
-## 🛠️ Building from source
-
-### Requirements
-
-| Tool | Version |
-|---|---|
-| Flutter | 3.x |
-| Android Studio | with SDK 34+ |
-| Java | 17 |
-| Git | with submodule support |
-
-### Steps
+### Building from Source
 
 ```bash
-# 1. Clone with submodules (the Echo extension contract is referenced
-#    by the native extension host)
-git clone --recurse-submodules <this-repo-url>
-cd zenmusic
-
-# 2. Fetch dependencies
+git clone https://github.com/vorlon-dev/Zen-music.git
+cd Zen-music
 flutter pub get
-
-# 3. Run
 flutter run
 ```
 
-### Listen Together server
+## Resources & Credits
 
-Listen Together requires a running [metroserver](https://github.com/MetrolistGroup/metroserver) instance. It ships as a single Docker container:
+ZenMusic stands on the shoulders of excellent open-source projects. Sincere thanks to:
 
-```bash
-docker run -d \
-  -p 8080:8080 \
-  -e PORT=8080 \
-  -e DATABASE_FILE=/app/data/metroserver.db \
-  -v metroserver-data:/app/data \
-  --name metroserver \
-  ghcr.io/MetrolistGroup/metroserver:latest
-```
+| Project                      | Contribution |
+|------------------------------|---|
+| [Echo nightly](#)            | Extension Implementation             |
+| [Echo muisc](#)              | UI design language, Listen Together client, recognition engine, Apple Music canvas and welcome dialog |
+| [Metrolist / metroserver](#) | Listen Together server protocol and deployment |
+| [Musify](#)                  | Streaming and app architecture reference |
 
-Point the app at your instance (see in-app settings), and you're set — any deployment platform that supports Docker + WebSocket passthrough works, including free tiers.
+Additional thanks:
 
-## 🧩 Architecture (short version)
+- `youtube_explode_dart` and `yt_extractor` — YouTube stream extraction
+- `audio_service` and `just_audio` — playback engine
+- `flutter_lyric` — lyrics rendering
+- Shazam discovery API and the dejavu-fingerprinter algorithm — song recognition
+- [LRCLIB](https://lrclib.net/) — synced lyrics provider
+- Music Recognizer — recognition flow reference
 
-```
-Flutter UI (dark, Echo-inspired)
-        │
-   audio_service + just_audio  ── background playback, queue, EQ
-        │
-   ┌────┴─────────┬──────────────┬──────────────┐
-   │               │              │              │
-YouTube        JioSaavn       Extensions    Listen Together
-(yt_extractor +  (unofficial   (DexClassLoader  (metroserver
- youtube_explode)  320kbps API)  host, .eapk)     WebSocket +
-                                                    protobuf)
-```
+## Contributing
 
-The extension host implements the [Echo](https://github.com/brahmkshatriya/echo) extension contract: community `.eapk` packages are loaded at runtime and can provide home feeds, search, detail pages and full streaming — the same way Echo does.
+Contributions are welcome.
 
-## 🙏 Credits & Acknowledgements
+1. Fork the repository.
+2. Create a branch for your change:
+   ```bash
+   git checkout -b feature/my-feature
+   ```
+3. Make your changes and commit with a clear message.
+4. Push to your fork and open a Pull Request describing what changed and why.
 
-ZenMusic stands on the shoulders of these projects and people. Huge thank-you to all of them:
+Please keep pull requests focused on a single change, and test on a real device before submitting.
 
-**Core inspiration & contracts**
-- [@brahmkshatriya](https://github.com/brahmkshatriya) — [Echo](https://github.com/brahmkshatriya/echo) — the extension contract (`echo.common`), the `DexClassLoader` host design and the Nightly UI design language that ZenMusic's interface is modelled on. Parts of this project's native extension layer are derived from Echo, which is why ZenMusic is licensed GPL-3.0.
-- [@nyxiereal](https://github.com/nyxiereal) & [MetrolistGroup](https://github.com/MetrolistGroup) — [metroserver](https://github.com/MetrolistGroup/metroserver) — the high-performance Go WebSocket server powering Listen Together, and [Metrolist](https://github.com/MetrolistGroup) where the Listen Together concept comes from.
+## Legal
 
-**Streaming & data**
-- [yt_extractor](https://pub.dev/packages/yt_extractor) — YouTube extraction (streams, search, related)
-- [youtube_explode_dart](https://pub.dev/packages/youtube_explode_dart) — YouTube InnerTube access with custom clients
-- [saavn.dev](https://saavn.dev/) — the unofficial JioSaavn API powering 320 kbps streaming and catalogs
+ZenMusic is a fully open-source project created for educational purposes and personal use. It is not monetized in any way — there are no advertisements, premium features or subscriptions.
 
-**Audio & media**
-- [just_audio](https://pub.dev/packages/just_audio), [audio_service](https://pub.dev/packages/audio_service), [audio_session](https://pub.dev/packages/audio_session) by [@ryanheise](https://github.com/ryanheise) — the audio backbone
+The app acts strictly as a client to publicly available content and APIs of the platforms it supports. We do not host, upload, distribute or store any audio, video or copyrighted media files. All content is served by the respective platforms and remains the property of its copyright owners.
 
-**Packages**
-- [provider](https://pub.dev/packages/provider) · [hive](https://pub.dev/packages/hive) · [shared_preferences](https://pub.dev/packages/shared_preferences) · [cached_network_image](https://pub.dev/packages/cached_network_image) · [flutter_lyric](https://pub.dev/packages/flutter_lyric) · [file_picker](https://pub.dev/packages/file_picker) · [web_socket_channel](https://pub.dev/packages/web_socket_channel) · [webview_flutter](https://pub.dev/packages/webview_flutter) · [video_player](https://pub.dev/packages/video_player) · [http](https://pub.dev/packages/http)
+This software is provided "AS IS", without warranty of any kind. Users are solely responsible for ensuring their usage complies with their local copyright laws and the Terms of Service of the platforms they access.
 
-**Design & icons**
-- [Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons) by Microsoft (MIT)
-- [Paytone One](https://fonts.google.com/specimen/Paytone+One) typeface (SIL Open Font License)
-- [LRCLIB](https://lrclib.net/) — the free, open lyrics API
-- Spotify — the original dark-interface inspiration
-
-## 📄 License
-
-This project is licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE).
-
-Because portions of the native extension layer are derived from [Echo](https://github.com/brahmkshatriya/echo) (GPL-3.0), the complete work must remain GPL-3.0 and source-available. That's not a burden — it's the deal that makes projects like this possible.
-
-## ⚠️ Disclaimer
-
-- ZenMusic is provided strictly for educational and personal use, "as-is", without warranty of any kind.
-- ZenMusic does not host, store, mirror or distribute any copyrighted content. All audio is streamed on demand from third-party platforms through their unofficial, publicly accessible APIs.
-- Users are responsible for ensuring their use complies with the laws of their country and the terms of service of those platforms.
-- This project is not affiliated with, endorsed by, or connected to YouTube, Google, JioSaavn, Spotify or any other platform mentioned.
-- If you are a rights holder and believe something here infringes your rights, please open an issue and it will be addressed promptly.
-
----
-
-Made with Flutter and too many late nights.
+Licensed under [GPL-3.0](LICENSE)

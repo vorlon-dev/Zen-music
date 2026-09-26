@@ -9,6 +9,10 @@ import 'package:video_player/video_player.dart';
 /// entire screen — full-bleed 9:16, edges cropped like Reels.
 /// [httpHeaders] replay the InnerTube client's User-Agent so
 /// googlevideo serves HD streams.
+///
+/// Set [shortLoop] for sources that ARE already short loops
+/// (Apple Music canvases, 2-5 s): the whole asset loops seamlessly
+/// instead of applying the 15 s clip window.
 class VideoBackdrop extends StatefulWidget {
   final String streamUrl;
   final bool playing;
@@ -21,6 +25,10 @@ class VideoBackdrop extends StatefulWidget {
   /// NOT follow the audio position — the loop is independent.
   final Stream<Duration>? positionStream;
 
+  /// True when the source is already a short loop (Apple canvas):
+  /// loop the entire asset, no clip window.
+  final bool shortLoop;
+
   const VideoBackdrop({
     super.key,
     required this.streamUrl,
@@ -30,6 +38,7 @@ class VideoBackdrop extends StatefulWidget {
     this.httpHeaders = const {},
     this.onUnavailable,
     this.positionStream,
+    this.shortLoop = false,
   });
 
   @override
@@ -97,18 +106,26 @@ class _VideoBackdropState extends State<VideoBackdrop> {
     await c.setVolume(0);
     await c.setLooping(false);
 
-    final duration = c.value.duration;
-    var start = widget.clipStart ?? _autoClipStart(duration);
-    var end = start + widget.clipLength;
-    if (duration > Duration.zero && end > duration) end = duration;
-    if (end <= start) {
-      start = Duration.zero;
-      end = duration > Duration.zero ? duration : widget.clipLength;
+    if (widget.shortLoop) {
+      // Source is already a short loop — loop the whole asset.
+      _loopStart = Duration.zero;
+      _loopEnd = c.value.duration > Duration.zero
+          ? c.value.duration
+          : const Duration(seconds: 5);
+    } else {
+      final duration = c.value.duration;
+      var start = widget.clipStart ?? _autoClipStart(duration);
+      var end = start + widget.clipLength;
+      if (duration > Duration.zero && end > duration) end = duration;
+      if (end <= start) {
+        start = Duration.zero;
+        end = duration > Duration.zero ? duration : widget.clipLength;
+      }
+      _loopStart = start;
+      _loopEnd = end;
     }
-    _loopStart = start;
-    _loopEnd = end;
 
-    await c.seekTo(start);
+    await c.seekTo(_loopStart);
     if (widget.playing) unawaited(c.play());
 
     c.addListener(_onVideoTick);
