@@ -1,6 +1,10 @@
-# <img src="screenshots/logo.png" alt="ZenMusic Logo" width="40" align="center"/> ZenMusic
+<div align="center">
+  <img src="screenshots/logo.png" alt="ZenMusic Logo" width="120"/>
+
+# ZenMusic
 
 A modern Android music player with multi-source streaming, synced lyrics, offline playback and Listen Together.
+</div>
 
 ## Table of Contents
 - [Overview](#overview)
@@ -26,7 +30,7 @@ ZenMusic is a Flutter-based music player for Android. It streams from multiple s
 
 | Listen Together | Search | Library |
 |---|---|---|
-| ![Listen Together](screenshots/listen_together.png) | ![Search](screenshots/library.png) | ![Library](screenshots/library.png) |
+| ![Listen Together](screenshots/listen_together.png) | ![Search](screenshots/search.png) | ![Library](screenshots/library.png) |
 
 ## Features
 
@@ -58,12 +62,12 @@ flutter run
 
 ZenMusic stands on the shoulders of excellent open-source projects. Sincere thanks to:
 
-| Project                      | Contribution |
-|------------------------------|---|
-| [Echo nightly](#)            | Extension Implementation             |
-| [Echo muisc](#)              | UI design language, Listen Together client, recognition engine, Apple Music canvas and welcome dialog |
+| Project | Contribution |
+|---|---|
+| [Echo nightly](#) | Extension Implementation |
+| [Echo music](#) | UI design language, Listen Together client, recognition engine, Apple Music canvas and welcome dialog |
 | [Metrolist / metroserver](#) | Listen Together server protocol and deployment |
-| [Musify](#)                  | Streaming and app architecture reference |
+| [Musify](#) | Streaming and app architecture reference |
 
 Additional thanks:
 

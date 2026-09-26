@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../main.dart';
 import '../models/song.dart';
@@ -11,9 +12,11 @@ import '../services/appearance_prefs.dart';
 import '../services/extension_bridge.dart';
 import '../services/listening_stats_service.dart';
 import '../services/spotify_bridge.dart';
+import '../services/update_service.dart';
 import '../theme/spotify_theme.dart';
 import '../utilities/zen_transitions.dart';
 import '../widgets/source_picker_sheet.dart';
+import '../widgets/welcome_dialog.dart';
 import 'equalizer_screen.dart';
 import 'extensions_screen.dart';
 import 'import_spotify_screen.dart';
@@ -34,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _checkUpdates = true;
   List<Map<String, dynamic>> _extensions = [];
   String? _activeSourceId;
+  String _appVersion = '…';
 
   @override
   void initState() {
@@ -72,6 +76,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _extensions = extensions;
       _activeSourceId = activeId;
     });
+    PackageInfo.fromPlatform().then((p) {
+      if (!mounted) return;
+      setState(() => _appVersion = p.version);
+    }).catchError((_) {});
   }
 
   void _toast(String msg) {
@@ -440,7 +448,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             () => _showPickerSheet(
           title: 'Progress slider style',
           current: AppearancePrefs.sliderStyle.value,
-          // Exactly three styles — one entry each.
           items: const [
             (value: 'slim', label: 'Slim', icon: Icons.linear_scale_rounded),
             (value: 'wavy', label: 'Wavy', icon: Icons.waves_rounded),
@@ -838,6 +845,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ]),
           _category('About', FluentIcons.info_24_regular, [
+            _prefRow(
+              FluentIcons.arrow_sync_24_regular,
+              'Check for updates',
+              'Latest release from GitHub',
+                  () async {
+                _toast('Checking…');
+                final result =
+                await UpdateService.instance.manualCheck(context);
+                _toast(result);
+              },
+            ),
+            _prefRow(
+              Icons.workspace_premium_rounded,
+              'About ZenMusic',
+              'Welcome screen · links & info',
+                  () => WelcomeDialog.show(context),
+            ),
+            _prefRow(
+              FluentIcons.info_24_regular,
+              'Version',
+              'v$_appVersion',
+              null,
+            ),
             _switchRow(
               FluentIcons.arrow_sync_24_regular,
               'Automatic update checks',
@@ -847,12 +877,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 await storage.setCheckUpdates(v);
                 setState(() => _checkUpdates = v);
               },
-            ),
-            _prefRow(
-              FluentIcons.info_24_regular,
-              'ZenMusic',
-              'Version 1.0.0',
-              null,
             ),
           ]),
         ],

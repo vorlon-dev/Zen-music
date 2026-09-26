@@ -8,9 +8,14 @@ import '../theme/spotify_theme.dart';
 /// First-launch welcome dialog — Echo Nightly port, trimmed to GitHub +
 /// Instagram. Shows once (until cleared from Settings → About), on top
 /// of the home screen after the first frame.
+///
+/// Fix: the "shown" flag is written ONLY after the dialog has actually
+/// been dismissed. Writing it before (the old bug) meant any hiccup in
+/// the dialog flow consumed the one-shot and the dialog never appeared.
 class WelcomeDialog {
   WelcomeDialog._();
 
+  // ⚠️ EDIT THESE — your links.
   static const _instagramUrl = 'https://instagram.com/neod.evx';
   static const _instagramHandle = '@neod.evx';
   static const _githubUrl = 'https://github.com/vorlon-dev';
@@ -22,13 +27,15 @@ class WelcomeDialog {
   static Future<void> maybeShow(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_shownKey) ?? false) return;
-    await prefs.setBool(_shownKey, true);
     if (!context.mounted) return;
+
+    // Show FIRST; mark shown only after the user closes it.
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (_) => const _WelcomeBody(),
     );
+    await prefs.setBool(_shownKey, true);
   }
 
   /// Re-show from Settings → About.
@@ -39,7 +46,7 @@ class WelcomeDialog {
     );
   }
 
-  /// Reset the "shown" flag (used by the About row's long-press).
+  /// Reset the "shown" flag so the dialog shows again on next launch.
   static Future<void> resetShownFlag() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_shownKey, false);
@@ -208,12 +215,12 @@ class _WelcomeBodyState extends State<_WelcomeBody> {
               color: Colors.orangeAccent.withOpacity(0.10),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Row(
+            child: const Row(
               children: [
-                const Icon(Icons.construction_rounded,
+                Icon(Icons.construction_rounded,
                     size: 18, color: Colors.orangeAccent),
-                const SizedBox(width: 10),
-                const Expanded(
+                SizedBox(width: 10),
+                Expanded(
                   child: Text(
                     'This app is still in development — features may '
                         'change and you may run into bugs.',

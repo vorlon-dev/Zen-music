@@ -15,6 +15,7 @@ import '../services/appearance_prefs.dart';
 import '../services/downloads_service.dart';
 import '../services/home_service.dart';
 import '../services/listening_stats_service.dart';
+import '../services/update_service.dart';
 import '../theme/spotify_theme.dart';
 import '../utilities/listening_stats_utils.dart';
 import '../utilities/zen_transitions.dart';
@@ -25,6 +26,7 @@ import '../widgets/media_shelf.dart';
 import '../widgets/playlist_sheets.dart';
 import '../widgets/section_header.dart';
 import '../widgets/skeleton.dart';
+import '../widgets/welcome_dialog.dart';
 import '../widgets/wave_spinner.dart';
 import '../widgets/zen_nav_bar.dart';
 import '../widgets/youtube_thumbnail.dart';
@@ -58,6 +60,17 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       final tab = AppearancePrefs.defaultTab.value;
       setState(() => _currentTab = tab < 0 ? 0 : (tab > 2 ? 2 : tab));
+    });
+
+    // First-launch welcome + OTA update check, after the first frame
+    // AND after the first build completes, so showDialog has a valid
+    // Navigator and the dialog is never lost to a lifecycle race.
+    // Welcome shows first; the update check runs after it is dismissed.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await WelcomeDialog.maybeShow(context);
+      if (!mounted) return;
+      await UpdateService.instance.checkOnLaunch(context);
     });
   }
 

@@ -18,14 +18,15 @@ class UpdateService {
   UpdateService._();
   static final UpdateService instance = UpdateService._();
 
-
   static const _repo = 'vorlon-dev/Zen-music';
 
   static bool _checkedThisSession = false;
   final http.Client _client = http.Client();
 
-  /// Called on app launch. Respects the "Automatic update checks"
-  /// toggle in Settings → About (storage.getCheckUpdates()).
+  /// Called on app launch. Runs AFTER the welcome dialog (HomeScreen
+  /// awaits it) so first-launch users never get both dialogs stacked.
+  /// Respects the "Automatic update checks" toggle in Settings → About
+  /// (storage.getCheckUpdates()).
   Future<void> checkOnLaunch(BuildContext context) async {
     if (_checkedThisSession) return;
     _checkedThisSession = true;
@@ -36,9 +37,14 @@ class UpdateService {
     _showUpdateDialog(context, update);
   }
 
-  /// Manual check (Settings row). Returns the result for a snackbar.
+  /// Manual check (Settings → About). Returns a snackbar-ready result.
   Future<String> manualCheck(BuildContext context) async {
-    final update = await checkForUpdate();
+    _UpdateInfo? update;
+    try {
+      update = await checkForUpdate();
+    } catch (_) {
+      update = null;
+    }
     if (!context.mounted) return 'Check failed — no connection?';
     if (update == null) {
       return 'You\'re on the latest version';
@@ -112,12 +118,12 @@ class UpdateService {
       builder: (ctx) => AlertDialog(
         backgroundColor: SpotifyColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Row(
+        title: const Row(
           children: [
-            const Icon(Icons.system_update_alt_rounded,
+            Icon(Icons.system_update_alt_rounded,
                 color: SpotifyColors.green, size: 22),
-            const SizedBox(width: 10),
-            const Expanded(
+            SizedBox(width: 10),
+            Expanded(
               child: Text('Update available',
                   style: TextStyle(
                       color: SpotifyColors.textPrimary,
