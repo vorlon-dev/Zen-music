@@ -2,7 +2,7 @@ name: zenmusic
 description: "A YouTube music player built with Flutter."
 publish_to: 'none'
 
-version: 1.0.4+3
+version: 1.0.5+3
 
 environment:
   sdk: ^3.13.0
