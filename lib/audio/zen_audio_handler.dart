@@ -33,8 +33,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   bool followRemote = false;
 
   // Set when a remote-controlled load failed (no stream URL available).
-  // Listen Together clears it on the next successful load and uses it to
-  // retry once the host's shared URL arrives.
   String? lastFailedSongId;
 
   // Fired when a remote-controlled load fails (Listen Together guest).
@@ -62,16 +60,219 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // hooks in here; guests ignore it via their own guard).
   void Function(Duration position)? onLocalSeek;
 
-  // Timestamp of the last USER-driven transport action (skip, queue jump,
-  // new queue). The natural-completion handler ignores completions that
-  // land right after a manual action — otherwise a manual skip AND the
-  // completion event both advance, skipping a song.
+  // Timestamp of the last USER-driven transport action.
   DateTime _lastTransportActionAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   final Map<String, VideoStreamResult> _urlCache = {};
-  // Songs whose cached URL failed to load — bypassed until a fresh
-  // resolve or a new host-seeded URL overwrites them.
   final Set<String> _staleStreamIds = {};
+
+  // ═════════════════════════════════════════════
+  // CROSSFADE — second hidden player, real audio overlap.
+  // The hidden player is created with handleInterruptions:false so it
+  // does NOT fight the primary for Android audio focus (the focus fight
+  // silently muted the fade-in and made the next song appear to start
+  // mid-track).
+  // ═════════════════════════════════════════════
+
+  bool _crossfadeEnabled = false;
+  int _crossfadeSeconds = 4;
+
+  AudioPlayer? _xfade;
+  bool _xfadeInProgress = false;
+  int _xfadeTargetIndex = -1;
+  Timer? _xfadeRamp;
+  Timer? _xfadeTick;
+  Song? _xfadeSong;
+
+  void applyCrossfadeSettings({required bool enabled, required int seconds}) {
+    _crossfadeEnabled = enabled;
+    _crossfadeSeconds = seconds.clamp(1, 12);
+    if (!enabled) _abortCrossfade();
+  }
+
+  bool get _crossfadeAllowed {
+    if (!_crossfadeEnabled || _xfadeInProgress) return false;
+    if (_isRadioMode || followRemote || _lockoutActive) return false;
+    if (_repeatMode == AudioServiceRepeatMode.one) return false;
+    if (_sleepAtEndOfSong) return false;
+    if (_queue.isEmpty) return false;
+    if (_player.processingState != ProcessingState.ready) return false;
+    if (!_player.playing) return false;
+    return _nextCrossfadeIndex() != null;
+  }
+
+  int? _nextCrossfadeIndex() {
+    if (_currentIndex + 1 < _queue.length) return _currentIndex + 1;
+    if (_repeatMode == AudioServiceRepeatMode.all && _queue.isNotEmpty) {
+      return 0;
+    }
+    return null;
+  }
+
+  void _startCrossfadeMonitor() {
+    _xfadeTick?.cancel();
+    _xfadeTick = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      _crossfadeTick();
+    });
+  }
+
+  Future<void> _crossfadeTick() async {
+    if (!_crossfadeAllowed) return;
+    final duration = _player.duration;
+    if (duration == null || duration <= Duration.zero) return;
+    final remaining = duration - _player.position;
+    final fade = Duration(seconds: _crossfadeSeconds);
+    if (remaining <= Duration.zero || remaining > fade) return;
+    await _triggerCrossfade();
+  }
+
+  Future<void> _triggerCrossfade() async {
+    final targetIndex = _nextCrossfadeIndex();
+    if (targetIndex == null) return;
+    final generation = _loadGeneration;
+    _xfadeInProgress = true;
+    _xfadeTargetIndex = targetIndex;
+    try {
+      final nextSong = _queue[targetIndex];
+      _xfadeSong = nextSong;
+      final stream = await _getStreamUrl(nextSong);
+      if (generation != _loadGeneration) {
+        _xfadeInProgress = false;
+        return;
+      }
+
+      // handleInterruptions:false — no audio-focus fight with the
+      // primary player, so the fade-in is actually audible.
+      final xf = _xfade ??= AudioPlayer(handleInterruptions: false);
+      await xf.setUrl(
+        stream.url,
+        headers: stream.headers.isNotEmpty ? stream.headers : null,
+      );
+      if (generation != _loadGeneration) {
+        _xfadeInProgress = false;
+        await xf.stop();
+        return;
+      }
+      await xf.setVolume(0);
+      await xf.play();
+
+      // Ramp both volumes over the fade window.
+      final fade = Duration(seconds: _crossfadeSeconds);
+      final started = DateTime.now();
+      const step = Duration(milliseconds: 50);
+      _xfadeRamp?.cancel();
+      _xfadeRamp = Timer.periodic(step, (t) {
+        if (generation != _loadGeneration || !_xfadeInProgress) {
+          t.cancel();
+          return;
+        }
+        final p = DateTime.now().difference(started).inMilliseconds /
+            fade.inMilliseconds;
+        final clamped = p.clamp(0.0, 1.0);
+        _player.setVolume(1.0 - clamped);
+        xf.setVolume(clamped);
+        if (p >= 1.0) t.cancel();
+      });
+    } catch (e) {
+      print('Crossfade failed: $e');
+      _xfadeInProgress = false;
+      _player.setVolume(1.0);
+      await _disposeXfade();
+    }
+  }
+
+  /// The old track completed while a crossfade was running — adopt the
+  /// incoming track on the primary player. The hidden player is paused
+  /// FIRST so its position is frozen at the exact handover point; the
+  /// primary then resumes from that same position with no skip.
+  Future<void> _adoptCrossfadedTrack() async {
+    final xf = _xfade;
+    // Freeze the hidden player before reading its position — otherwise
+    // it keeps advancing during the primary player's load and the song
+    // jumps forward at handover.
+    if (xf != null) {
+      try {
+        await xf.pause();
+      } catch (_) {}
+    }
+    final adoptedPos = xf?.position ?? Duration.zero;
+
+    final song = _xfadeSong;
+    final index = _xfadeTargetIndex;
+    _xfadeInProgress = false;
+    _xfadeRamp?.cancel();
+    _xfadeRamp = null;
+
+    VideoStreamResult? url;
+    if (song != null) {
+      try {
+        url = await _getStreamUrl(song);
+      } catch (_) {}
+    }
+    if (url == null ||
+        song == null ||
+        index < 0 ||
+        index >= _queue.length) {
+      _player.setVolume(1.0);
+      await _disposeXfade();
+      return;
+    }
+
+    _currentIndex = index;
+    mediaItem.add(_toMediaItem(song));
+    _broadcastAudioQuality(song, url);
+
+    try {
+      await _player.setUrl(
+        url.url,
+        headers: url.headers.isNotEmpty ? url.headers : null,
+        tag: _toMediaItem(song),
+      );
+      await _player.seek(adoptedPos);
+      await _player.setVolume(1.0);
+      await play();
+      lastFailedSongId = null;
+      _staleStreamIds.remove(song.id);
+      listeningStatsService.handlePlayerPlaying(true,
+          currentSong: songToStatsMap(song));
+      await storage.savePlayedSong(song);
+      await _saveCurrentSession();
+    } catch (e) {
+      print('Crossfade adopt failed: $e');
+      _player.setVolume(1.0);
+    } finally {
+      // Hidden player has handed over — stop it; the instance is
+      // reused for the next fade.
+      try {
+        await xf?.stop();
+        await xf?.setVolume(0);
+      } catch (_) {}
+      _prefetchNext();
+    }
+  }
+
+  /// Kills any in-flight crossfade and restores normal volume.
+  Future<void> _abortCrossfade() async {
+    if (!_xfadeInProgress) return;
+    _xfadeInProgress = false;
+    _xfadeRamp?.cancel();
+    _xfadeRamp = null;
+    _player.setVolume(1.0);
+    await _disposeXfade();
+  }
+
+  Future<void> _disposeXfade() async {
+    final xf = _xfade;
+    _xfade = null;
+    if (xf == null) return;
+    try {
+      await xf.stop();
+      await xf.dispose();
+    } catch (_) {}
+  }
+
+  // ═════════════════════════════════════════════
+
   Timer? _saveTimer;
   void setAudioQualitySetting(String quality) {
     _yt.setAudioQualitySetting(quality);
@@ -123,6 +324,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
     _restoreLastSession();
     unawaited(_restoreEqualizer());
+    _startCrossfadeMonitor();
   }
 
   void _markTransportAction() {
@@ -183,6 +385,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     try {
       _markTransportAction();
       _loadGeneration++; // abandon any in-flight music load
+      await _abortCrossfade();
       await _player.stop();
       _isRadioMode = true;
       _radioStationController.add(name);
@@ -230,6 +433,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     try {
       _markTransportAction();
       _loadGeneration++;
+      await _abortCrossfade();
       await _player.stop();
       _isRadioMode = true; // live-source mode: no queue advance
       _radioStationController.add(null);
@@ -255,9 +459,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // ═════════════════════════════════════════════
 
   Future<void> _onTrackCompleted() async {
-    // Guard 1: a manual transport action just happened — the completed
-    // event is stale (the user already moved on). Advancing here would
-    // double-skip.
+    // Guard 1: a manual transport action just happened — stale event.
     if (DateTime.now().difference(_lastTransportActionAt) <
         const Duration(milliseconds: 800)) {
       return;
@@ -265,10 +467,16 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     // Guard 2: radio/extension streams don't auto-advance.
     if (_isRadioMode) return;
 
+    // Guard 3: a crossfade is in flight — the incoming track is already
+    // audible; adopt it instead of advancing again.
+    if (_xfadeInProgress) {
+      await _adoptCrossfadedTrack();
+      return;
+    }
+
     listeningStatsService.finishListeningSession(countCurrentTick: true);
 
-    // Guard 3: remote-controlled queue (Listen Together guest) — the host
-    // broadcasts the next change_track; local advance would fight it.
+    // Guard 4: remote-controlled queue (Listen Together guest).
     if (followRemote) return;
 
     if (_sleepAtEndOfSong) {
@@ -385,9 +593,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // PUBLIC API
   // ═════════════════════════════════════════════
 
-  /// Listen Together: guests preload the host's resolved stream here —
-  /// straight into the memory cache (plus persistent cache) so the next
-  /// load is instant, with no Hive round-trip on the load path.
+  /// Listen Together: guests preload the host's resolved stream here.
   void seedStreamUrl(String id, String url, Map<String, String> headers) {
     _staleStreamIds.remove(id);
     _urlCache[id] = VideoStreamResult(url, headers);
@@ -397,6 +603,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> setQueue(List<Song> songs, {int startIndex = 0}) async {
     if (_lockoutActive) return;
     _markTransportAction();
+    await _abortCrossfade();
     await _exitRadioMode();
     _queue = List<Song>.from(songs);
     _currentIndex = startIndex;
@@ -408,6 +615,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> startRadio(Song seedSong) async {
     if (_lockoutActive) return;
     _markTransportAction();
+    await _abortCrossfade();
     await _exitRadioMode();
     _queue = [seedSong];
     _currentIndex = 0;
@@ -467,6 +675,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   Future<void> clearQueue() async {
     if (_lockoutActive) return;
+    await _abortCrossfade();
     _queue.clear();
     _urlCache.clear();
     _currentIndex = 0;
@@ -500,7 +709,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     final mem = _urlCache[song.id];
     if (mem != null) return mem;
 
-    // Stale ids skip the persistent cache — its URL already failed once.
     final cached = _staleStreamIds.contains(song.id)
         ? null
         : storage.getCachedStream(song.id);
@@ -511,9 +719,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       return result;
     }
 
-    // Remote-controlled queue: songs rebuilt from room metadata carry no
-    // source info — without the host's shared URL they cannot resolve.
-    // Fail fast instead of burning the whole extractor chain.
     if (followRemote && song.id.length != 11) {
       throw Exception('no stream hint for ${song.id}');
     }
@@ -528,20 +733,17 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     if (index < 0 || index >= _queue.length) return;
 
     final generation = ++_loadGeneration;
+    await _abortCrossfade();
     _currentIndex = index;
     final song = _queue[index];
     final mediaItem = _toMediaItem(song);
     this.mediaItem.add(mediaItem);
 
-    // Kill the previous track's audio immediately. If setUrl failed later,
-    // the old song used to keep playing — never fall back to it.
     try {
       await _player.stop();
     } catch (_) {}
+    await _player.setVolume(1.0);
 
-    // Up to 5 attempts: transient network hiccups retry the SAME URL,
-    // late attempts force a fresh resolve (caches bypassed) so a dead
-    // cached URL can never strand us on the previous track.
     const maxAttempts = 5;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       if (generation != _loadGeneration) return;
@@ -550,8 +752,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         if (attempt == 1) {
           stream = await _getStreamUrl(song);
         } else {
-          // Fresh attempt: drop the memoized result; from attempt 4 on,
-          // also bypass the persistent cache for this song.
           _urlCache.remove(song.id);
           if (attempt >= 4) _staleStreamIds.add(song.id);
           stream = await _getStreamUrl(song);
@@ -582,9 +782,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         }
         print('Failed to play ${song.title} after $maxAttempts attempts: $e');
         if (generation == _loadGeneration) {
-          // Remote-controlled queue: never self-advance on failure — the
-          // host decides what plays next. Flag it so Listen Together can
-          // retry when a fresh stream URL becomes available.
           if (followRemote) {
             lastFailedSongId = song.id;
             final cb = onRemoteLoadFailed;
@@ -610,7 +807,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   Future<void> _prefetchUrl(Song song) async {
     if (await DownloadsService().localPath(song.id) != null) {
-      // Downloaded — playback will resolve locally; nothing to prefetch.
       return;
     }
     if (_urlCache.containsKey(song.id)) return;
@@ -619,7 +815,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       _urlCache[song.id] = VideoStreamResult(cached.url, cached.headers);
       return;
     }
-    if (followRemote) return; // host shares resolved URLs; don't re-resolve
+    if (followRemote) return;
     try {
       final result = await _yt.getAudioStreamUrl(song);
       _urlCache[song.id] = result;
@@ -685,6 +881,11 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> play() async {
     if (_lockoutActive) return;
     await _player.play();
+    if (_xfadeInProgress && _xfade != null) {
+      try {
+        await _xfade!.play();
+      } catch (_) {}
+    }
   }
 
   @override
@@ -692,12 +893,18 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     if (_lockoutActive) return;
     listeningStatsService.handlePlayerPlaying(false);
     await _player.pause();
+    if (_xfadeInProgress && _xfade != null) {
+      try {
+        await _xfade!.pause();
+      } catch (_) {}
+    }
     await _saveCurrentSession();
     await listeningStatsService.flush();
   }
 
   @override
   Future<void> stop() async {
+    await _abortCrossfade();
     await _saveCurrentSession();
     await listeningStatsService.flush();
     await _player.stop();
@@ -707,15 +914,36 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   @override
   Future<void> seek(Duration position) async {
     if (_lockoutActive) return;
+    // A manual seek invalidates the fade overlap — abort and continue
+    // on the primary player only.
+    await _abortCrossfade();
     await _player.seek(position);
     final cb = onLocalSeek;
     if (cb != null) cb(position);
+  }
+
+  /// Seek that reports whether it was actually applied. Used by player
+  /// UI sliders: a swallowed seek (LT guest lockout, player not ready)
+  /// must be visible to the user instead of a frozen bar.
+  Future<bool> seekSafe(Duration position) async {
+    if (_lockoutActive) return false;
+    if (_player.processingState != ProcessingState.ready) return false;
+    try {
+      await _player.seek(position);
+      final cb = onLocalSeek;
+      if (cb != null) cb(position);
+      return true;
+    } catch (e) {
+      print('seekSafe failed: $e');
+      return false;
+    }
   }
 
   @override
   Future<void> skipToNext() async {
     if (_lockoutActive) return;
     _markTransportAction();
+    await _abortCrossfade();
     if (_isRadioMode) return;
     if (_currentIndex + 1 < _queue.length) {
       await _playIndex(_currentIndex + 1);
@@ -730,6 +958,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> skipToPrevious() async {
     if (_lockoutActive) return;
     _markTransportAction();
+    await _abortCrossfade();
     if (_isRadioMode) {
       await _player.seek(Duration.zero);
       return;
@@ -750,6 +979,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> skipToQueueItem(int index) async {
     if (_lockoutActive) return;
     _markTransportAction();
+    await _abortCrossfade();
     if (index < 0 || index >= _queue.length) return;
     await _playIndex(index);
     _prefetchNext();

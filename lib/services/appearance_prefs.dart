@@ -35,6 +35,9 @@ class AppearancePrefs {
   static final ambientShowLyrics = ValueNotifier<bool>(true);
   // Apple Music animated canvas on the player.
   static final canvasEnabled = ValueNotifier<bool>(true);
+  // Crossfade between tracks.
+  static final crossfadeEnabled = ValueNotifier<bool>(false);
+  static final crossfadeSeconds = ValueNotifier<double>(4.0);
 
   static Future<void> load() async {
     if (_loaded) return;
@@ -57,6 +60,8 @@ class AppearancePrefs {
     ambientShowArtist.value = p.getBool('ap_amb_artist') ?? false;
     ambientShowLyrics.value = p.getBool('ap_amb_lyrics') ?? true;
     canvasEnabled.value = p.getBool('ap_canvas') ?? true;
+    crossfadeEnabled.value = p.getBool('ap_xfade') ?? false;
+    crossfadeSeconds.value = p.getDouble('ap_xfade_secs') ?? 4;
     _loaded = true;
   }
 
@@ -161,5 +166,15 @@ class AppearancePrefs {
   static Future<void> setCanvasEnabled(bool v) async {
     canvasEnabled.value = v;
     await _write('ap_canvas', v);
+  }
+
+  static Future<void> setCrossfadeEnabled(bool v) async {
+    crossfadeEnabled.value = v;
+    await _write('ap_xfade', v);
+  }
+
+  static Future<void> setCrossfadeSeconds(double v) async {
+    crossfadeSeconds.value = v;
+    await _write('ap_xfade_secs', v);
   }
 }

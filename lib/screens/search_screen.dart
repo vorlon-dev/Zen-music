@@ -11,6 +11,7 @@ import '../services/downloads_service.dart';
 import '../services/home_service.dart';
 import '../services/jiosaavn_service.dart';
 import '../services/yt_music_service.dart';
+import '../services/video_preference_service.dart';
 import '../services/youtube_service.dart';
 import '../theme/spotify_theme.dart';
 import '../utilities/zen_transitions.dart';
@@ -46,8 +47,7 @@ class _SearchScreenState extends State<SearchScreen> {
   List<String> _suggestions = [];
   List<String> _history = [];
 
-  // Echo search-source toggle: 'online' (YouTube Music + JioSaavn) or
-  // 'library' (liked songs, downloads, played history).
+  // Echo search-source toggle: 'online' or 'library'.
   String _source = 'online';
   List<Song> _librarySongs = [];
 
@@ -55,8 +55,7 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Collection> _newAlbums = [];
   bool _albumsLoading = true;
 
-  // Echo quick-search overlay: true while the full-screen search view
-  // is expanded over the results.
+  // Echo quick-search overlay.
   bool _expanded = false;
 
   Timer? _debounce;
@@ -108,7 +107,6 @@ class _SearchScreenState extends State<SearchScreen> {
     final played = storage.getPlayedHistory();
     final downloads = await DownloadsService().downloadedSongs();
     if (!mounted) return;
-    // Dedupe by id, liked first.
     final seen = <String>{};
     final merged = <Song>[];
     for (final s in [...liked, ...downloads, ...played]) {
@@ -132,8 +130,6 @@ class _SearchScreenState extends State<SearchScreen> {
     if (mounted) _inputNode.unfocus();
   }
 
-  /// Echo's onSearch: a YouTube URL plays the video directly instead of
-  /// running a text search.
   bool _tryPlayFromUrl(String query) {
     final m = _ytUrlVideo.firstMatch(query);
     if (m == null) return false;
@@ -165,12 +161,10 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
 
-    // URL paste → direct play, no results page (Echo parity).
     if (_tryPlayFromUrl(query)) {
       return;
     }
 
-    // Library source: filter the local catalog, no network.
     if (_source == 'library') {
       final q = query.toLowerCase();
       final matches = _librarySongs
@@ -205,7 +199,6 @@ class _SearchScreenState extends State<SearchScreen> {
     storage.saveQuery(query);
     if (mounted) setState(() {});
 
-    // Five sources in parallel; each publishes as it lands.
     final songsF = _youtube.search(query);
     final ytmF = _ytm.searchSongs(query, limit: 15);
     final videosF = _youtube.search(query, filter: SearchFilter.videos);
@@ -258,7 +251,6 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
 
-    // Library source: live local matches, no network.
     if (_source == 'library') {
       if (mounted) setState(() {});
       return;
@@ -272,8 +264,6 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
-  /// Echo source toggle: online ↔ library. Refreshes the local catalog
-  /// when switching to library.
   void _toggleSource() {
     setState(() => _source = _source == 'online' ? 'library' : 'online');
     if (_source == 'library') {
@@ -282,9 +272,6 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  /// Plays the tapped song and builds a RADIO queue of related songs
-  /// (YTM automix → related streams → filtered search) — like the
-  /// radio system in YT Music / Spotify. NOT the search-result list.
   void _playWithRadio(Song song) {
     audioHandler.startRadio(song);
     Navigator.push(
@@ -293,7 +280,7 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Echo's long-click more-menu: download, playlist, queue actions.
+  /// Echo's long-click more-menu.
   void _songActions(Song song) {
     showModalBottomSheet(
       context: context,
@@ -306,6 +293,20 @@ class _SearchScreenState extends State<SearchScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.ondemand_video_rounded,
+                  color: SpotifyColors.textPrimary),
+              title: const Text('Play with video',
+                  style: TextStyle(color: SpotifyColors.textPrimary)),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                // Persist the preference; the player's current-song
+                // hook auto-enters video mode for this id.
+                VideoPreferenceService.instance
+                    .setPreferred(song.id, true);
+                _playWithRadio(song);
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.download_rounded,
                   color: SpotifyColors.textPrimary),
@@ -420,7 +421,6 @@ class _SearchScreenState extends State<SearchScreen> {
           SafeArea(
             child: Column(
               children: [
-                // Echo: the bar morphs from inset to full-bleed.
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 245),
                   curve: Curves.fastOutSlowIn,
@@ -443,8 +443,6 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
     );
   }
-
-  // ── Echo M3 search bar (56dp, full-rounded, morphing padding) ──
 
   Widget _searchBarView({required bool expanded}) {
     final hasText = _searchBar.text.isNotEmpty;
@@ -492,7 +490,6 @@ class _SearchScreenState extends State<SearchScreen> {
                 style: const TextStyle(
                     color: SpotifyColors.textPrimary, fontSize: 16),
                 decoration: InputDecoration(
-                  // Echo: the hint names the active source.
                   hintText: _source == 'library'
                       ? 'Search your library'
                       : 'Songs, artists, albums...',
@@ -523,7 +520,6 @@ class _SearchScreenState extends State<SearchScreen> {
                 icon: const Icon(Icons.close_rounded,
                     color: SpotifyColors.textSecondary),
               ),
-            // Song recognition entry (Shazam-style).
             IconButton(
               onPressed: () =>
                   pushSharedAxisY(context, const RecognizeScreen()),
@@ -531,7 +527,6 @@ class _SearchScreenState extends State<SearchScreen> {
               icon: const Icon(Icons.graphic_eq_rounded,
                   color: SpotifyColors.textSecondary, size: 22),
             ),
-            // Echo: source toggle icon (online ↔ library).
             IconButton(
               onPressed: _toggleSource,
               tooltip: _source == 'library'
@@ -552,8 +547,6 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
     );
   }
-
-  // ── Echo quick-search overlay (suggestions / history / library) ──
 
   Widget _quickSearchOverlay() {
     return Positioned.fill(
@@ -577,7 +570,6 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _quickList() {
-    // Library source: live local matches as tappable songs.
     if (_source == 'library') {
       final q = _searchBar.text.trim().toLowerCase();
       if (q.isEmpty) {
@@ -683,8 +675,6 @@ class _SearchScreenState extends State<SearchScreen> {
       },
     );
   }
-
-  // ── Echo explore idle view: recent searches + new releases grid ──
 
   Widget _idleExplore() {
     return ListView(
@@ -843,8 +833,8 @@ class _SearchScreenState extends State<SearchScreen> {
               itemBuilder: (context, i) {
                 final video = _videoResults[i];
                 return GestureDetector(
-                  // Radio from the video: video's audio + related queue.
                   onTap: () => _playWithRadio(video),
+                  onLongPress: () => _songActions(video),
                   child: SizedBox(
                     width: 200,
                     child: Column(

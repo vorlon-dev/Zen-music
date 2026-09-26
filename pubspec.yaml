@@ -16,7 +16,10 @@ dependencies:
   # 🎵 YouTube Extraction & Audio Playback
   # ─────────────────────────────────────────────
   yt_extractor: ^0.1.0
-  youtube_explode_dart: ^3.1.0
+  # Vendored hardened fork (EJS challenge solver, cipher deobfuscation,
+  # PoToken support) — BSD-3-Clause, see packages/youtube_explode_dart/LICENSE
+  youtube_explode_dart:
+    path: packages/youtube_explode_dart
   just_audio: ^0.10.6
   audio_service: ^0.18.18
   audio_session: ^0.1.21
@@ -43,7 +46,7 @@ dependencies:
   # ─────────────────────────────────────────────
   cached_network_image: ^3.4.1
   permission_handler: ^11.3.1
-
+  receive_sharing_intent: ^1.8.1
   # ─────────────────────────────────────────────
   # 🎨 UI / State Management
   # ─────────────────────────────────────────────

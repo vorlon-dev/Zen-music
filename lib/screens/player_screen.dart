@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 // WAKELOCK: requires `flutter pub add wakelock_plus`.
-// Remove these 3 marked spots if you skip the dependency.
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../widgets/wave_spinner.dart';
 import '../main.dart';
@@ -17,6 +16,7 @@ import '../services/appearance_prefs.dart';
 import '../services/apple_canvas_service.dart';
 import '../services/downloads_service.dart';
 import '../services/listen_together_service.dart';
+import '../services/video_preference_service.dart';
 import '../services/youtube_service.dart';
 import '../theme/spotify_theme.dart';
 import '../utilities/zen_transitions.dart';
@@ -50,7 +50,7 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   bool _showLyrics = false;
 
-  // Video state (extracted stream, Canvas loop).
+  // Video state (extracted stream, synchronized song-video mode).
   bool _showVideo = false;
   bool _videoLoading = false;
   String? _videoUrl;
@@ -59,10 +59,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _resolvingFor;
   bool _videoTriedSd = false;
 
+  // Fullscreen video (YouTube-style): landscape + immersive.
+  bool _videoFullscreen = false;
+
   // Apple Music canvas (animated artwork background).
   String? _canvasUrl;
   String? _canvasForSongId;
   final Set<String> _canvasFailed = {};
+
+  // Prefetched video streams — resolved in the background while the
+  // audio plays, so switching to video mode is instant.
+  final Map<String, VideoStreamResult> _videoPrefetch = {};
+  final Set<String> _videoPrefetchFailed = {};
+  String? _prefetchInFlight;
+
+  // Song queued with "Play with video" — the player enters video mode
+  // for this id on its first current-song tick.
+  String? _pendingVideoSongId;
 
   List<Song> _relatedSongs = [];
   String? _relatedForId;
@@ -84,14 +97,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _loadRelated();
       if (_showVideo) _resolveVideoFor(song);
       _resolveCanvas(song);
+      _prefetchVideoFor(song);
+      // Auto-video: songs marked "play with video" open video mode
+      // without the user touching the camera icon.
+      VideoPreferenceService.instance
+          .isVideoPreferred(song.id)
+          .then((preferred) {
+        if (!mounted || !preferred) return;
+        if (audioHandler.currentSong?.id != song.id) return;
+        if (_showVideo) return;
+        _toggleVideo(song);
+      });
+      // Explicit "Play with video" from the action sheet.
+      if (_pendingVideoSongId == song.id) {
+        _pendingVideoSongId = null;
+        if (!_showVideo) _toggleVideo(song);
+      }
     });
 
     // WAKELOCK — keep screen on while the player is open (if enabled).
     AppearancePrefs.keepScreenOn.addListener(_applyKeepScreenOn);
     _applyKeepScreenOn();
 
-    // Re-apply the immersive mode live when the setting is toggled while
-    // lyrics are already open.
     AppearancePrefs.hideStatusBarOnLyrics.addListener(_applySystemUi);
     AppearancePrefs.canvasEnabled.addListener(_onCanvasPrefChanged);
   }
@@ -107,6 +134,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// Re-applies the system-UI mode from the current lyrics/setting state.
   void _applySystemUi() {
+    if (_videoFullscreen) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      return;
+    }
     if (_showLyrics && AppearancePrefs.hideStatusBarOnLyrics.value) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else {
@@ -125,6 +156,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     AppearancePrefs.keepScreenOn.removeListener(_applyKeepScreenOn);
     AppearancePrefs.hideStatusBarOnLyrics.removeListener(_applySystemUi);
     AppearancePrefs.canvasEnabled.removeListener(_onCanvasPrefChanged);
+    if (_videoFullscreen) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+    }
     WakelockPlus.disable(); // WAKELOCK
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _songSub?.cancel();
@@ -169,7 +206,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final canvas = await AppleCanvasService.instance
         .getBySongArtist(song.title, song.artist);
     if (!mounted) return;
-    if (audioHandler.currentSong?.id != song.id) return; // song changed
+    if (audioHandler.currentSong?.id != song.id) return;
     if (canvas == null || canvas.animated.isEmpty) {
       _canvasFailed.add(song.id);
       setState(() => _canvasUrl = null);
@@ -178,17 +215,57 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() => _canvasUrl = canvas.animated);
   }
 
+  // ── Video prefetch ──
+
+  Future<void> _prefetchVideoFor(Song song) async {
+    if (_videoPrefetch.containsKey(song.id) ||
+        _videoPrefetchFailed.contains(song.id) ||
+        _prefetchInFlight == song.id) {
+      return;
+    }
+    _prefetchInFlight = song.id;
+    try {
+      final result = await _yt.getVideoStreamUrl(song, preferHd: true);
+      if (!mounted) return;
+      if (audioHandler.currentSong?.id != song.id) return;
+      if (result != null && result.url.isNotEmpty) {
+        _videoPrefetch[song.id] = result;
+      } else {
+        _videoPrefetchFailed.add(song.id);
+      }
+    } catch (_) {
+      _videoPrefetchFailed.add(song.id);
+    } finally {
+      _prefetchInFlight = null;
+    }
+  }
+
   Future<void> _toggleVideo(Song song) async {
     if (_showVideo) {
       setState(() => _showVideo = false);
+      VideoPreferenceService.instance.setPreferred(song.id, false);
       return;
     }
 
+    // Already resolved for this song — instant re-show.
     if (_videoForSongId == song.id && _videoUrl != null) {
       setState(() => _showVideo = true);
       return;
     }
 
+    // Prefetched — instant switch.
+    final prefetched = _videoPrefetch[song.id];
+    if (prefetched != null) {
+      setState(() {
+        _videoUrl = prefetched.url;
+        _videoHeaders = prefetched.headers;
+        _videoForSongId = song.id;
+        _showVideo = true;
+      });
+      return;
+    }
+
+    // Cold path — resolve now with a spinner.
     setState(() {
       _videoLoading = true;
       _showVideo = true;
@@ -243,11 +320,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _videoUrl = result.url;
       _videoHeaders = result.headers;
       _videoForSongId = song.id;
+      _videoPrefetch[song.id] = result;
     });
   }
 
   void _onVideoUnavailable(String reason) {
     if (!mounted) return;
+    if (_videoFullscreen) _exitVideoFullscreen();
 
     if (!_videoTriedSd) {
       _videoTriedSd = true;
@@ -278,6 +357,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
+  // ── Fullscreen video ──
+
+  void _enterVideoFullscreen() {
+    if (!_showVideo || _videoUrl == null) return;
+    setState(() => _videoFullscreen = true);
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    WakelockPlus.enable(); // WAKELOCK
+  }
+
+  void _exitVideoFullscreen() {
+    if (!_videoFullscreen) return;
+    setState(() => _videoFullscreen = false);
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    AppearancePrefs.keepScreenOn.value
+        ? WakelockPlus.enable()
+        : WakelockPlus.disable(); // WAKELOCK
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<PlayerController>();
@@ -300,24 +405,113 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _lyricsSynced = false;
     }
 
+    // ── Fullscreen video mode: edge-to-edge, landscape, immersive ──
+    if (_videoFullscreen && _showVideo && _videoUrl != null) {
+      return WillPopScope(
+        onWillPop: () async {
+          _exitVideoFullscreen();
+          return false;
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Synchronized song-video: full length, position locked
+              // to the audio.
+              VideoBackdrop(
+                streamUrl: _videoUrl!,
+                playing: controller.isPlaying,
+                httpHeaders: _videoHeaders,
+                synchronized: true,
+                positionStream: handler.positionStream,
+                onUnavailable: (reason) {
+                  _exitVideoFullscreen();
+                  _onVideoUnavailable(reason);
+                },
+              ),
+              // Play/pause — backdrop follows audioHandler, so this
+              // pauses both the music and the video.
+              Center(
+                child: GestureDetector(
+                  onTap: () {
+                    _maybeHaptic();
+                    controller.isPlaying
+                        ? audioHandler.pause()
+                        : audioHandler.play();
+                  },
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.5),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      controller.isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      size: 44,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              // Exit-fullscreen button.
+              Positioned(
+                top: 12,
+                right: 12,
+                child: SafeArea(
+                  child: GestureDetector(
+                    onTap: _exitVideoFullscreen,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.fullscreen_exit_rounded,
+                          size: 22, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          if (_showVideo && _videoUrl != null)
+          if (_showVideo && _videoUrl != null) ...[
             Positioned.fill(
+              // SYNCHRONIZED song-video: full-length, position locked to
+              // the audio — not a 15s muted loop. Double-tap → fullscreen.
               child: VideoBackdrop(
                 streamUrl: _videoUrl!,
                 playing: controller.isPlaying,
                 httpHeaders: _videoHeaders,
+                synchronized: true,
+                positionStream: handler.positionStream,
                 onUnavailable: _onVideoUnavailable,
               ),
-            )
-          else if (_canvasUrl != null)
+            ),
+            // VideoBackdrop swallows ALL taps internally (IgnorePointer),
+            // so double-tap-on-backdrop can't work directly. This
+            // transparent layer sits ABOVE the backdrop and BELOW the UI
+            // content — it receives double-taps for fullscreen while
+            // single taps fall through to the content above.
             Positioned.fill(
-              // Apple Music animated canvas — a short native loop, so the
-              // whole asset loops (no 15 s clip window). Falls back via
-              // onUnavailable if the stream can't play.
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onDoubleTap: _enterVideoFullscreen,
+              ),
+            ),
+          ] else if (_canvasUrl != null)
+            Positioned.fill(
               child: VideoBackdrop(
                 key: ValueKey(_canvasUrl),
                 streamUrl: _canvasUrl!,
@@ -387,8 +581,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               children: [
                 _topBar(song),
                 Expanded(
-                  // Lyrics slide up from the bottom; closing slides them
-                  // back down. The top bar stays pinned above.
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 380),
                     switchInCurve: Curves.easeOutCubic,
@@ -455,7 +647,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Column(
         children: [
           if (!_showVideo)
-          // Hideable artwork with configurable corner radius.
             ValueListenableBuilder<bool>(
               valueListenable: AppearancePrefs.hideThumbnail,
               builder: (context, hidden, _) => hidden
@@ -564,39 +755,63 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ],
                         ),
                       ),
-                      // ── Quality/type badge (hideable) ──
+                      // ── Quality badge (hideable) + VIDEO chip ──
                       const SizedBox(height: 6),
                       ValueListenableBuilder<bool>(
                         valueListenable: AppearancePrefs.showQualityBadge,
-                        builder: (context, show, _) => show
-                            ? StreamBuilder<Map<String, String?>>(
-                          stream: audioHandler.audioQualityStream,
-                          builder: (context, snap) {
-                            final type = snap.data?['type'];
-                            final bitrate = snap.data?['bitrate'];
-                            if (type == null || type.isEmpty) {
-                              return const SizedBox.shrink();
-                            }
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 7, vertical: 3),
-                              decoration: BoxDecoration(
-                                color:
-                                SpotifyColors.green.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(6),
+                        builder: (context, show, _) => Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (show)
+                              Flexible(
+                                child: StreamBuilder<Map<String, String?>>(
+                                  stream: audioHandler.audioQualityStream,
+                                  builder: (context, snap) {
+                                    final type = snap.data?['type'];
+                                    final bitrate = snap.data?['bitrate'];
+                                    if (type == null || type.isEmpty) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 7, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: SpotifyColors.green
+                                            .withOpacity(0.15),
+                                        borderRadius:
+                                        BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        '${type.toUpperCase()}'
+                                            '${bitrate != null && bitrate.isNotEmpty ? ' · $bitrate kbps' : ''}',
+                                        style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: SpotifyColors.green),
+                                      ),
+                                    );
+                                  },
+                                ),
                               ),
-                              child: Text(
-                                '${type.toUpperCase()}'
-                                    '${bitrate != null && bitrate.isNotEmpty ? ' · $bitrate kbps' : ''}',
-                                style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: SpotifyColors.green),
+                            if (_showVideo) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.redAccent.withOpacity(0.18),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text('VIDEO',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.5,
+                                        color: Colors.redAccent)),
                               ),
-                            );
-                          },
-                        )
-                            : const SizedBox.shrink(),
+                            ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -706,7 +921,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _topBar(Song song) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 8, 4),
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
       child: Row(
         children: [
           IconButton(
@@ -744,6 +959,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ],
             ),
           ),
+          // Fullscreen video button — visible only in video mode.
+          if (_showVideo && _videoUrl != null)
+            IconButton(
+              tooltip: 'Fullscreen video',
+              splashRadius: 22,
+              icon: const Icon(
+                Icons.fullscreen_rounded,
+                size: 28,
+                color: SpotifyColors.textPrimary,
+              ),
+              onPressed: _enterVideoFullscreen,
+            ),
           IconButton(
             tooltip: _showVideo ? 'Show cover art' : 'Show video',
             splashRadius: 22,
@@ -911,8 +1138,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 }
 
 // ═════════════════════════════════════════════
-// SLIM SLIDER — Echo SLIM style: thin track, round thumb,
-// times below. No wave.
+// SLIM SLIDER — hybrid position engine: positionStream ticks
+// continuously during playback, playbackState snaps instantly on
+// seeks. Drag-cancel safe.
 // ═════════════════════════════════════════════
 
 class _SlimSlider extends StatefulWidget {
@@ -932,10 +1160,12 @@ class _SlimSlider extends StatefulWidget {
 
 class _SlimSliderState extends State<_SlimSlider> {
   double? _dragFraction;
+  bool _seekPending = false;
   double _streamFraction = 0;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   StreamSubscription<Duration>? _posSub;
+  StreamSubscription? _stateSub;
   StreamSubscription<Duration?>? _durSub;
 
   @override
@@ -945,10 +1175,20 @@ class _SlimSliderState extends State<_SlimSlider> {
       if (!mounted) return;
       setState(() {
         _position = p;
-        if (_dragFraction == null) {
+        if (_dragFraction == null && !_seekPending) {
           _streamFraction = _fractionOf(p);
         }
       });
+    });
+    _stateSub = widget.handler.playbackState.listen((st) {
+      if (!mounted || _dragFraction != null || _seekPending) return;
+      final p = st.updatePosition;
+      if ((p - _position).abs() > const Duration(milliseconds: 400)) {
+        setState(() {
+          _position = p;
+          _streamFraction = _fractionOf(p);
+        });
+      }
     });
     _durSub = widget.handler.durationStream.listen((d) {
       if (!mounted || d == null) return;
@@ -959,6 +1199,7 @@ class _SlimSliderState extends State<_SlimSlider> {
   @override
   void dispose() {
     _posSub?.cancel();
+    _stateSub?.cancel();
     _durSub?.cancel();
     super.dispose();
   }
@@ -972,12 +1213,31 @@ class _SlimSliderState extends State<_SlimSlider> {
   Duration get _effectiveDuration =>
       _duration.inSeconds > 0 ? _duration : widget.song.duration;
 
-  void _seekToFraction(double f) {
+  void _endDrag() async {
     if (widget.locked) return;
-    final total = _effectiveDuration;
-    if (total.inMilliseconds <= 0) return;
-    widget.handler
-        .seek(Duration(milliseconds: (f * total.inMilliseconds).round()));
+    final f = _dragFraction;
+    if (f == null) return;
+    final total = _effectiveDuration.inMilliseconds;
+    if (total <= 0) {
+      setState(() => _dragFraction = null);
+      return;
+    }
+    final targetMs = (f * total).round();
+    setState(() {
+      _seekPending = true;
+      _dragFraction = null;
+    });
+    final ok =
+    await widget.handler.seekSafe(Duration(milliseconds: targetMs));
+    if (!mounted) return;
+    if (!ok) {
+      _seekPending = false;
+      setState(() {});
+      return;
+    }
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _seekPending = false);
+    });
   }
 
   @override
@@ -987,7 +1247,11 @@ class _SlimSliderState extends State<_SlimSlider> {
         ? Duration(
         milliseconds:
         (fraction * _effectiveDuration.inMilliseconds).round())
-        : _position;
+        : (_seekPending
+        ? Duration(
+        milliseconds:
+        (fraction * _effectiveDuration.inMilliseconds).round())
+        : _position);
 
     return Column(
       children: [
@@ -1011,18 +1275,20 @@ class _SlimSliderState extends State<_SlimSlider> {
                 behavior: HitTestBehavior.opaque,
                 onHorizontalDragStart: (d) => setDrag(d.localPosition.dx),
                 onHorizontalDragUpdate: (d) => setDrag(d.localPosition.dx),
-                onHorizontalDragEnd: (_) {
-                  if (widget.locked) return;
-                  _seekToFraction(fraction);
-                  setState(() => _dragFraction = null);
+                onHorizontalDragEnd: (_) => _endDrag(),
+                onHorizontalDragCancel: () {
+                  if (mounted) setState(() => _dragFraction = null);
                 },
                 onTapUp: (d) {
                   if (widget.locked) return;
                   final f = ((d.localPosition.dx - thumbR) / usable)
                       .clamp(0.0, 1.0)
                       .toDouble();
-                  _seekToFraction(f);
-                  setState(() => _dragFraction = f);
+                  _dragFraction = f;
+                  _endDrag();
+                },
+                onTapCancel: () {
+                  if (mounted) setState(() => _dragFraction = null);
                 },
                 child: SizedBox(
                   height: 28,
@@ -1030,7 +1296,6 @@ class _SlimSliderState extends State<_SlimSlider> {
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      // Full track.
                       Positioned(
                         left: 0,
                         right: 0,
@@ -1043,7 +1308,6 @@ class _SlimSliderState extends State<_SlimSlider> {
                           ),
                         ),
                       ),
-                      // Played part.
                       Positioned(
                         left: 0,
                         top: (28 - trackH) / 2,
@@ -1056,7 +1320,6 @@ class _SlimSliderState extends State<_SlimSlider> {
                           ),
                         ),
                       ),
-                      // Thumb.
                       Positioned(
                         left: thumbX - thumbR,
                         top: (28 - thumbR * 2) / 2,
@@ -1115,11 +1378,7 @@ class _SlimSliderState extends State<_SlimSlider> {
 }
 
 // ═════════════════════════════════════════════
-// WAVY SLIDER — Echo WavySlider port. Sine wave across the
-// track: faint full-width, accent-colored up to the progress
-// point. The wave travels forward while playing and tweens
-// flat (amplitude → 0) when paused, like Echo's
-// animatedAmplitude. Thumb maps across the full width.
+// WAVY SLIDER — same hybrid engine, wave visual on top.
 // ═════════════════════════════════════════════
 
 class _WavySlider extends StatefulWidget {
@@ -1139,12 +1398,10 @@ class _WavySlider extends StatefulWidget {
 
 class _WavySliderState extends State<_WavySlider>
     with TickerProviderStateMixin {
-  // Phase motion — the wave travels forward while playing.
   late final AnimationController _phase = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 2),
   );
-  // Amplitude — 1 while playing, 0 when paused (animated flatten).
   late final AnimationController _amp = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 350),
@@ -1153,10 +1410,12 @@ class _WavySliderState extends State<_WavySlider>
 
   bool _playing = false;
   double? _dragFraction;
+  bool _seekPending = false;
   double _streamFraction = 0;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   StreamSubscription<Duration>? _posSub;
+  StreamSubscription? _stateSub;
   StreamSubscription<Duration?>? _durSub;
   StreamSubscription<bool>? _playingSub;
 
@@ -1167,18 +1426,26 @@ class _WavySliderState extends State<_WavySlider>
       if (!mounted) return;
       setState(() {
         _position = p;
-        if (_dragFraction == null) {
+        if (_dragFraction == null && !_seekPending) {
           _streamFraction = _fractionOf(p);
         }
       });
+    });
+    _stateSub = widget.handler.playbackState.listen((st) {
+      if (!mounted || _dragFraction != null || _seekPending) return;
+      final p = st.updatePosition;
+      if ((p - _position).abs() > const Duration(milliseconds: 400)) {
+        setState(() {
+          _position = p;
+          _streamFraction = _fractionOf(p);
+        });
+      }
     });
     _durSub = widget.handler.durationStream.listen((d) {
       if (!mounted || d == null) return;
       setState(() => _duration = d);
     });
 
-    // Start in the correct state whether the song is already
-    // playing or paused when the slider mounts.
     _playing = widget.handler.playbackState.value.playing;
     if (_playing) {
       _phase.repeat();
@@ -1202,6 +1469,7 @@ class _WavySliderState extends State<_WavySlider>
     _phase.dispose();
     _amp.dispose();
     _posSub?.cancel();
+    _stateSub?.cancel();
     _durSub?.cancel();
     _playingSub?.cancel();
     super.dispose();
@@ -1216,12 +1484,31 @@ class _WavySliderState extends State<_WavySlider>
   Duration get _effectiveDuration =>
       _duration.inSeconds > 0 ? _duration : widget.song.duration;
 
-  void _seekToFraction(double f) {
+  void _endDrag() async {
     if (widget.locked) return;
-    final total = _effectiveDuration;
-    if (total.inMilliseconds <= 0) return;
-    widget.handler
-        .seek(Duration(milliseconds: (f * total.inMilliseconds).round()));
+    final f = _dragFraction;
+    if (f == null) return;
+    final total = _effectiveDuration.inMilliseconds;
+    if (total <= 0) {
+      setState(() => _dragFraction = null);
+      return;
+    }
+    final targetMs = (f * total).round();
+    setState(() {
+      _seekPending = true;
+      _dragFraction = null;
+    });
+    final ok =
+    await widget.handler.seekSafe(Duration(milliseconds: targetMs));
+    if (!mounted) return;
+    if (!ok) {
+      _seekPending = false;
+      setState(() {});
+      return;
+    }
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _seekPending = false);
+    });
   }
 
   @override
@@ -1231,7 +1518,11 @@ class _WavySliderState extends State<_WavySlider>
         ? Duration(
         milliseconds:
         (fraction * _effectiveDuration.inMilliseconds).round())
-        : _position;
+        : (_seekPending
+        ? Duration(
+        milliseconds:
+        (fraction * _effectiveDuration.inMilliseconds).round())
+        : _position);
 
     return Column(
       children: [
@@ -1241,8 +1532,6 @@ class _WavySliderState extends State<_WavySlider>
             builder: (context, constraints) {
               final width = constraints.maxWidth;
 
-              // Full-width mapping, exactly like Echo's
-              // offset.x / size.width thumb math.
               void setDrag(double localX) {
                 if (widget.locked) return;
                 setState(() => _dragFraction =
@@ -1253,17 +1542,19 @@ class _WavySliderState extends State<_WavySlider>
                 behavior: HitTestBehavior.opaque,
                 onHorizontalDragStart: (d) => setDrag(d.localPosition.dx),
                 onHorizontalDragUpdate: (d) => setDrag(d.localPosition.dx),
-                onHorizontalDragEnd: (_) {
-                  if (widget.locked) return;
-                  _seekToFraction(fraction);
-                  setState(() => _dragFraction = null);
+                onHorizontalDragEnd: (_) => _endDrag(),
+                onHorizontalDragCancel: () {
+                  if (mounted) setState(() => _dragFraction = null);
                 },
                 onTapUp: (d) {
                   if (widget.locked) return;
                   final f =
                   (d.localPosition.dx / width).clamp(0.0, 1.0).toDouble();
-                  _seekToFraction(f);
-                  setState(() => _dragFraction = f);
+                  _dragFraction = f;
+                  _endDrag();
+                },
+                onTapCancel: () {
+                  if (mounted) setState(() => _dragFraction = null);
                 },
                 child: SizedBox(
                   height: 34,
@@ -1328,7 +1619,7 @@ class _WavySliderState extends State<_WavySlider>
 class _WavyPainter extends CustomPainter {
   final double progress;
   final double phase;
-  final double amplitude; // 0..1 — 0 = flat line (paused)
+  final double amplitude;
   final Color color;
   final Color dimColor;
   final Color thumbColor;
@@ -1349,7 +1640,6 @@ class _WavyPainter extends CustomPainter {
     const maxAmp = 3.2;
     final amp = maxAmp * amplitude;
 
-    // One continuous sine across the full width.
     final path = Path();
     var first = true;
     for (var x = 0.0; x <= size.width; x += 2) {
@@ -1362,7 +1652,6 @@ class _WavyPainter extends CustomPainter {
       }
     }
 
-    // Faint full-width wave (the unplayed track).
     final dimPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4
@@ -1370,7 +1659,6 @@ class _WavyPainter extends CustomPainter {
       ..color = dimColor;
     canvas.drawPath(path, dimPaint);
 
-    // Played portion, clipped, in the accent color.
     final activePaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4
@@ -1382,7 +1670,6 @@ class _WavyPainter extends CustomPainter {
     canvas.drawPath(path, activePaint);
     canvas.restore();
 
-    // Thumb on the center line — same as Echo's canvas thumb.
     canvas.drawCircle(
       Offset(size.width * progress.clamp(0.0, 1.0), mid),
       7,
@@ -1398,7 +1685,7 @@ class _WavyPainter extends CustomPainter {
 }
 
 // ═════════════════════════════════════════════
-// BAR SLIDER — standard Material slider, selectable in settings.
+// BAR SLIDER — same hybrid engine on Material's slider.
 // ═════════════════════════════════════════════
 
 class _BarSlider extends StatefulWidget {
@@ -1418,10 +1705,12 @@ class _BarSlider extends StatefulWidget {
 
 class _BarSliderState extends State<_BarSlider> {
   double? _dragFraction;
+  bool _seekPending = false;
   double _streamFraction = 0;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   StreamSubscription<Duration>? _posSub;
+  StreamSubscription? _stateSub;
   StreamSubscription<Duration?>? _durSub;
 
   @override
@@ -1431,8 +1720,20 @@ class _BarSliderState extends State<_BarSlider> {
       if (!mounted) return;
       setState(() {
         _position = p;
-        if (_dragFraction == null) _streamFraction = _fractionOf(p);
+        if (_dragFraction == null && !_seekPending) {
+          _streamFraction = _fractionOf(p);
+        }
       });
+    });
+    _stateSub = widget.handler.playbackState.listen((st) {
+      if (!mounted || _dragFraction != null || _seekPending) return;
+      final p = st.updatePosition;
+      if ((p - _position).abs() > const Duration(milliseconds: 400)) {
+        setState(() {
+          _position = p;
+          _streamFraction = _fractionOf(p);
+        });
+      }
     });
     _durSub = widget.handler.durationStream.listen((d) {
       if (!mounted || d == null) return;
@@ -1443,6 +1744,7 @@ class _BarSliderState extends State<_BarSlider> {
   @override
   void dispose() {
     _posSub?.cancel();
+    _stateSub?.cancel();
     _durSub?.cancel();
     super.dispose();
   }
@@ -1481,7 +1783,7 @@ class _BarSliderState extends State<_BarSlider> {
                 : (v) {
               final total = _effectiveDuration;
               if (total.inMilliseconds > 0) {
-                widget.handler.seek(Duration(
+                widget.handler.seekSafe(Duration(
                     milliseconds:
                     (v * total.inMilliseconds).round()));
               }

@@ -166,34 +166,23 @@ class _WelcomeBodyState extends State<_WelcomeBody> {
     );
   }
 
-  // ── Header: app icon, name, version badge, dev notice ──
+  // ── Header: app name, version badge, dev notice (no logo) ──
 
   Widget _headerCard() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
       decoration: BoxDecoration(
         color: SpotifyColors.surfaceLight,
         borderRadius: BorderRadius.circular(24),
       ),
       child: Column(
         children: [
-          Container(
-            width: 88,
-            height: 88,
-            decoration: BoxDecoration(
-              color: SpotifyColors.green.withOpacity(0.15),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.music_note_rounded,
-                size: 44, color: SpotifyColors.green),
-          ),
-          const SizedBox(height: 10),
           const Text('ZenMusic',
               style: TextStyle(
-                  fontSize: 20,
+                  fontSize: 22,
                   fontWeight: FontWeight.w800,
                   color: SpotifyColors.textPrimary)),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Container(
             padding:
             const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -207,8 +196,7 @@ class _WelcomeBodyState extends State<_WelcomeBody> {
                     fontWeight: FontWeight.w600,
                     color: SpotifyColors.green)),
           ),
-          const SizedBox(height: 12),
-          // ── Development notice ──
+          const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
@@ -237,7 +225,6 @@ class _WelcomeBodyState extends State<_WelcomeBody> {
       ),
     );
   }
-
   // ── Echo's section card + action rows ──
 
   Widget _section(String title, List<Widget> children) {

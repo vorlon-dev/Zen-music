@@ -550,6 +550,88 @@ class YoutubeService {
   }
 
   // ═════════════════════════════════════════════
+  // DIRECT VIDEO STREAM — muxed video+audio for the watch page
+  // ═════════════════════════════════════════════
+
+  /// Resolves a muxed (video+audio) stream for a YouTube video id,
+  /// preferring 720p, then the best available ≤1080p. Returns null if
+  /// the video can't be resolved. Used by the dedicated video watch
+  /// page where the video's own audio is the playback source.
+  Future<VideoStreamResult?> getMuxedStreamUrl(String videoId,
+      {bool preferHd = true}) async {
+    await _throttle();
+    print('🎬 Watch: resolving muxed stream for $videoId ...');
+
+    if (preferHd) {
+      final v = await _muxedAttempt(videoId,
+          _HdClient('visionOs', visionOs, _visionOsUa));
+      if (v != null) return v;
+      for (final entry in _hdClients.skip(1)) {
+        final r = await _muxedAttempt(videoId, entry);
+        if (r != null) return r;
+      }
+    }
+
+    await _throttle();
+    try {
+      final manifest = await _yt.videos.streams
+          .getManifest(videoId)
+          .timeout(const Duration(seconds: 10));
+      if (manifest.muxed.isEmpty) {
+        print('🎬 Watch: no muxed streams for $videoId');
+        return null;
+      }
+      final best = manifest.muxed.withHighestBitrate();
+      print('🎬 Watch: muxed SD ${best.videoQualityLabel} ($videoId)');
+      return VideoStreamResult(best.url.toString());
+    } catch (e) {
+      print('❌ Watch: SD muxed failed for $videoId — $e');
+      return null;
+    }
+  }
+
+  Future<VideoStreamResult?> _muxedAttempt(
+      String videoId, _HdClient entry) async {
+    await _throttle();
+    try {
+      final manifest = await _yt.videos.streams.getManifest(
+        videoId,
+        ytClients: [entry.client],
+      ).timeout(const Duration(seconds: 10));
+
+      if (manifest.muxed.isEmpty) return null;
+
+      // Prefer 720p, then highest ≤1080p.
+      dynamic pick;
+      for (final target in const [720, 1080]) {
+        for (final s in manifest.muxed) {
+          if (_streamHeight(s) == target) {
+            pick = s;
+            break;
+          }
+        }
+        if (pick != null) break;
+      }
+      pick ??= manifest.muxed.withHighestBitrate();
+
+      final url = pick.url.toString();
+      if (!await _isPlayable(url, entry.userAgent)) {
+        print('   ↳ ${entry.name}: muxed URL blocked — next');
+        return null;
+      }
+      final ua = entry.userAgent;
+      final headers = ua == null
+          ? const <String, String>{}
+          : <String, String>{'User-Agent': ua};
+      print('✅ Watch: muxed ${pick.videoQualityLabel} via ${entry.name}');
+      return VideoStreamResult(url, headers);
+    } catch (e) {
+      print('   ↳ ${entry.name} muxed failed — $e');
+      return null;
+    }
+  }
+
+  // ═════════════════════════════════════════════
   // VIDEO STREAM — Canvas backdrop
   // ═════════════════════════════════════════════
 

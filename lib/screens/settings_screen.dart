@@ -80,12 +80,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       setState(() => _appVersion = p.version);
     }).catchError((_) {});
+    _applyCrossfade();
   }
 
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  /// Pushes crossfade prefs into the audio handler whenever they change.
+  void _applyCrossfade() {
+    audioHandler.applyCrossfadeSettings(
+      enabled: AppearancePrefs.crossfadeEnabled.value,
+      seconds: AppearancePrefs.crossfadeSeconds.value.round(),
     );
   }
 
@@ -518,6 +527,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           await AppearancePrefs.setShowQualityBadge(v);
           setState(() {});
         },
+      ),
+      _switchRow(
+        Icons.merge_rounded,
+        'Crossfade',
+        'Blend the end of a track into the next',
+        AppearancePrefs.crossfadeEnabled.value,
+            (v) async {
+          await AppearancePrefs.setCrossfadeEnabled(v);
+          _applyCrossfade();
+          setState(() {});
+        },
+      ),
+      _prefRow(
+        Icons.timer_outlined,
+        'Crossfade duration',
+        '${AppearancePrefs.crossfadeSeconds.value.round()}s',
+            () => _showSliderPrefDialog(
+          title: 'Crossfade duration',
+          initial: AppearancePrefs.crossfadeSeconds.value,
+          min: 1,
+          max: 12,
+          divisions: 11,
+          resetTo: 4,
+          label: (v) => '${v.round()}s',
+          onOk: (v) async {
+            await AppearancePrefs.setCrossfadeSeconds(v);
+            _applyCrossfade();
+            setState(() {});
+          },
+        ),
       ),
       _prefRow(
         Icons.format_align_left_rounded,

@@ -912,6 +912,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.6.0"
+  receive_sharing_intent:
+    dependency: "direct main"
+    description:
+      name: receive_sharing_intent
+      sha256: "72f229a38f2910029c11d840770c173b27072e348ef3376130b37514bc4556f6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.9.0"
   record:
     dependency: "direct main"
     description:
@@ -1480,10 +1488,9 @@ packages:
   youtube_explode_dart:
     dependency: "direct main"
     description:
-      name: youtube_explode_dart
-      sha256: "10134a53989b2f3dc576121735aec8fc6d88784956f4a2ad1a2525b006373a76"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/youtube_explode_dart"
+      relative: true
+    source: path
     version: "3.1.0"
   yt_extractor:
     dependency: "direct main"

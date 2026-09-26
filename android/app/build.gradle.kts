@@ -7,7 +7,10 @@ plugins {
 
 android {
     namespace = "com.zen.music.zenmusic"
-    compileSdk = flutter.compileSdkVersion
+    // Override: receive_sharing_intent's latest release was built
+    // against SDK 37; Flutter's default lags at 36. Explicit override
+    // keeps the plugin happy regardless of Flutter's pinned value.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -46,7 +49,6 @@ dependencies {
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
     implementation("androidx.media3:media3-common:1.4.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
     flutter {
         source = "../.."

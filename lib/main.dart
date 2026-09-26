@@ -5,12 +5,17 @@ import 'package:provider/provider.dart';
 import 'audio/zen_audio_handler.dart';
 import 'models/song.dart';
 import 'screens/home_screen.dart';
+import 'services/share_intent_service.dart';
 import 'services/storage_service.dart';
 import 'services/youtube_service.dart';
 import 'theme/spotify_theme.dart';
 
 late ZenAudioHandler audioHandler;
 late StorageService storage;
+
+/// Global navigator key — used by the share-intent service to push the
+/// video watch page when a YouTube link is shared into the app.
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,14 +41,40 @@ Future<void> main() async {
   runApp(const ZenMusicApp());
 }
 
-class ZenMusicApp extends StatelessWidget {
+class ZenMusicApp extends StatefulWidget {
   const ZenMusicApp({super.key});
+
+  @override
+  State<ZenMusicApp> createState() => _ZenMusicAppState();
+}
+
+class _ZenMusicAppState extends State<ZenMusicApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Share-target: YouTube links shared from other apps open the video
+    // watch page directly. Registered after the first frame so the
+    // navigator exists.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final nav = navigatorKey.currentState;
+      if (nav != null) {
+        ShareIntentService.instance.init(nav);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    ShareIntentService.instance.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
       create: (_) => PlayerController(),
       child: MaterialApp(
+        navigatorKey: navigatorKey,
         title: 'ZenMusic',
         debugShowCheckedModeBanner: false,
         theme: SpotifyTheme.dark(),

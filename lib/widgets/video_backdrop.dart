@@ -3,16 +3,18 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
-/// ZenMusic — Spotify-Canvas-style backdrop (Track 2).
+/// ZenMusic — video backdrop.
 ///
-/// SHORT LOOPING CLIP (default 15 s), muted, scaled to COVER the
-/// entire screen — full-bleed 9:16, edges cropped like Reels.
-/// [httpHeaders] replay the InnerTube client's User-Agent so
-/// googlevideo serves HD streams.
+/// Two modes:
 ///
-/// Set [shortLoop] for sources that ARE already short loops
-/// (Apple Music canvases, 2-5 s): the whole asset loops seamlessly
-/// instead of applying the 15 s clip window.
+/// 1. DEFAULT (canvas style): a SHORT LOOPING CLIP (15 s), muted,
+///    scaled to cover the screen. The loop is independent of audio.
+///
+/// 2. SYNCHRONIZED (song-video style): the FULL video plays UNMUTED
+///    as the actual playback surface — its position is continuously
+///    locked to the audio handler's position, seeks follow the
+///    slider, and pause follows playback. Use [synchronized] for
+///    "watch the actual song video" mode.
 class VideoBackdrop extends StatefulWidget {
   final String streamUrl;
   final bool playing;
@@ -20,14 +22,15 @@ class VideoBackdrop extends StatefulWidget {
   final Duration? clipStart;
   final Map<String, String> httpHeaders;
   final void Function(String reason)? onUnavailable;
-
-  /// Kept for call-site compatibility. Canvas mode intentionally does
-  /// NOT follow the audio position — the loop is independent.
   final Stream<Duration>? positionStream;
 
   /// True when the source is already a short loop (Apple canvas):
   /// loop the entire asset, no clip window.
   final bool shortLoop;
+
+  /// SYNCHRONIZED mode: full-length, unmuted, position locked to
+  /// [positionStream]. Requires positionStream to be provided.
+  final bool synchronized;
 
   const VideoBackdrop({
     super.key,
@@ -39,6 +42,7 @@ class VideoBackdrop extends StatefulWidget {
     this.onUnavailable,
     this.positionStream,
     this.shortLoop = false,
+    this.synchronized = false,
   });
 
   @override
@@ -54,9 +58,19 @@ class _VideoBackdropState extends State<VideoBackdrop> {
   Duration _loopStart = Duration.zero;
   Duration? _loopEnd;
 
+  // Synchronized mode: suppress our own position-subscription writes
+  // while the user drags a seek elsewhere in the UI (the seek event
+  // itself will arrive via positionStream and re-align us).
+  StreamSubscription<Duration>? _posSub;
+  bool _applyingSeek = false;
+  Duration _lastAudioPos = Duration.zero;
+
   @override
   void initState() {
     super.initState();
+    if (widget.synchronized && widget.positionStream != null) {
+      _posSub = widget.positionStream!.listen(_onAudioPosition);
+    }
     _init();
   }
 
@@ -80,6 +94,7 @@ class _VideoBackdropState extends State<VideoBackdrop> {
 
   @override
   void dispose() {
+    _posSub?.cancel();
     _controller?.dispose();
     super.dispose();
   }
@@ -103,11 +118,24 @@ class _VideoBackdropState extends State<VideoBackdrop> {
       return;
     }
 
+    if (widget.synchronized) {
+      // SYNCHRONIZED: full length, audible, locked to audio position.
+      await c.setVolume(1.0);
+      await c.setLooping(false);
+      _loopStart = Duration.zero;
+      _loopEnd = null;
+      await c.seekTo(_lastAudioPos);
+      if (widget.playing) unawaited(c.play());
+      c.addListener(_onVideoTick);
+      if (mounted) setState(() => _initialized = true);
+      return;
+    }
+
+    // CANVAS mode: muted clip loop.
     await c.setVolume(0);
     await c.setLooping(false);
 
     if (widget.shortLoop) {
-      // Source is already a short loop — loop the whole asset.
       _loopStart = Duration.zero;
       _loopEnd = c.value.duration > Duration.zero
           ? c.value.duration
@@ -156,6 +184,24 @@ class _VideoBackdropState extends State<VideoBackdrop> {
       return;
     }
 
+    // Synchronized mode: keep the video locked to the audio position.
+    if (widget.synchronized) {
+      final audioPos = _lastAudioPos;
+      final videoPos = c.value.position;
+      final drift = (videoPos - audioPos).abs();
+      if (_applyingSeek) return;
+      // Re-align when drift exceeds a second (seek from the UI,LT
+      // host seek, buffering difference).
+      if (drift > const Duration(seconds: 1)) {
+        _applyingSeek = true;
+        unawaited(c
+            .seekTo(audioPos)
+            .whenComplete(() => _applyingSeek = false));
+      }
+      return;
+    }
+
+    // Canvas mode: loop window.
     final end = _loopEnd;
     if (end == null || _loopingSeek) return;
 
@@ -164,6 +210,19 @@ class _VideoBackdropState extends State<VideoBackdrop> {
       unawaited(
         c.seekTo(_loopStart).whenComplete(() => _loopingSeek = false),
       );
+    }
+  }
+
+  void _onAudioPosition(Duration pos) {
+    _lastAudioPos = pos;
+    // Nudge the video on significant jumps (slider seek, LT seek).
+    // Fine drift is corrected by _onVideoTick.
+    if (!widget.synchronized) return;
+    final c = _controller;
+    if (c == null || !_initialized || _applyingSeek) return;
+    if ((c.value.position - pos).abs() > const Duration(seconds: 2)) {
+      _applyingSeek = true;
+      unawaited(c.seekTo(pos).whenComplete(() => _applyingSeek = false));
     }
   }
 
@@ -196,8 +255,7 @@ class _VideoBackdropState extends State<VideoBackdrop> {
 
             // COVER, computed explicitly: scale so BOTH screen
             // dimensions are filled (max of the two ratios);
-            // ClipRect crops the overflowing axis. This is the
-            // Reels/Canvas full-bleed look — no black bars, ever.
+            // ClipRect crops the overflowing axis.
             final scaleW = screenW / size.width;
             final scaleH = screenH / size.height;
             final s = scaleW > scaleH ? scaleW : scaleH;
