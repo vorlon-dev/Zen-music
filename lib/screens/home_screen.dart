@@ -41,6 +41,7 @@ import 'radio_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'user_playlist_screen.dart';
+import 'video_watch_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -365,6 +366,19 @@ class _HomeTabState extends State<HomeTab> {
     ).then((_) => _loadRecent());
   }
 
+  /// Opens a video in the dedicated watch page (YouTube-style).
+  void _openVideo(Song video) {
+    pushSharedAxisY(
+      context,
+      VideoWatchScreen(
+        videoId: video.id,
+        title: video.title,
+        artist: video.artist,
+        thumbnail: video.thumbnail,
+      ),
+    );
+  }
+
   void _openCollection(Collection c) {
     pushSharedAxisY(context, CollectionScreen(collection: c))
         .then((_) => _loadRecent());
@@ -372,18 +386,17 @@ class _HomeTabState extends State<HomeTab> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: RefreshIndicator(
-        color: Colors.transparent,
-        backgroundColor: Colors.transparent,
-        onRefresh: _loadAll,
-        child: _loading
-            ? _buildSkeletons()
-            : ListView(
-          controller: _scroll,
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.only(bottom: 24),
-          children: [
+    return RefreshIndicator(
+      color: Colors.transparent,
+      backgroundColor: Colors.transparent,
+      onRefresh: _loadAll,
+      child: _loading
+          ? _buildSkeletons()
+          : ListView(
+        controller: _scroll,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(0, 6, 0, 24),
+        children: [
             if (_isRefreshing)
               const Padding(
                 padding: EdgeInsets.all(14),
@@ -467,7 +480,8 @@ class _HomeTabState extends State<HomeTab> {
                 items: [
                   for (final s in _personalVideos) ShelfItem.fromSong(s)
                 ],
-                onTapItem: (i) => _playSong(_personalVideos[i]),
+                // Videos open the dedicated watch page (YouTube-style).
+                onTapItem: (i) => _openVideo(_personalVideos[i]),
                 playingIdStream: audioHandler.currentSongStream,
               ),
 
@@ -518,30 +532,28 @@ class _HomeTabState extends State<HomeTab> {
                 playingIdStream: audioHandler.currentSongStream,
               ),
 
-            if (_loadingMore)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Center(child: WaveSpinner(size: 22)),
-              )
-            else if (_endReached)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 28),
-                child: Center(
-                  child: Text(
-                    'You\'re all caught up — pull to refresh',
-                    style: TextStyle(
-                      color: SpotifyColors.textTertiary,
-                      fontSize: 13,
-                    ),
+          if (_loadingMore)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: WaveSpinner(size: 22)),
+            )
+          else if (_endReached)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: Center(
+                child: Text(
+                  'You\'re all caught up — pull to refresh',
+                  style: TextStyle(
+                    color: SpotifyColors.textTertiary,
+                    fontSize: 13,
                   ),
                 ),
               ),
-          ],
-        ),
-      ),
-    );
-  }
-
+            ),
+        ],        // 1. closes children: [ of the ListView
+      ),          // 2. closes ListView(
+    );            // 3. closes RefreshIndicator( + return
+  }                 // closes _HomeTabState.build
   Widget _buildSkeletons() {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -1400,7 +1412,7 @@ class _Artwork extends StatelessWidget {
           imageUrl: url,
           width: MiniPlayer._artworkSize,
           height: MiniPlayer._artworkSize,
-          fit: BoxFit.cover,
+          fit: BoxFit.cover, // CROP 16:9 thumbs into 1:1 — no bars
           placeholder: (_, __) => Container(
             width: MiniPlayer._artworkSize,
             height: MiniPlayer._artworkSize,

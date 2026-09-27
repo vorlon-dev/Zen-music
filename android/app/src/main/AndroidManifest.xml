@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
     <application
         android:label="zenmusic"
@@ -27,7 +28,7 @@
 
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
-                android:resource="@style/NormalTheme" />
+                android:resource="@style/LaunchTheme" />
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -41,6 +42,17 @@
                 <data android:mimeType="text/*" />
             </intent-filter>
         </activity>
+
+        <!-- Serves the downloaded APK to the system installer -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationName}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <service
             android:name="com.ryanheise.audioservice.AudioService"

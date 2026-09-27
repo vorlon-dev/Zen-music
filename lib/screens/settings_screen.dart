@@ -81,6 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => _appVersion = p.version);
     }).catchError((_) {});
     _applyCrossfade();
+    audioHandler.setBufferedStreaming(AppearancePrefs.bufferedStreaming.value);
   }
 
   void _toast(String msg) {
@@ -769,6 +770,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ? 'Medium (≤160 kbps)'
                   : 'Low (≤96 kbps)',
               _showQualityPicker,
+            ),
+            _switchRow(
+              Icons.storage_rounded,
+              'Buffered streaming',
+              'Downloads ahead of playback — smoother on slow networks',
+              AppearancePrefs.bufferedStreaming.value,
+                  (v) async {
+                await AppearancePrefs.setBufferedStreaming(v);
+                audioHandler.setBufferedStreaming(v);
+                setState(() {});
+              },
             ),
             _statsToggle(),
             _switchRow(

@@ -1,5 +1,6 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'audio/zen_audio_handler.dart';
@@ -27,6 +28,20 @@ Future<void> main() async {
   // yt_downloader needs no initialization — video mode is always available.
   YoutubeService.videoEnabled = true;
 
+  // Full-screen app: hide the status bar and the 3-button nav bar
+  // globally. Immersive-sticky re-hides them automatically after the
+  // user swipes the edge, like the YouTube app.
+  await SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.immersiveSticky,
+  );
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    systemNavigationBarIconBrightness: Brightness.light,
+  ));
+
   // Initialize audio service
   audioHandler = await AudioService.init(
     builder: () => ZenAudioHandler(storage: storage),
@@ -48,10 +63,11 @@ class ZenMusicApp extends StatefulWidget {
   State<ZenMusicApp> createState() => _ZenMusicAppState();
 }
 
-class _ZenMusicAppState extends State<ZenMusicApp> {
+class _ZenMusicAppState extends State<ZenMusicApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Share-target: YouTube links shared from other apps open the video
     // watch page directly. Registered after the first frame so the
     // navigator exists.
@@ -65,8 +81,19 @@ class _ZenMusicAppState extends State<ZenMusicApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     ShareIntentService.instance.dispose();
     super.dispose();
+  }
+
+  // Re-assert immersive mode whenever the app resumes — the system can
+  // restore system bars after dialogs, permission prompts, or the
+  // in-app APK installer opens over us.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
   }
 
   @override

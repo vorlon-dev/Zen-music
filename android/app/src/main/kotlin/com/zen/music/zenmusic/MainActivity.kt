@@ -20,6 +20,8 @@ class MainActivity : AudioServiceActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
         )
         registerExtensions(flutterEngine)
+        // In-app APK installer channel (OTA updates)
+        InstallApkPlugin.register(flutterEngine, this)
     }
 
     private fun registerExtensions(flutterEngine: FlutterEngine) {

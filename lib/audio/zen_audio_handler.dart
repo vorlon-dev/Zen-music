@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:audio_service/audio_service.dart';
+import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/song.dart';
+import '../services/buffered_stream_source.dart';
 import '../services/downloads_service.dart';
 import '../services/listening_stats_service.dart';
+import '../services/song_source_resolver.dart';
 import '../services/storage_service.dart';
 import '../services/youtube_service.dart';
 
@@ -67,11 +70,60 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final Set<String> _staleStreamIds = {};
 
   // ═════════════════════════════════════════════
+  // STRICT SOURCE POLICY — resolve non-JioSaavn songs to proper
+  // music-catalog songs (JioSaavn 320kbps / YTMusic song) before
+  // playing. The whole queue is resolved ahead in the background, so
+  // no raw YouTube entries (16:9 thumbnails, video-only sources) stay
+  // in the queue.
+  // ═════════════════════════════════════════════
+
+  bool _strictSources = true;
+  bool _queueResolving = false;
+
+  void setStrictSources(bool enabled) {
+    _strictSources = enabled;
+  }
+
+  /// Resolves [song] to a proper music-catalog song when needed, swaps
+  /// it into the queue at [index], and returns the song to play.
+  Future<Song> _resolveSongSource(Song song, int index) async {
+    if (followRemote || song.isFromJiosaavn || storage.getOfflineMode()) {
+      return song;
+    }
+    if (!_strictSources) return song;
+
+    final resolved = await SongSourceResolver.instance.resolve(song);
+    if (resolved == null) return song;
+
+    if (index >= 0 && index < _queue.length && _queue[index].id == song.id) {
+      _queue[index] = resolved;
+      queue.add(_queue.map(_toMediaItem).toList());
+    }
+    return resolved;
+  }
+
+  /// Resolves the songs ahead of the current one in the background.
+  Future<void> _resolveQueueAhead() async {
+    if (_queueResolving || followRemote || !_strictSources) return;
+    _queueResolving = true;
+    try {
+      for (var i = 0; i < _queue.length; i++) {
+        if (i == _currentIndex) continue; // resolved by _playIndex
+        final s = _queue[i];
+        if (s.isFromJiosaavn) continue;
+        final resolved = await SongSourceResolver.instance.resolve(s);
+        if (resolved != null && i < _queue.length && _queue[i].id == s.id) {
+          _queue[i] = resolved;
+          queue.add(_queue.map(_toMediaItem).toList());
+        }
+      }
+    } finally {
+      _queueResolving = false;
+    }
+  }
+
+  // ═════════════════════════════════════════════
   // CROSSFADE — second hidden player, real audio overlap.
-  // The hidden player is created with handleInterruptions:false so it
-  // does NOT fight the primary for Android audio focus (the focus fight
-  // silently muted the fade-in and made the next song appear to start
-  // mid-track).
   // ═════════════════════════════════════════════
 
   bool _crossfadeEnabled = false;
@@ -133,7 +185,13 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _xfadeInProgress = true;
     _xfadeTargetIndex = targetIndex;
     try {
-      final nextSong = _queue[targetIndex];
+      // Resolve first, so the fade plays the proper song version.
+      final nextSong =
+      await _resolveSongSource(_queue[targetIndex], targetIndex);
+      if (generation != _loadGeneration) {
+        _xfadeInProgress = false;
+        return;
+      }
       _xfadeSong = nextSong;
       final stream = await _getStreamUrl(nextSong);
       if (generation != _loadGeneration) {
@@ -141,8 +199,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         return;
       }
 
-      // handleInterruptions:false — no audio-focus fight with the
-      // primary player, so the fade-in is actually audible.
       final xf = _xfade ??= AudioPlayer(handleInterruptions: false);
       await xf.setUrl(
         stream.url,
@@ -156,7 +212,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       await xf.setVolume(0);
       await xf.play();
 
-      // Ramp both volumes over the fade window.
       final fade = Duration(seconds: _crossfadeSeconds);
       final started = DateTime.now();
       const step = Duration(milliseconds: 50);
@@ -182,14 +237,9 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   /// The old track completed while a crossfade was running — adopt the
-  /// incoming track on the primary player. The hidden player is paused
-  /// FIRST so its position is frozen at the exact handover point; the
-  /// primary then resumes from that same position with no skip.
+  /// incoming track on the primary player.
   Future<void> _adoptCrossfadedTrack() async {
     final xf = _xfade;
-    // Freeze the hidden player before reading its position — otherwise
-    // it keeps advancing during the primary player's load and the song
-    // jumps forward at handover.
     if (xf != null) {
       try {
         await xf.pause();
@@ -241,8 +291,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       print('Crossfade adopt failed: $e');
       _player.setVolume(1.0);
     } finally {
-      // Hidden player has handed over — stop it; the instance is
-      // reused for the next fade.
       try {
         await xf?.stop();
         await xf?.setVolume(0);
@@ -251,7 +299,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     }
   }
 
-  /// Kills any in-flight crossfade and restores normal volume.
   Future<void> _abortCrossfade() async {
     if (!_xfadeInProgress) return;
     _xfadeInProgress = false;
@@ -272,6 +319,27 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   // ═════════════════════════════════════════════
+  // BUFFERED STREAMING
+  // ═════════════════════════════════════════════
+
+  bool _bufferedStreaming = true;
+
+  void setBufferedStreaming(bool enabled) {
+    _bufferedStreaming = enabled;
+  }
+
+  Future<int> _contentLength(VideoStreamResult stream) async {
+    try {
+      final resp = await http.head(Uri.parse(stream.url),
+          headers: stream.headers);
+      final len = resp.headers['content-length'];
+      return int.tryParse(len ?? '') ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  // ═════════════════════════════════════════════
 
   Timer? _saveTimer;
   void setAudioQualitySetting(String quality) {
@@ -283,7 +351,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   bool _sleepAtEndOfSong = false;
   final _sleepTimerController = StreamController<Duration?>.broadcast();
 
-  /// null = off · Duration.zero = end-of-song armed · >0 = countdown
   Stream<Duration?> get sleepTimerStream => _sleepTimerController.stream;
 
   // Radio (live stream) mode.
@@ -292,14 +359,11 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   bool get isRadioMode => _isRadioMode;
 
-  /// Name of the currently playing radio station (null = not radio).
   Stream<String?> get radioStationStream => _radioStationController.stream;
 
-  // Quality/type badge stream.
   final _audioQualityController =
   StreamController<Map<String, String?>>.broadcast();
 
-  /// {'type': 'OPUS'|'AAC'|..., 'bitrate': '128'} — nulled when queue clears.
   Stream<Map<String, String?>> get audioQualityStream =>
       _audioQualityController.stream;
 
@@ -384,7 +448,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }) async {
     try {
       _markTransportAction();
-      _loadGeneration++; // abandon any in-flight music load
+      _loadGeneration++;
       await _abortCrossfade();
       await _player.stop();
       _isRadioMode = true;
@@ -419,9 +483,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // EXTENSION (raw stream playback — live-source mode)
   // ═════════════════════════════════════════════
 
-  /// Plays a direct stream (url + headers) outside the music queue —
-  /// used by the extension engine until extension playback is merged
-  /// into the queue system.
   Future<bool> playStream({
     required String url,
     Map<String, String> headers = const {},
@@ -435,7 +496,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       _loadGeneration++;
       await _abortCrossfade();
       await _player.stop();
-      _isRadioMode = true; // live-source mode: no queue advance
+      _isRadioMode = true;
       _radioStationController.add(null);
 
       mediaItem.add(MediaItem(
@@ -459,16 +520,12 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // ═════════════════════════════════════════════
 
   Future<void> _onTrackCompleted() async {
-    // Guard 1: a manual transport action just happened — stale event.
     if (DateTime.now().difference(_lastTransportActionAt) <
         const Duration(milliseconds: 800)) {
       return;
     }
-    // Guard 2: radio/extension streams don't auto-advance.
     if (_isRadioMode) return;
 
-    // Guard 3: a crossfade is in flight — the incoming track is already
-    // audible; adopt it instead of advancing again.
     if (_xfadeInProgress) {
       await _adoptCrossfadedTrack();
       return;
@@ -476,7 +533,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
     listeningStatsService.finishListeningSession(countCurrentTick: true);
 
-    // Guard 4: remote-controlled queue (Listen Together guest).
     if (followRemote) return;
 
     if (_sleepAtEndOfSong) {
@@ -502,7 +558,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   // ═════════════════════════════════════════════
-  // EQUALIZER (Android system EQ via just_audio)
+  // EQUALIZER
   // ═════════════════════════════════════════════
 
   Future<AndroidEqualizerParameters?> getEqualizerParameters() async {
@@ -593,7 +649,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // PUBLIC API
   // ═════════════════════════════════════════════
 
-  /// Listen Together: guests preload the host's resolved stream here.
   void seedStreamUrl(String id, String url, Map<String, String> headers) {
     _staleStreamIds.remove(id);
     _urlCache[id] = VideoStreamResult(url, headers);
@@ -698,7 +753,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // ═════════════════════════════════════════════
 
   Future<VideoStreamResult> _getStreamUrl(Song song) async {
-    // Tier 0: offline download — zero network.
     final localPath = await DownloadsService().localPath(song.id);
     if (localPath != null) {
       final result = VideoStreamResult('file://$localPath', const {});
@@ -729,13 +783,17 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     return result;
   }
 
+
   Future<void> _playIndex(int index) async {
     if (index < 0 || index >= _queue.length) return;
 
     final generation = ++_loadGeneration;
     await _abortCrossfade();
     _currentIndex = index;
-    final song = _queue[index];
+    // STRICT SOURCE POLICY: resolve to a proper music-catalog song
+    // (JioSaavn / YTMusic) BEFORE the player shows it, so the artwork
+    // is the 1:1 album art and the stream is the high-quality version.
+    final song = await _resolveSongSource(_queue[index], index);
     final mediaItem = _toMediaItem(song);
     this.mediaItem.add(mediaItem);
 
@@ -743,6 +801,10 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       await _player.stop();
     } catch (_) {}
     await _player.setVolume(1.0);
+
+    // Resolve the rest of the queue in the background — no raw YouTube
+    // entries (16:9 thumbnails) remain behind the playing song.
+    unawaited(_resolveQueueAhead());
 
     const maxAttempts = 5;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -758,11 +820,33 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         }
         _broadcastAudioQuality(song, stream);
         if (generation != _loadGeneration) return;
-        await _player.setUrl(
-          stream.url,
-          headers: stream.headers.isNotEmpty ? stream.headers : null,
-          tag: mediaItem,
-        );
+
+        if (_bufferedStreaming && !stream.url.startsWith('file://')) {
+          // ignore: experimental_member_use
+          final source = BufferedStreamAudioSource(
+            songId: song.id,
+            streamUrl: stream.url,
+            headers: stream.headers,
+            totalBytes: await _contentLength(stream),
+          );
+          if (generation != _loadGeneration) return;
+          try {
+            await _player.setAudioSource(source);
+          } on Exception {
+            await _player.setUrl(
+              stream.url,
+              headers: stream.headers.isNotEmpty ? stream.headers : null,
+              tag: mediaItem,
+            );
+          }
+        } else {
+          await _player.setUrl(
+            stream.url,
+            headers: stream.headers.isNotEmpty ? stream.headers : null,
+            tag: mediaItem,
+          );
+        }
+
         if (generation != _loadGeneration) return;
         await play();
         lastFailedSongId = null;
@@ -914,17 +998,12 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   @override
   Future<void> seek(Duration position) async {
     if (_lockoutActive) return;
-    // A manual seek invalidates the fade overlap — abort and continue
-    // on the primary player only.
     await _abortCrossfade();
     await _player.seek(position);
     final cb = onLocalSeek;
     if (cb != null) cb(position);
   }
 
-  /// Seek that reports whether it was actually applied. Used by player
-  /// UI sliders: a swallowed seek (LT guest lockout, player not ready)
-  /// must be visible to the user instead of a frozen bar.
   Future<bool> seekSafe(Duration position) async {
     if (_lockoutActive) return false;
     if (_player.processingState != ProcessingState.ready) return false;

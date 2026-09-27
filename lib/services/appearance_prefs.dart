@@ -38,6 +38,8 @@ class AppearancePrefs {
   // Crossfade between tracks.
   static final crossfadeEnabled = ValueNotifier<bool>(false);
   static final crossfadeSeconds = ValueNotifier<double>(4.0);
+  // Buffered streaming.
+  static final bufferedStreaming = ValueNotifier<bool>(true);
 
   static Future<void> load() async {
     if (_loaded) return;
@@ -62,6 +64,7 @@ class AppearancePrefs {
     canvasEnabled.value = p.getBool('ap_canvas') ?? true;
     crossfadeEnabled.value = p.getBool('ap_xfade') ?? false;
     crossfadeSeconds.value = p.getDouble('ap_xfade_secs') ?? 4;
+    bufferedStreaming.value = p.getBool('ap_bufstream') ?? true;
     _loaded = true;
   }
 
@@ -176,5 +179,10 @@ class AppearancePrefs {
   static Future<void> setCrossfadeSeconds(double v) async {
     crossfadeSeconds.value = v;
     await _write('ap_xfade_secs', v);
+  }
+
+  static Future<void> setBufferedStreaming(bool v) async {
+    bufferedStreaming.value = v;
+    await _write('ap_bufstream', v);
   }
 }

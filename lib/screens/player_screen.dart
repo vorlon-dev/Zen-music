@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
-
+import '../services/echomusic_canvas_service.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
@@ -119,6 +119,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     AppearancePrefs.keepScreenOn.addListener(_applyKeepScreenOn);
     _applyKeepScreenOn();
 
+    // Keep the app-wide immersive mode (bars stay hidden everywhere).
     AppearancePrefs.hideStatusBarOnLyrics.addListener(_applySystemUi);
     AppearancePrefs.canvasEnabled.addListener(_onCanvasPrefChanged);
   }
@@ -132,23 +133,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  /// Re-applies the system-UI mode from the current lyrics/setting state.
+  /// Keeps the app-wide immersive mode (status bar + nav bar hidden).
   void _applySystemUi() {
-    if (_videoFullscreen) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-      return;
-    }
-    if (_showLyrics && AppearancePrefs.hideStatusBarOnLyrics.value) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    }
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
-  /// Opens/closes lyrics and manages the immersive status bar setting.
+  /// Opens/closes the lyrics pane.
   void _setLyricsOpen(bool open) {
     setState(() => _showLyrics = open);
-    _applySystemUi();
   }
 
   @override
@@ -157,13 +149,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     AppearancePrefs.hideStatusBarOnLyrics.removeListener(_applySystemUi);
     AppearancePrefs.canvasEnabled.removeListener(_onCanvasPrefChanged);
     if (_videoFullscreen) {
+      // Restore portrait if the user pops the screen mid-fullscreen.
+      // System bars stay hidden — the app is full-screen everywhere.
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
       ]);
     }
     WakelockPlus.disable(); // WAKELOCK
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _songSub?.cancel();
     super.dispose();
   }
@@ -203,16 +196,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     if (_canvasForSongId == song.id) return;
     _canvasForSongId = song.id;
-    final canvas = await AppleCanvasService.instance
+    // Provider chain: echomusic curated manifest (instant) →
+    // Apple Music AMP (deeper catalog).
+    String? canvasUrl;
+    final echo = await EchomusicCanvasService.instance
         .getBySongArtist(song.title, song.artist);
     if (!mounted) return;
     if (audioHandler.currentSong?.id != song.id) return;
-    if (canvas == null || canvas.animated.isEmpty) {
+    if (echo != null && echo.videoUrl.isNotEmpty) {
+      canvasUrl = echo.videoUrl;
+      print('Canvas: echomusic match for "${song.title}"');
+    } else {
+      final apple = await AppleCanvasService.instance
+          .getBySongArtist(song.title, song.artist);
+      if (!mounted) return;
+      if (audioHandler.currentSong?.id != song.id) return;
+      if (apple != null && apple.animated.isNotEmpty) {
+        canvasUrl = apple.animated;
+        print('Canvas: Apple Music match for "${song.title}"');
+      }
+    }
+    if (canvasUrl == null || canvasUrl.isEmpty) {
       _canvasFailed.add(song.id);
       setState(() => _canvasUrl = null);
       return;
     }
-    setState(() => _canvasUrl = canvas.animated);
+    setState(() => _canvasUrl = canvasUrl);
   }
 
   // ── Video prefetch ──
@@ -377,10 +386,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     AppearancePrefs.keepScreenOn.value
         ? WakelockPlus.enable()
         : WakelockPlus.disable(); // WAKELOCK
+    // System bars stay hidden — app is full-screen everywhere.
   }
 
   @override
@@ -489,7 +498,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (_showVideo && _videoUrl != null) ...[
             Positioned.fill(
               // SYNCHRONIZED song-video: full-length, position locked to
-              // the audio — not a 15s muted loop. Double-tap → fullscreen.
+              // the audio — not a 15s muted loop.
               child: VideoBackdrop(
                 streamUrl: _videoUrl!,
                 playing: controller.isPlaying,
@@ -669,14 +678,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
                         ],
                       ),
+                      // Crop any thumbnail aspect (16:9 video
+                      // stills included) into the 1:1 art frame —
+                      // no black bars, ever.
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(
                             AppearancePrefs.thumbRadius.value),
-                        child: YoutubeThumbnail(
-                          videoId: song.id,
-                          imageUrl: song.thumbnail,
-                          borderRadius:
-                          AppearancePrefs.thumbRadius.value,
+                        child: LayoutBuilder(
+                          builder: (context, box) {
+                            final size = box.maxWidth;
+                            return Image.network(
+                              song.thumbnail,
+                              width: size,
+                              height: size,
+                              fit: BoxFit.cover,
+                              alignment: Alignment.center,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: SpotifyColors.surfaceLight,
+                                child: const Icon(
+                                    Icons.music_note_rounded,
+                                    size: 64,
+                                    color: SpotifyColors.textTertiary),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),
@@ -1231,6 +1256,8 @@ class _SlimSliderState extends State<_SlimSlider> {
     await widget.handler.seekSafe(Duration(milliseconds: targetMs));
     if (!mounted) return;
     if (!ok) {
+      // Seek swallowed (LT guest lockout / player not ready) — snap the
+      // bar back to the real position instead of freezing.
       _seekPending = false;
       setState(() {});
       return;
