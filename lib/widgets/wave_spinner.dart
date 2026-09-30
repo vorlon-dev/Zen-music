@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../theme/spotify_theme.dart';
 
-/// Small wavy spinner — mini-player ring style. Compact by default;
+/// Material 3 Expressive wavy loading indicator — a full wavy ring
+/// whose wave travels around while the amplitude inflates and deflates
+/// once per cycle (the expressive "jelly" pulse). Compact by default;
 /// place inside Center()/SizedBox as needed.
 class WaveSpinner extends StatefulWidget {
   const WaveSpinner({
@@ -30,7 +32,7 @@ class _WaveSpinnerState extends State<WaveSpinner>
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 1600),
+      duration: const Duration(milliseconds: 1800),
       vsync: this,
     )..repeat();
   }
@@ -48,22 +50,34 @@ class _WaveSpinnerState extends State<WaveSpinner>
       height: widget.size,
       child: AnimatedBuilder(
         animation: _controller,
-        builder: (context, _) => CustomPaint(
-          size: Size(widget.size, widget.size),
-          painter: WaveRingPainter(
-            phase: _controller.value * 2 * math.pi,
-            startAngle: _controller.value * 2 * math.pi,
-            sweepAngle: math.pi / 2, // rotating quarter-arc
-            color: widget.color,
-            strokeWidth: widget.strokeWidth,
-          ),
-        ),
+        builder: (context, _) {
+          final t = _controller.value;
+          // Amplitude envelope: 0 -> full -> 0 once per cycle, eased —
+          // the Material 3 Expressive wavy indicator behavior. The wave
+          // phase also travels around the ring for the rolling motion.
+          final envelope =
+          Curves.easeInOut.transform(math.sin(math.pi * t));
+          final maxAmp = math.max(1.0, widget.size * 0.08);
+          return CustomPaint(
+            size: Size(widget.size, widget.size),
+            painter: WaveRingPainter(
+              phase: t * 2 * math.pi,
+              startAngle: t * 2 * math.pi,
+              sweepAngle: 2 * math.pi, // full expressive wavy ring
+              color: widget.color,
+              strokeWidth: widget.strokeWidth,
+              amplitude: maxAmp * envelope,
+            ),
+          );
+        },
       ),
     );
   }
 }
 
 /// Wavy ring painter — shared with the mini player's progress ring.
+/// [amplitude] is the wave height in pixels; defaults to the original
+/// fixed 1.5 so existing callers render identically.
 class WaveRingPainter extends CustomPainter {
   WaveRingPainter({
     required this.phase,
@@ -72,6 +86,7 @@ class WaveRingPainter extends CustomPainter {
     required this.color,
     this.backgroundColor,
     this.strokeWidth = 3,
+    this.amplitude = 1.5,
   });
 
   final double phase;
@@ -80,8 +95,8 @@ class WaveRingPainter extends CustomPainter {
   final Color color;
   final Color? backgroundColor;
   final double strokeWidth;
+  final double amplitude;
 
-  static const _waveAmplitude = 1.5;
   static const _waveFrequency = 12.0;
 
   Path _buildWavyArcPath(Size size, double start, double sweep) {
@@ -94,7 +109,7 @@ class WaveRingPainter extends CustomPainter {
     for (var i = 0; i <= steps; i++) {
       final t = i / steps;
       final angle = start + sweep * t;
-      final wave = _waveAmplitude * math.sin(_waveFrequency * angle + phase);
+      final wave = amplitude * math.sin(_waveFrequency * angle + phase);
       final r = baseRadius + wave;
       final x = cx + r * math.cos(angle);
       final y = cy + r * math.sin(angle);
@@ -132,5 +147,6 @@ class WaveRingPainter extends CustomPainter {
   bool shouldRepaint(WaveRingPainter old) =>
       old.phase != phase ||
           old.startAngle != startAngle ||
-          old.sweepAngle != sweepAngle;
+          old.sweepAngle != sweepAngle ||
+          old.amplitude != amplitude;
 }

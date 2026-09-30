@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
+import 'package:flutter/physics.dart';
 import '../services/echomusic_canvas_service.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
@@ -9,6 +10,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 // WAKELOCK: requires `flutter pub add wakelock_plus`.
 import 'package:wakelock_plus/wakelock_plus.dart';
+import '../widgets/cookie_play_button.dart';
+import '../widgets/player_backgrounds.dart';
 import '../widgets/wave_spinner.dart';
 import '../main.dart';
 import '../models/song.dart';
@@ -341,7 +344,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _videoTriedSd = true;
       final song = audioHandler.currentSong;
       if (song != null && _showVideo) {
-        print('🔁 Video: HD failed ($reason) — retrying SD');
+        print('Video: HD failed ($reason) — retrying SD');
         setState(() {
           _videoUrl = null;
           _videoHeaders = const {};
@@ -538,12 +541,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
             )
           else
             Positioned.fill(
-              // Player background style: gradient | solid | blur.
+              // Player background style: gradient | solid | blur |
+              // glow | mesh | apple.
               child: ValueListenableBuilder<String>(
                 valueListenable: AppearancePrefs.playerBackground,
                 builder: (context, bg, _) {
-                  if (bg == 'blur' && song.thumbnail.isNotEmpty) {
+                  final hasArt = song.thumbnail.isNotEmpty;
+                  if (bg == 'blur' && hasArt) {
                     return _BlurBackground(imageUrl: song.thumbnail);
+                  }
+                  if (bg == 'glow' && hasArt) {
+                    return GlowBackground(imageUrl: song.thumbnail);
+                  }
+                  if (bg == 'mesh' && hasArt) {
+                    return MeshBackground(imageUrl: song.thumbnail);
+                  }
+                  if (bg == 'apple' && hasArt) {
+                    return AppleArtworkBackground(imageUrl: song.thumbnail);
                   }
                   if (bg == 'solid') {
                     return const ColoredBox(color: Colors.black);
@@ -1848,7 +1862,9 @@ class _BarSliderState extends State<_BarSlider> {
 }
 
 // ═════════════════════════════════════════════
-// PLAY BUTTON — Echo style: clean white circle, no ring.
+// PLAY BUTTON — Echo "cookie": 84dp, 9-bump wavy circle that morphs
+// in and rotates while playing, springs on press, wavy spinner while
+// buffering (tap no-ops while buffering, same as before).
 // ═════════════════════════════════════════════
 
 class _PlayButton extends StatefulWidget {
@@ -1878,42 +1894,92 @@ class _PlayButtonState extends State<_PlayButton> {
         final buffering = st != null &&
             (st.processingState == AudioProcessingState.loading ||
                 st.processingState == AudioProcessingState.buffering);
-        return Container(
-          width: 76,
-          height: 76,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black38,
-                blurRadius: 18,
-                offset: Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Center(
-            child: buffering
-                ? const SizedBox(
-              width: 28,
-              height: 28,
-              child: WaveSpinner(size: 28, strokeWidth: 2.6),
-            )
-                : PlayPauseMorph(
-              playing: widget.playing,
-              size: 32,
-              color: Colors.black,
-              onTap: () {
-                if (widget.locked) return;
-                _maybeHaptic();
-                widget.playing
-                    ? widget.handler.pause()
-                    : widget.handler.play();
-              },
-            ),
-          ),
+        return CookiePlayButton(
+          playing: widget.playing,
+          loading: buffering,
+          size: 84,
+          onToggle: () {
+            if (widget.locked || buffering) return;
+            _maybeHaptic();
+            widget.playing
+                ? widget.handler.pause()
+                : widget.handler.play();
+          },
         );
       },
+    );
+  }
+}
+
+// ═════════════════════════════════════════════
+// TRANSPORT BUTTON — plain white icon (no circle behind it),
+// press-spring scale, 68dp invisible hit area.
+// ═════════════════════════════════════════════
+
+class _TransportButton extends StatefulWidget {
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  const _TransportButton({required this.icon, this.onPressed});
+
+  @override
+  State<_TransportButton> createState() => _TransportButtonState();
+}
+
+class _TransportButtonState extends State<_TransportButton>
+    with SingleTickerProviderStateMixin {
+  // IMPORTANT: value MUST start at 1.0. AnimationController defaults
+  // to 0.0, which renders Transform.scale(0) — invisible buttons
+  // until the first tap springs them into view.
+  late final AnimationController _scale =
+  AnimationController(vsync: this, value: 1.0);
+
+  static final _pressSpring = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 500,
+    ratio: 0.6,
+  );
+
+  void _setPressed(bool pressed) {
+    _scale.animateWith(
+      SpringSimulation(_pressSpring, _scale.value, pressed ? 0.9 : 1.0, 0),
+    );
+  }
+
+  @override
+  void dispose() {
+    _scale.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onPressed != null;
+    return AnimatedBuilder(
+      animation: _scale,
+      builder: (context, _) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: enabled ? (_) => _setPressed(true) : null,
+        onTapUp: enabled ? (_) => _setPressed(false) : null,
+        onTapCancel: enabled ? () => _setPressed(false) : null,
+        onTap: widget.onPressed,
+        child: Transform.scale(
+          scale: _scale.value,
+          // 68dp tappable area with NO visible background — just the
+          // icon, centered.
+          child: SizedBox(
+            width: 68,
+            height: 68,
+            child: Center(
+              child: Icon(
+                widget.icon,
+                size: 34,
+                color: enabled ? Colors.white : SpotifyColors.textTertiary,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2151,14 +2217,8 @@ class _PlayerControlsState extends State<_PlayerControls> {
             ),
             onPressed: locked ? null : _toggleShuffle,
           ),
-          IconButton(
-            iconSize: 38,
-            splashRadius: 26,
-            color: locked ? SpotifyColors.textTertiary : null,
-            icon: const Icon(
-              FluentIcons.previous_24_regular,
-              color: SpotifyColors.textPrimary,
-            ),
+          _TransportButton(
+            icon: FluentIcons.previous_24_regular,
             onPressed: locked
                 ? null
                 : () {
@@ -2172,14 +2232,8 @@ class _PlayerControlsState extends State<_PlayerControls> {
             playing: widget.controller.isPlaying,
             locked: locked,
           ),
-          IconButton(
-            iconSize: 38,
-            splashRadius: 26,
-            color: locked ? SpotifyColors.textTertiary : null,
-            icon: const Icon(
-              FluentIcons.next_24_regular,
-              color: SpotifyColors.textPrimary,
-            ),
+          _TransportButton(
+            icon: FluentIcons.next_24_regular,
             onPressed: locked
                 ? null
                 : () {

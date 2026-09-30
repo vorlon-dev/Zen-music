@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../theme/spotify_theme.dart';
+import 'wave_spinner.dart';
 
+/// App-standard loading spinner. Renders the same Material 3 Expressive
+/// wavy ring as WaveSpinner so every loading state in the app matches.
 class Spinner extends StatelessWidget {
   const Spinner({
     super.key,
@@ -17,13 +20,10 @@ class Spinner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: CircularProgressIndicator(
-          strokeWidth: strokeWidth,
-          valueColor: AlwaysStoppedAnimation<Color>(color),
-        ),
+      child: WaveSpinner(
+        size: size,
+        strokeWidth: strokeWidth,
+        color: color,
       ),
     );
   }

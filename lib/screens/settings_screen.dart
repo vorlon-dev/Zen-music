@@ -428,11 +428,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _prefRow(
         Icons.gradient_rounded,
         'Player background',
-        AppearancePrefs.playerBackground.value == 'gradient'
-            ? 'Gradient'
-            : AppearancePrefs.playerBackground.value == 'blur'
-            ? 'Blurred artwork'
-            : 'Solid black',
+        switch (AppearancePrefs.playerBackground.value) {
+          'gradient' => 'Gradient',
+          'blur' => 'Blurred artwork',
+          'glow' => 'Animated glow',
+          'mesh' => 'Live mesh',
+          'apple' => 'Apple artwork stack',
+          _ => 'Solid black',
+        },
             () => _showPickerSheet(
           title: 'Player background',
           current: AppearancePrefs.playerBackground.value,
@@ -440,6 +443,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             (value: 'gradient', label: 'Gradient', icon: Icons.gradient_rounded),
             (value: 'solid', label: 'Solid black', icon: Icons.crop_square_rounded),
             (value: 'blur', label: 'Blurred artwork', icon: Icons.blur_on_rounded),
+            (value: 'glow', label: 'Animated glow', icon: Icons.auto_awesome),
+            (value: 'mesh', label: 'Live mesh', icon: Icons.animation_rounded),
+            (value: 'apple', label: 'Apple artwork stack', icon: Icons.wallpaper_rounded),
           ],
           onSelect: (v) async {
             await AppearancePrefs.setPlayerBackground(v);
@@ -1082,7 +1088,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Text(title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                             color: SpotifyColors.textPrimary,
                             fontSize: 16,
                             fontWeight: FontWeight.w600)),
