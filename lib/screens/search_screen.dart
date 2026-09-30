@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:yt_extractor/yt_extractor.dart';
 
 import '../main.dart';
@@ -10,6 +12,7 @@ import '../models/song.dart';
 import '../services/downloads_service.dart';
 import '../services/home_service.dart';
 import '../services/jiosaavn_service.dart';
+import '../services/song_source_resolver.dart';
 import '../services/yt_music_service.dart';
 import '../services/video_preference_service.dart';
 import '../services/youtube_service.dart';
@@ -64,9 +67,9 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _searching = false;
   bool _hasSearchedOnce = false;
 
-  // Echo's URL handling: a pasted YouTube link plays directly.
+  // A pasted YouTube link is an explicit user pick.
   static final _ytUrlVideo = RegExp(
-      r'(?:youtu\.be\/|watch\?v=|shorts\/|embed\/)([A-Za-z0-9_-]{11})');
+      r'(?:youtu\.be\/|watch\?v=|shorts\/|embed\/|live\/)([A-Za-z0-9_-]{11})');
 
   @override
   void initState() {
@@ -133,16 +136,50 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _tryPlayFromUrl(String query) {
     final m = _ytUrlVideo.firstMatch(query);
     if (m == null) return false;
-    final id = m.group(1)!;
+    unawaited(_playPastedVideo(m.group(1)!));
+    return true;
+  }
+
+  /// A pasted link is an explicit pick by the user — it plays as AUDIO
+  /// in the normal player, and it plays THAT EXACT VIDEO. The real
+  /// title and channel are fetched for display, the song is marked
+  /// explicit so the source resolver can never substitute a different
+  /// catalog song, and playback falls through to the exact video's
+  /// audio. Video mode stays available from the player screen as
+  /// usual.
+  Future<void> _playPastedVideo(String videoId) async {
+    var title = 'YouTube video';
+    var artist = '';
+    try {
+      final uri = Uri.https('www.youtube.com', '/oembed', {
+        'url': 'https://www.youtube.com/watch?v=$videoId',
+        'format': 'json',
+      });
+      final res = await http.get(uri).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        title = (data['title'] as String?)?.trim() ?? title;
+        artist = ((data['author_name'] as String?) ?? '')
+            .replaceAll(RegExp(r'\s*-\s*Topic$'), '')
+            .trim();
+      }
+    } catch (_) {
+      // Metadata fetch failed — the placeholder title still plays the
+      // exact video's audio below; nothing is substituted either way.
+    }
     final song = Song(
-      id: id,
-      title: 'YouTube video',
-      artist: '',
-      thumbnail: 'https://i.ytimg.com/vi/$id/hqdefault.jpg',
+      id: videoId,
+      title: title,
+      artist: artist,
+      thumbnail: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
       duration: Duration.zero,
     );
+    // The user linked THIS video. Mark it explicit so the resolver
+    // returns null for it and the handler streams this exact video's
+    // audio — never a fuzzy-matched different song.
+    SongSourceResolver.instance.markExplicit(song);
+    if (!mounted) return;
     _playWithRadio(song);
-    return true;
   }
 
   Future<void> _search() async {

@@ -28,8 +28,24 @@ class SongSourceResolver {
   final Map<String, Song?> _cache = {};
   final Map<String, Future<Song?>> _inFlight = {};
 
+  /// Ids the user explicitly picked (a pasted link). These are NEVER
+  /// substituted — the resolver always returns null for them so the
+  /// handler streams that exact video's audio.
+  final Set<String> _explicit = {};
+
+  /// Marks a song as the user's explicit pick (a pasted link). The
+  /// resolver then always returns null for its id, so the handler
+  /// falls back to streaming THAT exact video's audio instead of
+  /// fuzzy-matching a different catalog song.
+  void markExplicit(Song song) {
+    _explicit.add(song.id);
+    _cache[song.id] = null;
+  }
+
   Future<Song?> resolve(Song song) {
     final key = song.id;
+    // Explicit user picks (pasted links) are never substituted.
+    if (_explicit.contains(key)) return Future.value(null);
     if (_cache.containsKey(key)) return Future.value(_cache[key]);
     final inFlight = _inFlight[key];
     if (inFlight != null) return inFlight;
@@ -47,6 +63,12 @@ class SongSourceResolver {
     final title = song.title.trim();
     final artist = song.artist.split(',').first.trim();
     if (title.isEmpty) return null;
+
+    // Placeholder metadata (a bare video id with no fetched title)
+    // must never be fuzzy-matched. Returning null makes the caller
+    // fall back to the exact video — correct for explicit picks.
+    final normTitle = _norm(title);
+    if (normTitle.isEmpty || normTitle == 'youtube') return null;
 
     // ── 1. JioSaavn: 320 kbps AAC + square 1:1 artwork ──
     try {
@@ -117,8 +139,10 @@ class SongSourceResolver {
     }
 
     // Artist: required to overlap, exact match scores higher.
-    final artistMatch = ca.contains(oa) || oa.contains(ca);
-    final artistWords = _wordOverlap(ca, oa);
+    // An empty original artist carries no identity — never a free
+    // pass (that hole once matched "YouTube video" to random songs).
+    final artistMatch = oa.isNotEmpty && (ca.contains(oa) || oa.contains(ca));
+    final artistWords = oa.isEmpty ? 0.0 : _wordOverlap(ca, oa);
     if (!artistMatch && artistWords < 0.4) return null;
     score += artistMatch ? 12 : (artistWords * 8).round();
 
