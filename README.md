@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="screenshots/logo.png" alt="ZenMusic Logo" width="120"/>
+  <img src="screenshots/logo.png" alt="ZenMusic Logo" width="300"/>
 
 # ZenMusic
 
