@@ -397,140 +397,140 @@ class _HomeTabState extends State<HomeTab> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(0, 6, 0, 24),
         children: [
-            if (_isRefreshing)
-              const Padding(
-                padding: EdgeInsets.all(14),
-                child: Center(child: WaveSpinner(size: 26)),
-              ),
+          if (_isRefreshing)
+            const Padding(
+              padding: EdgeInsets.all(14),
+              child: Center(child: WaveSpinner(size: 26)),
+            ),
 
-            _echoHeader(),
+          _echoHeader(),
 
-            if (wrappedEnabled.value &&
-                listeningStatsService.hasStats &&
-                listeningStatsService.availableMonthKeys.isNotEmpty)
-              _recapSection(
-                  listeningStatsService.availableMonthKeys.first),
+          if (wrappedEnabled.value &&
+              listeningStatsService.hasStats &&
+              listeningStatsService.availableMonthKeys.isNotEmpty)
+            _recapSection(
+                listeningStatsService.availableMonthKeys.first),
 
-            // ── Speed Dial (Echo): paged grid + randomize + dots ──
-            if (_startListening.isNotEmpty) ...[
-              ShelfHeaderBar(title: 'Speed dial'),
-              _SpeedDialGrid(
-                items: _startListening,
-                isRandomizing: _randomizing,
-                onItemTap: _playSong,
-                onRandomize: _randomize,
-              ),
-              const SizedBox(height: 8),
-            ],
+          // ── Speed Dial (Echo): paged grid + randomize + dots ──
+          if (_startListening.isNotEmpty) ...[
+            ShelfHeaderBar(title: 'Speed dial'),
+            _SpeedDialGrid(
+              items: _startListening,
+              isRandomizing: _randomizing,
+              onItemTap: _playSong,
+              onRandomize: _randomize,
+            ),
+            const SizedBox(height: 8),
+          ],
 
-            // ── Quick Picks (Echo): 2-row horizontal song grid ──
-            if (_trendingNow.length >= 4) ...[
-              ShelfHeaderBar(title: 'Quick picks'),
-              _QuickPicksGrid(
-                songs: _trendingNow.take(12).toList(),
-                onTap: _playSong,
-              ),
-              const SizedBox(height: 8),
-            ],
+          // ── Quick Picks (Echo): 2-row horizontal song grid ──
+          if (_trendingNow.length >= 4) ...[
+            ShelfHeaderBar(title: 'Quick picks'),
+            _QuickPicksGrid(
+              songs: _trendingNow.take(12).toList(),
+              onTap: _playSong,
+            ),
+            const SizedBox(height: 8),
+          ],
 
-            // ── Recently played (Keep Listening) ──
-            if (_recentlyPlayed.isNotEmpty)
-              MediaShelfRow(
-                title: 'Keep listening',
-                items: [
-                  for (final s in _recentlyPlayed) ShelfItem.fromSong(s)
-                ],
-                onTapItem: (i) => _playSong(_recentlyPlayed[i]),
-                playingIdStream: audioHandler.currentSongStream,
-              ),
-
-            // ── Forgotten favorites (Echo): old liked songs ──
-            if (_forgottenFavorites.length >= 4)
-              MediaShelfRow(
-                title: 'Forgotten favorites',
-                items: [
-                  for (final s in _forgottenFavorites) ShelfItem.fromSong(s)
-                ],
-                onTapItem: (i) => _playSong(_forgottenFavorites[i]),
-                onShuffle: () => _shufflePlay(_forgottenFavorites),
-                playingIdStream: audioHandler.currentSongStream,
-              ),
-
-            // ── Daily Discover (Echo): hero cards ──
-            if (_recommendedToday.length >= 3) ...[
-              ShelfHeaderBar(title: 'Daily discover'),
-              _DailyDiscoverPager(
-                songs: _recommendedToday.take(10).toList(),
-                seedArtist: _recentlyPlayed.isEmpty
-                    ? ''
-                    : _recentlyPlayed.first.artist.split(',').first.trim(),
-                onTap: _playSong,
-              ),
-              const SizedBox(height: 8),
-            ],
-
-            if (_collections.isNotEmpty)
-              _collectionRow('Playlists for you', _collections),
-            if (_newAlbums.isNotEmpty)
-              _collectionRow('New releases', _newAlbums),
-
-            if (_personalVideos.isNotEmpty)
-              MediaShelfRow(
-                title: _videoShelfTitle,
-                items: [
-                  for (final s in _personalVideos) ShelfItem.fromSong(s)
-                ],
-                // Videos open the dedicated watch page (YouTube-style).
-                onTapItem: (i) => _openVideo(_personalVideos[i]),
-                playingIdStream: audioHandler.currentSongStream,
-              ),
-
+          // ── Recently played (Keep Listening) ──
+          if (_recentlyPlayed.isNotEmpty)
             MediaShelfRow(
-              title: "Today's biggest hits",
-              items: [for (final s in _biggestHits) ShelfItem.fromSong(s)],
-              onTapItem: (i) => _playSong(_biggestHits[i]),
-              onShuffle: () => _shufflePlay(_biggestHits),
+              title: 'Keep listening',
+              items: [
+                for (final s in _recentlyPlayed) ShelfItem.fromSong(s)
+              ],
+              onTapItem: (i) => _playSong(_recentlyPlayed[i]),
               playingIdStream: audioHandler.currentSongStream,
             ),
-            MediaShelfRow(
-              title: 'Trending on YouTube Music',
-              items: [for (final s in _ytTrending) ShelfItem.fromSong(s)],
-              onTapItem: (i) => _playSong(_ytTrending[i]),
-              onShuffle: () => _shufflePlay(_ytTrending),
-              playingIdStream: audioHandler.currentSongStream,
-            ),
-            MediaShelfRow(
-              title: 'Hot on YouTube Music',
-              items: [for (final s in _ytmHot) ShelfItem.fromSong(s)],
-              onTapItem: (i) => _playSong(_ytmHot[i]),
-              onShuffle: () => _shufflePlay(_ytmHot),
-              playingIdStream: audioHandler.currentSongStream,
-            ),
-            MediaShelfRow(
-              title: 'Top charts',
-              items: [for (final s in _topCharts) ShelfItem.fromSong(s)],
-              onTapItem: (i) => _playSong(_topCharts[i]),
-              onShuffle: () => _shufflePlay(_topCharts),
-              playingIdStream: audioHandler.currentSongStream,
-            ),
-            if (_ytmFresh.isNotEmpty)
-              MediaShelfRow(
-                title: 'Fresh music',
-                items: [for (final s in _ytmFresh) ShelfItem.fromSong(s)],
-                onTapItem: (i) => _playSong(_ytmFresh[i]),
-                onShuffle: () => _shufflePlay(_ytmFresh),
-                playingIdStream: audioHandler.currentSongStream,
-              ),
 
-            // ── Infinite chart shelves (appended on scroll) ──
-            for (final shelf in _chartShelves)
-              MediaShelfRow(
-                title: shelf.title,
-                items: [for (final s in shelf.songs) ShelfItem.fromSong(s)],
-                onTapItem: (i) => _playSong(shelf.songs[i]),
-                onShuffle: () => _shufflePlay(shelf.songs),
-                playingIdStream: audioHandler.currentSongStream,
-              ),
+          // ── Forgotten favorites (Echo): old liked songs ──
+          if (_forgottenFavorites.length >= 4)
+            MediaShelfRow(
+              title: 'Forgotten favorites',
+              items: [
+                for (final s in _forgottenFavorites) ShelfItem.fromSong(s)
+              ],
+              onTapItem: (i) => _playSong(_forgottenFavorites[i]),
+              onShuffle: () => _shufflePlay(_forgottenFavorites),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+
+          // ── Daily Discover (Echo): hero cards ──
+          if (_recommendedToday.length >= 3) ...[
+            ShelfHeaderBar(title: 'Daily discover'),
+            _DailyDiscoverPager(
+              songs: _recommendedToday.take(10).toList(),
+              seedArtist: _recentlyPlayed.isEmpty
+                  ? ''
+                  : _recentlyPlayed.first.artist.split(',').first.trim(),
+              onTap: _playSong,
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          if (_collections.isNotEmpty)
+            _collectionRow('Playlists for you', _collections),
+          if (_newAlbums.isNotEmpty)
+            _collectionRow('New releases', _newAlbums),
+
+          if (_personalVideos.isNotEmpty)
+            MediaShelfRow(
+              title: _videoShelfTitle,
+              items: [
+                for (final s in _personalVideos) ShelfItem.fromSong(s)
+              ],
+              // Videos open the dedicated watch page (YouTube-style).
+              onTapItem: (i) => _openVideo(_personalVideos[i]),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+
+          MediaShelfRow(
+            title: "Today's biggest hits",
+            items: [for (final s in _biggestHits) ShelfItem.fromSong(s)],
+            onTapItem: (i) => _playSong(_biggestHits[i]),
+            onShuffle: () => _shufflePlay(_biggestHits),
+            playingIdStream: audioHandler.currentSongStream,
+          ),
+          MediaShelfRow(
+            title: 'Trending on YouTube Music',
+            items: [for (final s in _ytTrending) ShelfItem.fromSong(s)],
+            onTapItem: (i) => _playSong(_ytTrending[i]),
+            onShuffle: () => _shufflePlay(_ytTrending),
+            playingIdStream: audioHandler.currentSongStream,
+          ),
+          MediaShelfRow(
+            title: 'Hot on YouTube Music',
+            items: [for (final s in _ytmHot) ShelfItem.fromSong(s)],
+            onTapItem: (i) => _playSong(_ytmHot[i]),
+            onShuffle: () => _shufflePlay(_ytmHot),
+            playingIdStream: audioHandler.currentSongStream,
+          ),
+          MediaShelfRow(
+            title: 'Top charts',
+            items: [for (final s in _topCharts) ShelfItem.fromSong(s)],
+            onTapItem: (i) => _playSong(_topCharts[i]),
+            onShuffle: () => _shufflePlay(_topCharts),
+            playingIdStream: audioHandler.currentSongStream,
+          ),
+          if (_ytmFresh.isNotEmpty)
+            MediaShelfRow(
+              title: 'Fresh music',
+              items: [for (final s in _ytmFresh) ShelfItem.fromSong(s)],
+              onTapItem: (i) => _playSong(_ytmFresh[i]),
+              onShuffle: () => _shufflePlay(_ytmFresh),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+
+          // ── Infinite chart shelves (appended on scroll) ──
+          for (final shelf in _chartShelves)
+            MediaShelfRow(
+              title: shelf.title,
+              items: [for (final s in shelf.songs) ShelfItem.fromSong(s)],
+              onTapItem: (i) => _playSong(shelf.songs[i]),
+              onShuffle: () => _shufflePlay(shelf.songs),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
 
           if (_loadingMore)
             const Padding(
@@ -550,10 +550,11 @@ class _HomeTabState extends State<HomeTab> {
                 ),
               ),
             ),
-        ],        // 1. closes children: [ of the ListView
-      ),          // 2. closes ListView(
-    );            // 3. closes RefreshIndicator( + return
-  }                 // closes _HomeTabState.build
+        ],
+      ),
+    );
+  }
+
   Widget _buildSkeletons() {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -1526,6 +1527,13 @@ class _Controls extends StatelessWidget {
   }
 }
 
+// ═════════════════════════════════════════════
+// CIRCULAR PLAY BUTTON — the ring is the WAVY ARC ONLY (no track
+// circle behind it — deliberately removed): green wavy arc = elapsed
+// (arc length = progress), wave travels while playing, flattens when
+// paused (wavy-slider parity).
+// ═════════════════════════════════════════════
+
 class _CircularPlayButton extends StatefulWidget {
   const _CircularPlayButton({
     required this.playbackState,
@@ -1540,15 +1548,51 @@ class _CircularPlayButton extends StatefulWidget {
 }
 
 class _CircularPlayButtonState extends State<_CircularPlayButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _waveController = AnimationController(
-    duration: const Duration(milliseconds: 4000),
+    with TickerProviderStateMixin {
+  // Wave phase travels only while playing; amplitude breathes in/out
+  // with the play state (wavy-slider parity).
+  late final AnimationController _phase = AnimationController(
+    duration: const Duration(milliseconds: 2000),
     vsync: this,
-  )..repeat();
+  );
+  late final AnimationController _amp = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 350),
+    value: 0,
+  );
+
+  bool _playing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _playing = widget.playbackState.playing;
+    if (_playing) {
+      _phase.repeat();
+      _amp.value = 1;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _CircularPlayButton old) {
+    super.didUpdateWidget(old);
+    final playing = widget.playbackState.playing;
+    if (playing != _playing) {
+      _playing = playing;
+      if (playing) {
+        _phase.repeat(); // continues from the current angle
+        _amp.forward();
+      } else {
+        _amp.reverse();
+        _phase.stop();
+      }
+    }
+  }
 
   @override
   void dispose() {
-    _waveController.dispose();
+    _phase.dispose();
+    _amp.dispose();
     super.dispose();
   }
 
@@ -1576,18 +1620,18 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
           return Stack(
             alignment: Alignment.center,
             children: [
+              // Ring: wavy progress arc ONLY — no background circle.
               AnimatedBuilder(
-                animation: _waveController,
+                animation: Listenable.merge([_phase, _amp]),
                 builder: (context, _) => CustomPaint(
                   size: const Size(48, 48),
                   painter: WaveRingPainter(
-                    phase: _waveController.value * 2 * math.pi,
+                    phase: _phase.value * 2 * math.pi,
                     startAngle: -math.pi / 2,
                     sweepAngle: 2 * math.pi * progress.clamp(0.0, 1.0),
                     color: SpotifyColors.green,
-                    backgroundColor:
-                    SpotifyColors.textTertiary.withOpacity(0.25),
                     strokeWidth: 3,
+                    amplitude: 1.6 * _amp.value,
                   ),
                 ),
               ),

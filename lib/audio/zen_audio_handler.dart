@@ -12,6 +12,25 @@ import '../services/song_source_resolver.dart';
 import '../services/storage_service.dart';
 import '../services/youtube_service.dart';
 
+/// A playback load failure surfaced to the UI. [halted] is true when
+/// the queue could NOT advance after the failure — i.e. playback
+/// actually stopped; false when the handler skipped to the next track.
+class PlaybackFailure {
+  const PlaybackFailure({
+    required this.songId,
+    required this.title,
+    required this.rawMessage,
+    required this.halted,
+    this.code,
+  });
+
+  final String songId;
+  final String title;
+  final String rawMessage;
+  final bool halted;
+  final int? code;
+}
+
 class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final _equalizer = AndroidEqualizer();
   late final _player = AudioPlayer(
@@ -70,6 +89,67 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final Set<String> _staleStreamIds = {};
 
   // ═════════════════════════════════════════════
+  // PLAYBACK ERRORS — UI surfacing (PlaybackError port). Published
+  // when the 5-attempt load loop exhausts. The queue still auto-
+  // advances when it can (halted=false); when it cannot (halted=true)
+  // playback has actually stopped and the UI should show the retry
+  // card.
+  // ═════════════════════════════════════════════
+
+  final _playbackErrorController =
+  StreamController<PlaybackFailure>.broadcast();
+
+  /// Load failures, newest last. Skips carry halted=false; stops carry
+  /// halted=true.
+  Stream<PlaybackFailure> get playbackErrorStream =>
+      _playbackErrorController.stream;
+
+  Song? _failedSong;
+  int _failedIndex = -1;
+
+  void _publishPlaybackFailure(Song song, int index, Object error,
+      {required bool halted}) {
+    _failedSong = song;
+    _failedIndex = index;
+    if (_playbackErrorController.isClosed) return;
+    _playbackErrorController.add(PlaybackFailure(
+      songId: song.id,
+      title: song.title,
+      rawMessage: error.toString(),
+      halted: halted,
+      code: _errorCodeOf(error),
+    ));
+  }
+
+  /// just_audio surfaces platform errors with a numeric code; duck-typed
+  /// here so no compile-time dependency on the exception class name.
+  int? _errorCodeOf(Object e) {
+    try {
+      final c = (e as dynamic).code;
+      if (c is int) return c;
+    } catch (_) {}
+    return null;
+  }
+
+  /// Re-attempts the last failed song (Retry on the error card):
+  /// plays it in place when still in the queue, else as a
+  /// single-song queue.
+  Future<void> retryFailedSong() async {
+    if (_lockoutActive) return;
+    final song = _failedSong;
+    if (song == null) return;
+    _markTransportAction();
+    final index = _failedIndex;
+    if (index >= 0 &&
+        index < _queue.length &&
+        _queue[index].id == song.id) {
+      await _playIndex(index);
+    } else {
+      await setQueue([song], startIndex: 0);
+    }
+  }
+
+  // ═════════════════════════════════════════════
   // STRICT SOURCE POLICY — resolve non-JioSaavn songs to proper
   // music-catalog songs (JioSaavn 320kbps / YTMusic song) before
   // playing. The whole queue is resolved ahead in the background, so
@@ -79,6 +159,17 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   bool _strictSources = true;
   bool _queueResolving = false;
+
+  // Origin video ids: when a raw YouTube song is swapped for a
+  // resolved catalog song, its original video id is kept here so the
+  // artist page can still resolve the REAL uploader channel via
+  // oEmbed (the resolved song's own id points at the catalog version,
+  // not at the video the user actually picked).
+  final Map<String, String> _originVideoIds = {};
+
+  /// The original YouTube video id a queue song was resolved from
+  /// (strict source policy), or null when it was never swapped.
+  String? originalVideoIdFor(String songId) => _originVideoIds[songId];
 
   void setStrictSources(bool enabled) {
     _strictSources = enabled;
@@ -94,6 +185,12 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
     final resolved = await SongSourceResolver.instance.resolve(song);
     if (resolved == null) return song;
+
+    // Preserve the origin video id so the artist page can still show
+    // the REAL uploader channel of the video the user picked.
+    if (resolved.id != song.id) {
+      _originVideoIds[resolved.id] = song.id;
+    }
 
     if (index >= 0 && index < _queue.length && _queue[index].id == song.id) {
       _queue[index] = resolved;
@@ -113,6 +210,9 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         if (s.isFromJiosaavn) continue;
         final resolved = await SongSourceResolver.instance.resolve(s);
         if (resolved != null && i < _queue.length && _queue[i].id == s.id) {
+          if (resolved.id != s.id) {
+            _originVideoIds[resolved.id] = s.id;
+          }
           _queue[i] = resolved;
           queue.add(_queue.map(_toMediaItem).toList());
         }
@@ -135,6 +235,22 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Timer? _xfadeRamp;
   Timer? _xfadeTick;
   Song? _xfadeSong;
+
+  // Crossfade state broadcast for the UI (status chip). Every change
+  // to _xfadeInProgress goes through _setCrossfadeInProgress so the
+  // stream always mirrors the field.
+  final _crossfadeStateController = StreamController<bool>.broadcast();
+
+  /// True while two tracks are actually overlapping in a crossfade.
+  Stream<bool> get crossfadeStream => _crossfadeStateController.stream;
+
+  void _setCrossfadeInProgress(bool v) {
+    if (_xfadeInProgress == v) return;
+    _xfadeInProgress = v;
+    if (!_crossfadeStateController.isClosed) {
+      _crossfadeStateController.add(v);
+    }
+  }
 
   void applyCrossfadeSettings({required bool enabled, required int seconds}) {
     _crossfadeEnabled = enabled;
@@ -182,20 +298,20 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     final targetIndex = _nextCrossfadeIndex();
     if (targetIndex == null) return;
     final generation = _loadGeneration;
-    _xfadeInProgress = true;
+    _setCrossfadeInProgress(true);
     _xfadeTargetIndex = targetIndex;
     try {
       // Resolve first, so the fade plays the proper song version.
       final nextSong =
       await _resolveSongSource(_queue[targetIndex], targetIndex);
       if (generation != _loadGeneration) {
-        _xfadeInProgress = false;
+        _setCrossfadeInProgress(false);
         return;
       }
       _xfadeSong = nextSong;
       final stream = await _getStreamUrl(nextSong);
       if (generation != _loadGeneration) {
-        _xfadeInProgress = false;
+        _setCrossfadeInProgress(false);
         return;
       }
 
@@ -205,7 +321,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         headers: stream.headers.isNotEmpty ? stream.headers : null,
       );
       if (generation != _loadGeneration) {
-        _xfadeInProgress = false;
+        _setCrossfadeInProgress(false);
         await xf.stop();
         return;
       }
@@ -230,7 +346,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       });
     } catch (e) {
       print('Crossfade failed: $e');
-      _xfadeInProgress = false;
+      _setCrossfadeInProgress(false);
       _player.setVolume(1.0);
       await _disposeXfade();
     }
@@ -249,7 +365,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
     final song = _xfadeSong;
     final index = _xfadeTargetIndex;
-    _xfadeInProgress = false;
+    _setCrossfadeInProgress(false);
     _xfadeRamp?.cancel();
     _xfadeRamp = null;
 
@@ -301,7 +417,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   Future<void> _abortCrossfade() async {
     if (!_xfadeInProgress) return;
-    _xfadeInProgress = false;
+    _setCrossfadeInProgress(false);
     _xfadeRamp?.cancel();
     _xfadeRamp = null;
     _player.setVolume(1.0);
@@ -872,9 +988,14 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
             if (cb != null) cb(song.id);
             return;
           }
-          if (_currentIndex + 1 < _queue.length) {
+          final canAdvance = _currentIndex + 1 < _queue.length;
+          // Surface the failure to the UI: halted=true means playback
+          // actually stopped (error card); halted=false = skip snackbar.
+          _publishPlaybackFailure(song, index, e, halted: !canAdvance);
+          if (canAdvance) {
             await _playIndex(_currentIndex + 1);
           }
+          // else: playback halted — the error UI is responsible now.
         }
       }
     }
