@@ -23,6 +23,12 @@ class VideoStreamResult {
 class YoutubeService {
   static bool videoEnabled = true;
 
+  /// App-lifetime video-stream prefetch cache — survives player
+  /// screen close/reopen so the backdrop doesn't re-resolve. The
+  /// player screen ALIASES these (no per-screen copies).
+  static final Map<String, VideoStreamResult> videoPrefetchCache = {};
+  static final Set<String> videoPrefetchFailed = {};
+
   final _extractor = YtExtractor();
   final _yt = yt_explode.YoutubeExplode();
   final _jiosaavn = JiosaavnService();
@@ -639,6 +645,14 @@ class YoutubeService {
       {bool preferHd = true}) async {
     if (!videoEnabled) return null;
 
+    // PREFETCH HIT: the app-lifetime cache — a re-opened player gets
+    // the same resolved stream instantly (no refetch).
+    final cached = videoPrefetchCache[song.id];
+    if (cached != null && !videoPrefetchFailed.contains(song.id)) {
+      print('✅ Video: prefetch hit for "${song.title}"');
+      return cached;
+    }
+
     final videoId = await getVideoId(song);
     if (videoId == null || videoId.isEmpty) {
       print('🎬 Video: no YouTube id for "${song.title}"');
@@ -648,17 +662,29 @@ class YoutubeService {
     if (preferHd) {
       final v = await _progressiveAttempt(
           videoId, _HdClient('visionOs', visionOs, _visionOsUa));
-      if (v != null) return v;
+      if (v != null) {
+        videoPrefetchCache[song.id] = v;
+        return v;
+      }
 
       final hls = await _resolveHlsStream(videoId);
-      if (hls != null) return hls;
+      if (hls != null) {
+        videoPrefetchCache[song.id] = hls;
+        return hls;
+      }
 
       final inv = await _resolveInvidiousStream(videoId);
-      if (inv != null) return inv;
+      if (inv != null) {
+        videoPrefetchCache[song.id] = inv;
+        return inv;
+      }
 
       for (final entry in _hdClients.skip(1)) {
         final r = await _progressiveAttempt(videoId, entry);
-        if (r != null) return r;
+        if (r != null) {
+          videoPrefetchCache[song.id] = r;
+          return r;
+        }
       }
     }
 
@@ -670,11 +696,14 @@ class YoutubeService {
           .timeout(const Duration(seconds: 10));
       if (manifest.muxed.isEmpty) {
         print('🎬 Video: no muxed streams for $videoId');
+        videoPrefetchFailed.add(song.id);
         return null;
       }
       final best = manifest.muxed.withHighestBitrate();
       print('✅ Video: SD muxed ${best.videoQualityLabel} ($videoId)');
-      return VideoStreamResult(best.url.toString());
+      final result = VideoStreamResult(best.url.toString());
+      videoPrefetchCache[song.id] = result;
+      return result;
     } catch (e) {
       print('❌ Video: SD muxed failed for $videoId — $e');
       return null;

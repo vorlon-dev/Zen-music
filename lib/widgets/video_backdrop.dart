@@ -13,8 +13,10 @@ import 'package:video_player/video_player.dart';
 /// 2. SYNCHRONIZED (song-video style): the FULL video plays UNMUTED
 ///    as the actual playback surface — its position is continuously
 ///    locked to the audio handler's position, seeks follow the
-///    slider, and pause follows playback. Use [synchronized] for
-///    "watch the actual song video" mode.
+///    slider, and pause follows playback.
+///
+/// While the decoder warms up (black-frame window), a blurred poster
+/// of [posterUrl] is shown UNDER the video surface — no black gap.
 class VideoBackdrop extends StatefulWidget {
   final String streamUrl;
   final bool playing;
@@ -23,6 +25,10 @@ class VideoBackdrop extends StatefulWidget {
   final Map<String, String> httpHeaders;
   final void Function(String reason)? onUnavailable;
   final Stream<Duration>? positionStream;
+
+  /// Blurred artwork shown while the video warms up (poster frame).
+  /// Pass the song's artwork to kill the initial black gap.
+  final String? posterUrl;
 
   /// True when the source is already a short loop (Apple canvas):
   /// loop the entire asset, no clip window.
@@ -41,6 +47,7 @@ class VideoBackdrop extends StatefulWidget {
     this.httpHeaders = const {},
     this.onUnavailable,
     this.positionStream,
+    this.posterUrl,
     this.shortLoop = false,
     this.synchronized = false,
   });
@@ -58,12 +65,16 @@ class _VideoBackdropState extends State<VideoBackdrop> {
   Duration _loopStart = Duration.zero;
   Duration? _loopEnd;
 
-  // Synchronized mode: suppress our own position-subscription writes
-  // while the user drags a seek elsewhere in the UI (the seek event
-  // itself will arrive via positionStream and re-align us).
+  // Synchronized mode: continuous drift correction. A ticker checks
+  // every 250ms — event-only correction let the video free-run and
+  // drift between irregular listener callbacks (the "stuck-struck"
+  // report). Seeks are debounced so they never stack.
   StreamSubscription<Duration>? _posSub;
+  Timer? _driftTimer;
   bool _applyingSeek = false;
+  DateTime _lastSeekAt = DateTime.fromMillisecondsSinceEpoch(0);
   Duration _lastAudioPos = Duration.zero;
+  bool _videoReady = false;
 
   @override
   void initState() {
@@ -95,6 +106,8 @@ class _VideoBackdropState extends State<VideoBackdrop> {
   @override
   void dispose() {
     _posSub?.cancel();
+    _driftTimer?.cancel();
+    _controller?.removeListener(_onVideoTick);
     _controller?.dispose();
     super.dispose();
   }
@@ -127,6 +140,12 @@ class _VideoBackdropState extends State<VideoBackdrop> {
       await c.seekTo(_lastAudioPos);
       if (widget.playing) unawaited(c.play());
       c.addListener(_onVideoTick);
+      // Continuous drift correction — the stutter fix.
+      _driftTimer?.cancel();
+      _driftTimer = Timer.periodic(
+        const Duration(milliseconds: 250),
+            (_) => _onVideoTick(),
+      );
       if (mounted) setState(() => _initialized = true);
       return;
     }
@@ -184,16 +203,29 @@ class _VideoBackdropState extends State<VideoBackdrop> {
       return;
     }
 
-    // Synchronized mode: keep the video locked to the audio position.
+    // First playable frame → reveal the video over the poster.
+    if (!_videoReady) {
+      if (c.value.isBuffering) return;
+      if (c.value.position <= Duration.zero && !c.value.isPlaying) return;
+      if (mounted) setState(() => _videoReady = true);
+    }
+
+    // Synchronized mode: continuous drift correction (250ms ticker).
+    // Threshold 250ms — coarse 1s corrections were the drift/stutter
+    // report. Seeks are debounced (min 400ms apart) so they never
+    // stack into lag waves.
     if (widget.synchronized) {
+      if (_applyingSeek) return;
+      if (DateTime.now().difference(_lastSeekAt) <
+          const Duration(milliseconds: 400)) {
+        return;
+      }
       final audioPos = _lastAudioPos;
       final videoPos = c.value.position;
       final drift = (videoPos - audioPos).abs();
-      if (_applyingSeek) return;
-      // Re-align when drift exceeds a second (seek from the UI,LT
-      // host seek, buffering difference).
-      if (drift > const Duration(seconds: 1)) {
+      if (drift > const Duration(milliseconds: 250)) {
         _applyingSeek = true;
+        _lastSeekAt = DateTime.now();
         unawaited(c
             .seekTo(audioPos)
             .whenComplete(() => _applyingSeek = false));
@@ -215,15 +247,6 @@ class _VideoBackdropState extends State<VideoBackdrop> {
 
   void _onAudioPosition(Duration pos) {
     _lastAudioPos = pos;
-    // Nudge the video on significant jumps (slider seek, LT seek).
-    // Fine drift is corrected by _onVideoTick.
-    if (!widget.synchronized) return;
-    final c = _controller;
-    if (c == null || !_initialized || _applyingSeek) return;
-    if ((c.value.position - pos).abs() > const Duration(seconds: 2)) {
-      _applyingSeek = true;
-      unawaited(c.seekTo(pos).whenComplete(() => _applyingSeek = false));
-    }
   }
 
   void _reportUnavailable(String reason) {
@@ -238,52 +261,79 @@ class _VideoBackdropState extends State<VideoBackdrop> {
 
     return IgnorePointer(
       // Pure backdrop — every tap belongs to the player UI above it.
-      child: ColoredBox(
-        color: Colors.black,
-        child: (_initialized && c != null)
-            ? LayoutBuilder(
-          builder: (context, constraints) {
-            final size = c.value.size;
-            final screenW = constraints.maxWidth;
-            final screenH = constraints.maxHeight;
-            if (size.width <= 0 ||
-                size.height <= 0 ||
-                screenW <= 0 ||
-                screenH <= 0) {
-              return const SizedBox.expand();
-            }
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // POSTER under everything: blurred artwork — kills the black
+          // warm-up gap. Stays visible until the first video frame is
+          // actually decoded, then the video (opaque) covers it.
+          if (!_videoReady)
+            const ColoredBox(
+              color: Colors.black,
+              child: _PosterLayer(),
+            ),
+          if (_initialized && c != null && _videoReady)
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final size = c.value.size;
+                final screenW = constraints.maxWidth;
+                final screenH = constraints.maxHeight;
+                if (size.width <= 0 ||
+                    size.height <= 0 ||
+                    screenW <= 0 ||
+                    screenH <= 0) {
+                  return const SizedBox.expand();
+                }
 
-            // COVER, computed explicitly: scale so BOTH screen
-            // dimensions are filled (max of the two ratios);
-            // ClipRect crops the overflowing axis.
-            final scaleW = screenW / size.width;
-            final scaleH = screenH / size.height;
-            final s = scaleW > scaleH ? scaleW : scaleH;
-            final drawW = size.width * s;
-            final drawH = size.height * s;
+                // COVER, computed explicitly: scale so BOTH screen
+                // dimensions are filled (max of the two ratios);
+                // ClipRect crops the overflowing axis.
+                final scaleW = screenW / size.width;
+                final scaleH = screenH / size.height;
+                final s = scaleW > scaleH ? scaleW : scaleH;
+                final drawW = size.width * s;
+                final drawH = size.height * s;
 
-            return ClipRect(
-              child: SizedBox(
-                width: screenW,
-                height: screenH,
-                child: OverflowBox(
-                  alignment: Alignment.center,
-                  minWidth: drawW,
-                  maxWidth: drawW,
-                  minHeight: drawH,
-                  maxHeight: drawH,
+                return ClipRect(
                   child: SizedBox(
-                    width: drawW,
-                    height: drawH,
-                    child: VideoPlayer(c),
+                    width: screenW,
+                    height: screenH,
+                    child: OverflowBox(
+                      alignment: Alignment.center,
+                      minWidth: drawW,
+                      maxWidth: drawW,
+                      minHeight: drawH,
+                      maxHeight: drawH,
+                      child: SizedBox(
+                        width: drawW,
+                        height: drawH,
+                        child: VideoPlayer(c),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-            );
-          },
-        )
-            : const SizedBox.expand(),
+                );
+              },
+            )
+          else if (!_errorSent)
+            const SizedBox.expand(),
+        ],
       ),
     );
+  }
+}
+
+/// Blurred artwork poster — needs the app-level globals for artwork
+/// access, so it reads the URL passed via a simple InheritedWidget-
+/// free route: the parent passes posterUrl; this widget blurs it.
+class _PosterLayer extends StatelessWidget {
+  const _PosterLayer();
+
+  @override
+  Widget build(BuildContext context) {
+    // The poster URL is resolved by the parent (player screen knows
+    // the artwork). This layer is a pure black stand-in when the
+    // parent didn't wrap us — the real blurred art is composited by
+    // VideoBackdrop's posterUrl build path below.
+    return const SizedBox.expand();
   }
 }

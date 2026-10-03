@@ -57,6 +57,7 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   bool _showLyrics = false;
 
+  // Video state (extracted stream, synchronized song-video mode).
   bool _showVideo = false;
   bool _videoLoading = false;
   String? _videoUrl;
@@ -65,16 +66,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _resolvingFor;
   bool _videoTriedSd = false;
 
+  // Fullscreen video (YouTube-style): landscape + immersive.
   bool _videoFullscreen = false;
 
+  // Apple Music canvas (animated artwork background).
   String? _canvasUrl;
   String? _canvasForSongId;
   final Set<String> _canvasFailed = {};
 
-  final Map<String, VideoStreamResult> _videoPrefetch = {};
-  final Set<String> _videoPrefetchFailed = {};
+  // Prefetched video streams — resolved in the background while the
+  // audio plays, so switching to video mode is instant. The caches
+  // are APP-LIFETIME (owned by YoutubeService statics) so they
+  // survive player close/reopen — no backdrop refetch on re-entry.
+  final Map<String, VideoStreamResult> _videoPrefetch =
+      YoutubeService.videoPrefetchCache;
+  final Set<String> _videoPrefetchFailed =
+      YoutubeService.videoPrefetchFailed;
   String? _prefetchInFlight;
 
+  // Song queued with "Play with video" — the player enters video mode
+  // for this id on its first current-song tick.
   String? _pendingVideoSongId;
 
   List<Song> _relatedSongs = [];
@@ -91,6 +102,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     AppearancePrefs.load();
     _loadRelated();
 
+    // Bluetooth device indicator: start the native event stream
+    // (idempotent) so the row is live whenever the player is open.
     AudioDeviceService.instance.start();
 
     _songSub = audioHandler.currentSongStream.listen((song) {
@@ -100,6 +113,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (_showVideo) _resolveVideoFor(song);
       _resolveCanvas(song);
       _prefetchVideoFor(song);
+      // Auto-video: songs marked "play with video" open video mode
+      // without the user touching the camera icon.
       VideoPreferenceService.instance
           .isVideoPreferred(song.id)
           .then((preferred) {
@@ -108,20 +123,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (_showVideo) return;
         _toggleVideo(song);
       });
+      // Explicit "Play with video" from the action sheet.
       if (_pendingVideoSongId == song.id) {
         _pendingVideoSongId = null;
         if (!_showVideo) _toggleVideo(song);
       }
     });
 
+    // WAKELOCK — keep screen on while the player is open (if enabled).
     AppearancePrefs.keepScreenOn.addListener(_applyKeepScreenOn);
     _applyKeepScreenOn();
 
+    // Keep the app-wide immersive mode (bars stay hidden everywhere).
     AppearancePrefs.hideStatusBarOnLyrics.addListener(_applySystemUi);
     AppearancePrefs.canvasEnabled.addListener(_onCanvasPrefChanged);
   }
 
   void _applyKeepScreenOn() {
+    // WAKELOCK
     if (AppearancePrefs.keepScreenOn.value) {
       WakelockPlus.enable();
     } else {
@@ -129,10 +148,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  /// Keeps the app-wide immersive mode (status bar + nav bar hidden).
   void _applySystemUi() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
+  /// Opens/closes the lyrics pane.
   void _setLyricsOpen(bool open) {
     setState(() => _showLyrics = open);
   }
@@ -143,12 +164,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     AppearancePrefs.hideStatusBarOnLyrics.removeListener(_applySystemUi);
     AppearancePrefs.canvasEnabled.removeListener(_onCanvasPrefChanged);
     if (_videoFullscreen) {
+      // Restore portrait if the user pops the screen mid-fullscreen.
+      // System bars stay hidden — the app is full-screen everywhere.
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
       ]);
     }
-    WakelockPlus.disable();
+    WakelockPlus.disable(); // WAKELOCK
     _songSub?.cancel();
     super.dispose();
   }
@@ -162,6 +185,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!mounted) return;
     setState(() => _relatedSongs = related);
   }
+
+  // ── Apple Music canvas ──
 
   void _onCanvasPrefChanged() {
     if (!mounted) return;
@@ -186,6 +211,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     if (_canvasForSongId == song.id) return;
     _canvasForSongId = song.id;
+    // Provider chain: echomusic curated manifest (instant) →
+    // Apple Music AMP (deeper catalog).
     String? canvasUrl;
     final echo = await EchomusicCanvasService.instance
         .getBySongArtist(song.title, song.artist);
@@ -211,6 +238,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     setState(() => _canvasUrl = canvasUrl);
   }
+
+  // ── Video prefetch ──
 
   Future<void> _prefetchVideoFor(Song song) async {
     if (_videoPrefetch.containsKey(song.id) ||
@@ -242,11 +271,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
+    // Already resolved for this song — instant re-show.
     if (_videoForSongId == song.id && _videoUrl != null) {
       setState(() => _showVideo = true);
       return;
     }
 
+    // Prefetched — instant switch.
     final prefetched = _videoPrefetch[song.id];
     if (prefetched != null) {
       setState(() {
@@ -258,6 +289,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
+    // Cold path — resolve now with a spinner.
     setState(() {
       _videoLoading = true;
       _showVideo = true;
@@ -349,6 +381,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
+  // ── Fullscreen video ──
+
   void _enterVideoFullscreen() {
     if (!_showVideo || _videoUrl == null) return;
     setState(() => _videoFullscreen = true);
@@ -357,7 +391,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       DeviceOrientation.landscapeRight,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    WakelockPlus.enable();
+    WakelockPlus.enable(); // WAKELOCK
   }
 
   void _exitVideoFullscreen() {
@@ -369,7 +403,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     ]);
     AppearancePrefs.keepScreenOn.value
         ? WakelockPlus.enable()
-        : WakelockPlus.disable();
+        : WakelockPlus.disable(); // WAKELOCK
+    // System bars stay hidden — app is full-screen everywhere.
   }
 
   @override
@@ -394,6 +429,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _lyricsSynced = false;
     }
 
+    // ── Fullscreen video mode: edge-to-edge, landscape, immersive ──
     if (_videoFullscreen && _showVideo && _videoUrl != null) {
       return WillPopScope(
         onWillPop: () async {
@@ -405,17 +441,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
           body: Stack(
             fit: StackFit.expand,
             children: [
+              // Synchronized song-video: full length, position locked
+              // to the audio. Poster = song artwork (no black gap).
               VideoBackdrop(
                 streamUrl: _videoUrl!,
                 playing: controller.isPlaying,
                 httpHeaders: _videoHeaders,
                 synchronized: true,
                 positionStream: handler.positionStream,
+                posterUrl: song.thumbnail,
                 onUnavailable: (reason) {
                   _exitVideoFullscreen();
                   _onVideoUnavailable(reason);
                 },
               ),
+              // Play/pause — backdrop follows audioHandler, so this
+              // pauses both the music and the video.
               Center(
                 child: GestureDetector(
                   onTap: () {
@@ -441,6 +482,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
               ),
+              // Exit-fullscreen button.
               Positioned(
                 top: 12,
                 right: 12,
@@ -471,15 +513,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
         children: [
           if (_showVideo && _videoUrl != null) ...[
             Positioned.fill(
+              // SYNCHRONIZED song-video: full-length, position locked to
+              // the audio — not a 15s muted loop. Poster = song artwork
+              // (no black gap while the decoder warms up).
               child: VideoBackdrop(
                 streamUrl: _videoUrl!,
                 playing: controller.isPlaying,
                 httpHeaders: _videoHeaders,
                 synchronized: true,
                 positionStream: handler.positionStream,
+                posterUrl: song.thumbnail,
                 onUnavailable: _onVideoUnavailable,
               ),
             ),
+            // VideoBackdrop swallows ALL taps internally (IgnorePointer),
+            // so double-tap-on-backdrop can't work directly. This
+            // transparent layer sits ABOVE the backdrop and BELOW the UI
+            // content — it receives double-taps for fullscreen while
+            // single taps fall through to the content above.
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
@@ -505,6 +556,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
             )
           else
             Positioned.fill(
+              // Player background style: gradient | solid | blur |
+              // glow | mesh | apple.
               child: ValueListenableBuilder<String>(
                 valueListenable: AppearancePrefs.playerBackground,
                 builder: (context, bg, _) {
@@ -638,43 +691,59 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ? const SizedBox(height: 24)
                   : Padding(
                 padding: const EdgeInsets.fromLTRB(28, 16, 28, 20),
-                child: AspectRatio(
-                  aspectRatio: 1,
-                  child: Hero(
-                    tag: 'artwork-${song.id}',
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(
-                            AppearancePrefs.thumbRadius.value),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.45),
-                            blurRadius: 24,
-                            offset: const Offset(0, 12),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragEnd: (d) {
+                    final v = d.primaryVelocity ?? 0;
+                    if (v < -300) {
+                      _maybeHaptic();
+                      handler.skipToNext();
+                    } else if (v > 300) {
+                      _maybeHaptic();
+                      handler.skipToPrevious();
+                    }
+                  },
+                  child: AspectRatio(
+                    aspectRatio: 1,
+                    child: Hero(
+                      tag: 'artwork-${song.id}',
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(
+                              AppearancePrefs.thumbRadius.value),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.45),
+                              blurRadius: 24,
+                              offset: const Offset(0, 12),
+                            ),
+                          ],
+                        ),
+                        // Crop any thumbnail aspect (16:9 video
+                        // stills included) into the 1:1 art frame —
+                        // no black bars, ever.
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(
+                              AppearancePrefs.thumbRadius.value),
+                          child: LayoutBuilder(
+                            builder: (context, box) {
+                              final size = box.maxWidth;
+                              return Image.network(
+                                song.thumbnail,
+                                width: size,
+                                height: size,
+                                fit: BoxFit.cover,
+                                alignment: Alignment.center,
+                                errorBuilder: (_, __, ___) => Container(
+                                  color: SpotifyColors.surfaceLight,
+                                  child: const Icon(
+                                      Icons.music_note_rounded,
+                                      size: 64,
+                                      color: SpotifyColors.textTertiary),
+                                ),
+                              );
+                            },
                           ),
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(
-                            AppearancePrefs.thumbRadius.value),
-                        child: LayoutBuilder(
-                          builder: (context, box) {
-                            final size = box.maxWidth;
-                            return Image.network(
-                              song.thumbnail,
-                              width: size,
-                              height: size,
-                              fit: BoxFit.cover,
-                              alignment: Alignment.center,
-                              errorBuilder: (_, __, ___) => Container(
-                                color: SpotifyColors.surfaceLight,
-                                child: const Icon(
-                                    Icons.music_note_rounded,
-                                    size: 64,
-                                    color: SpotifyColors.textTertiary),
-                              ),
-                            );
-                          },
                         ),
                       ),
                     ),
@@ -753,6 +822,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ],
                         ),
                       ),
+                      // ── Quality badge (hideable) + VIDEO chip ──
                       const SizedBox(height: 6),
                       ValueListenableBuilder<bool>(
                         valueListenable: AppearancePrefs.showQualityBadge,
@@ -837,6 +907,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
 
           const SizedBox(height: 14),
+          // ── Progress slider (Slim | Wavy | Bar) + LT lockout pill ──
           ValueListenableBuilder<LtRoomSnapshot?>(
             valueListenable: ListenTogetherService.instance.roomNotifier,
             builder: (context, ltRoom, _) {
@@ -884,6 +955,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           const SizedBox(height: 8),
           _PlayerControls(
               handler: handler, controller: controller, song: song),
+          // ── Audio output row: current device + name, tap opens the
+          // device sheet (always visible — shows Phone speaker when
+          // nothing else is connected).
           const _DeviceRow(),
           const SizedBox(height: 18),
           _smallIconsRow(song),
@@ -956,6 +1030,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ],
             ),
           ),
+          // Fullscreen video button — visible only in video mode.
           if (_showVideo && _videoUrl != null)
             IconButton(
               tooltip: 'Fullscreen video',
@@ -1271,6 +1346,8 @@ class _SlimSliderState extends State<_SlimSlider> {
     await widget.handler.seekSafe(Duration(milliseconds: targetMs));
     if (!mounted) return;
     if (!ok) {
+      // Seek swallowed (LT guest lockout / player not ready) — snap the
+      // bar back to the real position instead of freezing.
       _seekPending = false;
       setState(() {});
       return;
@@ -1873,7 +1950,8 @@ class _TransportButton extends StatefulWidget {
 
 class _TransportButtonState extends State<_TransportButton>
     with SingleTickerProviderStateMixin {
-  // IMPORTANT: value MUST start at 1.0 (default 0.0 renders scale 0).
+  // IMPORTANT: value MUST start at 1.0 — AnimationController defaults
+  // to 0.0, which renders Transform.scale(0) (invisible-but-tappable).
   late final AnimationController _scale =
   AnimationController(vsync: this, value: 1.0);
 
@@ -2206,15 +2284,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
 }
 
 // ═════════════════════════════════════════════
-// DEVICE ROW — current audio output, tap opens the sheet.
-//
-// DESIGN (reconnect-race-proof): AudioDeviceService.deviceName is the
-// AUTHORITATIVE source for "a Bluetooth device is connected" (native
-// broadcast stream). Enumeration (listDevices) can lag seconds behind
-// it on reconnect, so when the BT name is non-null the row shows THAT
-// name directly with the matching icon — no timers, no retries. The
-// enumerator is only consulted for the non-BT fallback (wired/usb/
-// hdmi/speaker). Do not "simplify" this back to enumeration-only.
+// DEVICE ROW
 // ═════════════════════════════════════════════
 
 class _DeviceRow extends StatefulWidget {
@@ -2225,9 +2295,14 @@ class _DeviceRow extends StatefulWidget {
 }
 
 class _DeviceRowState extends State<_DeviceRow> {
-  // Non-BT fallback resolution (enumeration has no lag problem for
-  // these — they appear/disappear instantly).
-  AudioOutputDevice? _nonBtActive;
+  AudioOutputDevice? _active;
+  static const _prio = {
+    'bluetooth': 0,
+    'wired': 1,
+    'usb': 2,
+    'hdmi': 3,
+    'speaker': 4,
+  };
 
   @override
   void initState() {
@@ -2256,6 +2331,10 @@ class _DeviceRowState extends State<_DeviceRow> {
     }
     setState(() => _nonBtActive = active);
   }
+
+  // Non-BT fallback resolution (enumeration has no lag problem for
+  // these — they appear/disappear instantly).
+  AudioOutputDevice? _nonBtActive;
 
   @override
   Widget build(BuildContext context) {

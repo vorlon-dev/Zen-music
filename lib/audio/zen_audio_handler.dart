@@ -765,6 +765,19 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // PUBLIC API
   // ═════════════════════════════════════════════
 
+  /// Inserts [song] at [index] — position-faithful undo for queue
+  /// removal (swipe/clear). Index is clamped; the current index shifts
+  /// when the insertion lands at or before it (mirror of
+  /// removeFromQueue's decrement).
+  Future<void> insertQueueAt(int index, Song song) async {
+    if (_lockoutActive) return;
+    final i = index.clamp(0, _queue.length);
+    _queue.insert(i, song);
+    if (i <= _currentIndex) _currentIndex++;
+    queue.add(_queue.map(_toMediaItem).toList());
+    await _prefetchUrl(song);
+  }
+
   void seedStreamUrl(String id, String url, Map<String, String> headers) {
     _staleStreamIds.remove(id);
     _urlCache[id] = VideoStreamResult(url, headers);

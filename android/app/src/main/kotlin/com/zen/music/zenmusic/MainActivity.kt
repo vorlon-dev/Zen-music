@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -22,17 +23,23 @@ import androidx.core.view.WindowCompat
 import cc.tomko.outify.SpotifyPlaybackBridge
 import com.ryanheise.audioservice.AudioServiceActivity
 import com.zen.music.zenmusic.extensions.ZenExtensionManager
+import com.zen.music.zenmusic.innertubex.InnerTubeXResolver
+import com.zen.music.zenmusic.innertubex.itxDebugLogs
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
+import timber.log.Timber
 
 class MainActivity : AudioServiceActivity() {
     private lateinit var extensionManager: ZenExtensionManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // Audio-device (Bluetooth) event stream state.
     private var audioDeviceEvents: EventChannel.EventSink? = null
     private var audioReceiver: BroadcastReceiver? = null
+
+    // Volume events + audio channel state.
     private var volumeEvents: EventChannel.EventSink? = null
     private var volumeReceiver: BroadcastReceiver? = null
     private var bluetoothPermissionResult: MethodChannel.Result? = null
@@ -41,7 +48,11 @@ class MainActivity : AudioServiceActivity() {
         super.onCreate(savedInstanceState)
 
         // Full-screen under the display cutout (notch) — no black
-        // status-bar strip when the system bars are hidden.
+        // status-bar strip when the system bars are hidden. Flutter
+        // has no API for this; it must be set natively. The window
+        // extends into the cutout on ALL edges (ALWAYS on API 30+,
+        // SHORT_EDGES on API 28-29; pre-28 devices have no cutout
+        // reporting and need nothing).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
             window.attributes.layoutInDisplayCutoutMode =
@@ -63,15 +74,38 @@ class MainActivity : AudioServiceActivity() {
         registerAudioDeviceEvents(flutterEngine)
         registerVolumeEvents(flutterEngine)
         registerAudioChannel(flutterEngine)
+        registerInnertubexChannel(flutterEngine)
+        // In-app APK installer channel (OTA updates)
         InstallApkPlugin.register(flutterEngine, this)
+        // Flutter apps have no BuildConfig — use the runtime debuggable
+        // flag instead. Also gates the innertubex package's verbose logs.
+        val isDebuggable =
+            (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (isDebuggable) Timber.plant(Timber.DebugTree())
+        itxDebugLogs = isDebuggable
+        InnerTubeXResolver.init(applicationContext)
     }
 
     // ═══════════════════════════════════════════
-    // AUDIO DEVICE EVENTS — receiver-only (do NOT re-add
-    // AudioDeviceCallback — unresolved in this toolchain).
-    // RACE NOTE: ACL_DISCONNECTED fires before A2DP teardown — the
-    // delayed re-pushes (500/1200ms) read the settled state. Do not
-    // remove them.
+    // AUDIO DEVICE (Bluetooth) EVENTS — receiver-only (do NOT re-add
+    // AudioDeviceCallback — unresolved in this project's toolchain;
+    // the broadcast set fully covers the feature).
+    //
+    // LEAK-SAFE REGISTRATION (do not revert): receivers register on
+    // applicationContext, NEVER on the Activity. The Dart listener is
+    // app-lifetime and never cancels, so if the Activity is destroyed
+    // first (hot restart, background kill/restore), onCancel never runs
+    // — an Activity-tied receiver would leak (IntentReceiverLeaked).
+    // Application-context receivers are process-scoped: no leak.
+    // onListen also unregisters any previous receiver first, so engine
+    // restarts without onCancel never accumulate duplicates.
+    //
+    // RACE NOTE (do not remove the delayed re-pushes): ACL_DISCONNECTED
+    // fires BEFORE the A2DP profile teardown completes, so the device
+    // is still present in getDevices() when the broadcast arrives.
+    // Re-checking at +500ms and +1200ms reads the settled state — the
+    // disconnect then pushes null. Repeated pushes are harmless:
+    // Dart's ValueNotifier ignores same-value writes.
     // ═══════════════════════════════════════════
 
     private fun registerAudioDeviceEvents(flutterEngine: FlutterEngine) {
@@ -79,6 +113,14 @@ class MainActivity : AudioServiceActivity() {
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(args: Any?, events: EventChannel.EventSink?) {
                     audioDeviceEvents = events
+                    // Drop any leftover receiver (engine restart without
+                    // onCancel) before registering a fresh one.
+                    audioReceiver?.let {
+                        try {
+                            applicationContext.unregisterReceiver(it)
+                        } catch (_: Exception) {
+                        }
+                    }
                     scheduleAudioDevicePushes()
 
                     val filter = IntentFilter().apply {
@@ -94,13 +136,13 @@ class MainActivity : AudioServiceActivity() {
                         }
                     }
                     audioReceiver = receiver
-                    registerReceiver(receiver, filter)
+                    applicationContext.registerReceiver(receiver, filter)
                 }
 
                 override fun onCancel(args: Any?) {
                     audioReceiver?.let {
                         try {
-                            unregisterReceiver(it)
+                            applicationContext.unregisterReceiver(it)
                         } catch (_: Exception) {
                         }
                     }
@@ -113,6 +155,7 @@ class MainActivity : AudioServiceActivity() {
 
     private val AUDIO_DEVICE_TOKEN = Any()
 
+    /// Immediate push + settled-state re-pushes (see the race note).
     private fun scheduleAudioDevicePushes() {
         pushAudioDeviceName()
         mainHandler.postDelayed(
@@ -127,6 +170,8 @@ class MainActivity : AudioServiceActivity() {
         audioDeviceEvents?.success(connectedBluetoothDeviceName())
     }
 
+    /// The active Bluetooth output device's product name, or null.
+    /// getDevices(OUTPUTS) is the source of truth on API 23+.
     private fun connectedBluetoothDeviceName(): String? {
         val audioManager =
             getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -146,7 +191,77 @@ class MainActivity : AudioServiceActivity() {
     }
 
     // ═══════════════════════════════════════════
+    // INNERTUBEX — Tier-0 stream extraction (cipher-resilient,
+    // benchmarked client catalog). Round A: channel only; the Dart
+    // tier-0 wiring lands in Round B.
+    // ═══════════════════════════════════════════
+
+    private fun registerInnertubexChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/innertubex")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "extract" -> {
+                        val videoId = call.argument<String>("videoId") ?: ""
+                        val maxKbps = call.argument<Int>("maxKbps") ?: 160
+                        val requireM4a = call.argument<Boolean>("requireM4a") ?: false
+                        val skip = (call.argument<List<String>>("skipClients") ?: emptyList()).toSet()
+                        Thread {
+                            try {
+                                val ex = InnerTubeXResolver.extractBlocking(
+                                    videoId, maxKbps, skip, requireM4a
+                                )
+                                mainHandler.post {
+                                    if (ex == null) {
+                                        result.success(null)
+                                    } else {
+                                        result.success(
+                                            mapOf(
+                                                "videoId" to ex.videoId,
+                                                "url" to ex.url,
+                                                "kbps" to ex.kbps,
+                                                "mimeType" to ex.mimeType,
+                                                "loudnessDb" to ex.loudnessDb,
+                                                "clientName" to ex.clientName,
+                                                "profileId" to ex.profileId,
+                                                "headers" to ex.headers,
+                                            )
+                                        )
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                mainHandler.post {
+                                    result.error("EXTRACT_FAILED", t.message, null)
+                                }
+                            }
+                        }.start()
+                    }
+                    "headersFor" -> {
+                        val url = call.argument<String>("url") ?: ""
+                        result.success(InnerTubeXResolver.headersFor(url))
+                    }
+                    "onRefused" -> {
+                        val url = call.argument<String>("url") ?: ""
+                        result.success(InnerTubeXResolver.onRefused(url))
+                    }
+                    "onSessionChanged" -> {
+                        InnerTubeXResolver.onSessionChanged()
+                        result.success(null)
+                    }
+                    "getVisitorData" -> {
+                        Thread {
+                            val vd = InnerTubeXResolver.visitorDataBlocking()
+                            mainHandler.post { result.success(vd) }
+                        }.start()
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    // ═══════════════════════════════════════════
     // VOLUME EVENTS — STREAM_MUSIC {volume, max} on change + subscribe.
+    // Same leak-safe registration as above (applicationContext +
+    // idempotent onListen).
     // ═══════════════════════════════════════════
 
     private fun registerVolumeEvents(flutterEngine: FlutterEngine) {
@@ -154,6 +269,12 @@ class MainActivity : AudioServiceActivity() {
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(args: Any?, events: EventChannel.EventSink?) {
                     volumeEvents = events
+                    volumeReceiver?.let {
+                        try {
+                            applicationContext.unregisterReceiver(it)
+                        } catch (_: Exception) {
+                        }
+                    }
                     pushVolume()
 
                     val receiver = object : BroadcastReceiver() {
@@ -167,7 +288,7 @@ class MainActivity : AudioServiceActivity() {
                         }
                     }
                     volumeReceiver = receiver
-                    registerReceiver(
+                    applicationContext.registerReceiver(
                         receiver, IntentFilter("android.media.VOLUME_CHANGED_ACTION")
                     )
                 }
@@ -175,7 +296,7 @@ class MainActivity : AudioServiceActivity() {
                 override fun onCancel(args: Any?) {
                     volumeReceiver?.let {
                         try {
-                            unregisterReceiver(it)
+                            applicationContext.unregisterReceiver(it)
                         } catch (_: Exception) {
                         }
                     }

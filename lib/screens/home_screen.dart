@@ -6,6 +6,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 
 import '../main.dart';
@@ -53,6 +54,13 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentTab = 0;
 
+  // Nav bar auto-hide: hides when the user scrolls a vertical list
+  // down, returns on scroll-up or at any list's top. The
+  // NotificationListener catches vertical scroll notifications
+  // bubbling up from ALL tabs (horizontal shelf swipes are ignored
+  // via the axis filter).
+  bool _navVisible = true;
+
   @override
   void initState() {
     super.initState();
@@ -79,19 +87,47 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: SpotifyColors.background,
-      body: IndexedStack(
-        index: _currentTab,
-        children: const [
-          HomeTab(),
-          SearchScreen(),
-          LibraryTab(),
-        ],
+      // extendBody: the body scrolls BEHIND the floating mini player +
+      // nav bar — no black slot rectangle behind them.
+      extendBody: true,
+      body: NotificationListener<UserScrollNotification>(
+        onNotification: (n) {
+          // Vertical lists only — horizontal shelf swipes must not
+          // flicker the bar.
+          if (n.metrics.axis != Axis.vertical) return false;
+          // At the top of any list the bar is always visible.
+          if (n.metrics.pixels <= 0) {
+            if (!_navVisible && mounted) setState(() => _navVisible = true);
+            return false;
+          }
+          // Only EXPLICIT directions change state. IDLE (finger
+          // release / fling settle) KEEPS the current state — that was
+          // the bug where the bar reappeared the moment a downward
+          // swipe was released.
+          if (n.direction == ScrollDirection.reverse) {
+            // Scrolling toward the bottom — hide.
+            if (_navVisible && mounted) setState(() => _navVisible = false);
+          } else if (n.direction == ScrollDirection.forward) {
+            // Scrolling back toward the top — show.
+            if (!_navVisible && mounted) setState(() => _navVisible = true);
+          }
+          return false;
+        },
+        child: _TabStack(
+          index: _currentTab,
+          children: const [
+            HomeTab(),
+            SearchScreen(),
+            LibraryTab(),
+          ],
+        ),
       ),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const MiniPlayer(),
           ZenNavBar(
+            visible: _navVisible,
             items: const [
               ZenNavItem(
                 icon: FluentIcons.home_24_regular,
@@ -117,6 +153,46 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════
+// SLIDING TAB STACK — state-preserving IndexedStack replacement.
+// Every tab stays mounted (scroll positions / data kept); tabs slide
+// horizontally with AnimatedSlide (320ms ease). Adjacent tabs stay
+// painted during the slide; far tabs are offstage. Non-active tabs
+// ignore pointers; their tickers are disabled to save battery.
+// ═════════════════════════════════════════════
+
+class _TabStack extends StatelessWidget {
+  final int index;
+  final List<Widget> children;
+
+  const _TabStack({required this.index, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        for (var i = 0; i < children.length; i++)
+          AnimatedSlide(
+            offset: Offset((i - index).toDouble().clamp(-1.0, 1.0), 0),
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeInOutCubic,
+            child: Offstage(
+              offstage: (i - index).abs() > 1,
+              child: TickerMode(
+                enabled: i == index,
+                child: IgnorePointer(
+                  ignoring: i != index,
+                  child: children[i],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -395,7 +471,9 @@ class _HomeTabState extends State<HomeTab> {
           : ListView(
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(0, 6, 0, 24),
+        // Bottom padding clears the floating mini player + nav bar
+        // (extendBody: content scrolls behind them).
+        padding: const EdgeInsets.fromLTRB(0, 6, 0, 170),
         children: [
           if (_isRefreshing)
             const Padding(
@@ -558,7 +636,7 @@ class _HomeTabState extends State<HomeTab> {
   Widget _buildSkeletons() {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.only(bottom: 170),
       children: const [
         SizedBox(height: 8),
         SkeletonShelf(),
@@ -1149,7 +1227,10 @@ class _DailyDiscoverPager extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════
-// MINI PLAYER
+// MINI PLAYER — floating card. With extendBody, the app background
+// behind it is scrolling content, so the default 'surface' setting is
+// TRANSPARENT (no black slab behind the content); 'gradient' and
+// 'blur' keep their looks.
 // ═════════════════════════════════════════════
 
 class MiniPlayer extends StatelessWidget {
@@ -1278,13 +1359,28 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
             onTapUp: (_) => _animationController.reverse(),
             onTapCancel: () => _animationController.reverse(),
             onVerticalDragUpdate: _handleVerticalDrag,
+            onHorizontalDragEnd: (d) {
+              final v = d.primaryVelocity ?? 0;
+              if (v < -300) {
+                // Swipe left → next.
+                audioHandler.skipToNext();
+              } else if (v > 300) {
+                // Swipe right → previous.
+                audioHandler.skipToPrevious();
+              }
+            },
             onTap: widget.onOpen,
             child: ValueListenableBuilder<String>(
               valueListenable: AppearancePrefs.miniPlayerBackground,
               builder: (context, miniBg, _) => Container(
                 height: MiniPlayer._playerHeight,
                 decoration: BoxDecoration(
-                  color: SpotifyColors.surface,
+                  // 'surface' = TRANSPARENT (extendBody shows scrolling
+                  // content behind — no black slab). gradient/blur keep
+                  // their looks. No boxShadow — the dark halo is gone.
+                  color: miniBg == 'surface'
+                      ? Colors.transparent
+                      : SpotifyColors.surface,
                   gradient: miniBg == 'gradient'
                       ? const LinearGradient(
                     begin: Alignment.topLeft,
@@ -1297,13 +1393,6 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                       : null,
                   borderRadius:
                   BorderRadius.circular(MiniPlayer._borderRadius),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.18),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
                 ),
                 child: ClipRRect(
                   borderRadius:
@@ -2041,7 +2130,9 @@ class _LibraryTabState extends State<LibraryTab> {
               ),
             )
                 : ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              // Bottom padding clears the floating mini player +
+              // nav bar (extendBody).
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 160),
               itemCount: _played.length,
               separatorBuilder: (_, __) => const SizedBox(height: 4),
               itemBuilder: (context, i) {

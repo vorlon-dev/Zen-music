@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 
 import '../theme/spotify_theme.dart';
 
@@ -11,98 +12,201 @@ class ZenNavItem {
 
   final IconData icon;
   final IconData activeIcon;
+
+  /// Kept for constructor compatibility; not rendered (icon-only bar).
   final String label;
 }
 
-/// Echo-style bottom bar: 56x32 pill indicator behind the icon,
-/// non-bold 12sp label below, animated icon swap on select.
-/// [onTap] fires on every tap, including re-selects (reselect handling
-/// is the caller's job — Echo opens the extension sheet on Home).
-class ZenNavBar extends StatelessWidget {
+/// Echo-compact floating bottom bar (raised a touch): slim stadium,
+/// CIRCLE indicator behind the icon.
+///
+/// Hide/show = controller-driven WIPE + FADE: SizeTransition sinks the
+/// bar below the bottom edge (top-pinned), FadeTransition smooths it,
+/// and the slot collapses fully — hidden TOTALLY. Finger release /
+/// fling settle (ScrollDirection.idle) does NOT reshow it — only an
+/// actual upward scroll does (the scroll owner's job).
+class ZenNavBar extends StatefulWidget {
   const ZenNavBar({
     super.key,
     required this.items,
     required this.currentIndex,
     required this.onTap,
+    this.visible = true,
   });
 
   final List<ZenNavItem> items;
   final int currentIndex;
   final ValueChanged<int> onTap;
 
-  // Bar = surface token; pill = one step up. Echo resolves both from
-  // theme attributes — tune here if you want the pill lighter.
-  static const Color _barColor = SpotifyColors.surface;
-  static const Color _indicatorColor = SpotifyColors.surfaceLight;
+  /// false → bar wipes down + fades out; true → wipes back up.
+  final bool visible;
+
+  @override
+  State<ZenNavBar> createState() => _ZenNavBarState();
+}
+
+class _ZenNavBarState extends State<ZenNavBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+    value: widget.visible ? 1.0 : 0.0,
+  );
+
+  late final Animation<double> _wipe = CurvedAnimation(
+    parent: _ctrl,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInCubic,
+  );
+
+  @override
+  void didUpdateWidget(covariant ZenNavBar old) {
+    super.didUpdateWidget(old);
+    if (widget.visible != old.visible) {
+      widget.visible ? _ctrl.forward() : _ctrl.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: _barColor,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.only(top: 8, bottom: 6),
-          child: Row(
-            children: [
-              for (var i = 0; i < items.length; i++) Expanded(child: _item(i)),
-            ],
+    // A hidden bar must never eat taps mid-animation.
+    return IgnorePointer(
+      ignoring: !widget.visible,
+      child: ClipRect(
+        child: SizeTransition(
+          sizeFactor: _wipe,
+          axis: Axis.vertical,
+          // -1 pins the bar's TOP while the size shrinks — the bar
+          // sinks below the bottom edge (wipe-down). Do not change.
+          axisAlignment: -1,
+          child: FadeTransition(
+            opacity: _wipe,
+            child: Padding(
+              // Raised a touch (Echo placement) — was 8.
+              padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
+              child: Container(
+                height: 56,
+                decoration: BoxDecoration(
+                  color: SpotifyColors.surface,
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.06),
+                    width: 0.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.30),
+                      blurRadius: 14,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    for (var i = 0; i < widget.items.length; i++)
+                      Expanded(
+                        child: _ZenTab(
+                          item: widget.items[i],
+                          active: i == widget.currentIndex,
+                          onTap: () => widget.onTap(i),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _item(int i) {
-    final item = items[i];
-    final active = i == currentIndex;
+/// One icon-only tab. Active = filled CIRCLE behind the icon; spring
+/// press-scale (controller starts at 1.0 — the default 0.0 renders
+/// Transform.scale(0), the invisible-button regression).
+class _ZenTab extends StatefulWidget {
+  const _ZenTab({
+    required this.item,
+    required this.active,
+    required this.onTap,
+  });
+
+  final ZenNavItem item;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  State<_ZenTab> createState() => _ZenTabState();
+}
+
+class _ZenTabState extends State<_ZenTab>
+    with SingleTickerProviderStateMixin {
+  // IMPORTANT: value MUST start at 1.0 — AnimationController defaults
+  // to 0.0, which renders Transform.scale(0) (invisible-but-tappable).
+  late final AnimationController _scale =
+  AnimationController(vsync: this, value: 1.0);
+
+  static final _pressSpring = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 420,
+    ratio: 0.7,
+  );
+
+  void _setPressed(bool pressed) {
+    _scale.animateWith(
+      SpringSimulation(_pressSpring, _scale.value, pressed ? 0.88 : 1.0, 0),
+    );
+  }
+
+  @override
+  void dispose() {
+    _scale.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.active;
+    final item = widget.item;
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => onTap(i),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
+      onTapDown: (_) => _setPressed(true),
+      onTapUp: (_) => _setPressed(false),
+      onTapCancel: () => _setPressed(false),
+      onTap: widget.onTap,
+      child: AnimatedBuilder(
+        animation: _scale,
+        builder: (context, child) => Transform.scale(
+          scale: _scale.value,
+          child: child,
+        ),
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 280),
             curve: Curves.fastOutSlowIn,
-            width: 56,
-            height: 32,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
-              color: active ? _indicatorColor : Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
+              shape: BoxShape.circle,
+              color: active ? SpotifyColors.surfaceLight : Colors.transparent,
             ),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              switchInCurve: Curves.fastOutSlowIn,
-              switchOutCurve: Curves.fastOutSlowIn,
-              transitionBuilder: (child, anim) => ScaleTransition(
-                scale: anim,
-                child: FadeTransition(opacity: anim, child: child),
-              ),
-              child: Icon(
-                active ? item.activeIcon : item.icon,
-                key: ValueKey(active),
-                size: 22,
-                color: active
-                    ? SpotifyColors.textPrimary
-                    : SpotifyColors.textSecondary,
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            item.label,
-            maxLines: 1,
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.0,
-              fontWeight: FontWeight.w400,
+            child: Icon(
+              active ? item.activeIcon : item.icon,
+              size: 24,
               color: active
                   ? SpotifyColors.textPrimary
                   : SpotifyColors.textSecondary,
             ),
           ),
-        ],
+        ),
       ),
     );
   }
