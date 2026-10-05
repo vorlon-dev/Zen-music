@@ -1320,6 +1320,17 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
 
   static const double _dragThreshold = 10;
 
+  // ── Track-change slide state (player-screen parity) ──
+  // Direction of the artwork + title/artist slide when the song
+  // changes. Explicit gestures (mini-player swipe, next button)
+  // record an intent just before skipping; the intent is consumed
+  // when the NEW song's data actually arrives. Auto-advance and
+  // radio keep the last direction (forward on first play).
+  bool _slideForward = true;
+  bool? _pendingSlideForward;
+  DateTime _slideIntentAt = DateTime.fromMillisecondsSinceEpoch(0);
+  String? _lastSlideSongId;
+
   @override
   void initState() {
     super.initState();
@@ -1338,14 +1349,95 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
     super.dispose();
   }
 
+  /// Records the swipe/button direction so the NEXT song change slides
+  /// the artwork and titles the way the user moved. Skips resolve
+  /// asynchronously, so the intent is stored until the song changes.
+  void _noteSlideIntent(bool forward) {
+    _pendingSlideForward = forward;
+    _slideIntentAt = DateTime.now();
+  }
+
+  /// Consumes a pending slide intent — but ONLY when the song id
+  /// actually changed and the intent is still fresh. An unrelated
+  /// rebuild between the gesture and the track resolution must not
+  /// eat the direction; a stale intent (skip that never happened)
+  /// must not hijack a later, unrelated track change.
+  void _consumeSlideIntentIfNeeded() {
+    final id = widget.metadata.id;
+    if (id == _lastSlideSongId) return;
+    final pending = _pendingSlideForward;
+    if (pending != null &&
+        DateTime.now().difference(_slideIntentAt) <
+            const Duration(milliseconds: 3000)) {
+      _slideForward = pending;
+    }
+    _pendingSlideForward = null;
+    _lastSlideSongId = id;
+  }
+
   void _handleVerticalDrag(DragUpdateDetails details) {
     if ((details.primaryDelta ?? 0) < -_dragThreshold) {
       widget.onOpen();
     }
   }
 
+  /// Wraps a song-bound subtree so that when [slideKey] (the song id)
+  /// changes, the old content slides out and the new content slides in —
+  /// right-to-left for "next", left-to-right for "previous". The
+  /// outgoing child is pointer-disabled and clipped to this subtree's
+  /// bounds, so slides never bleed over neighboring widgets.
+  Widget _slideOnChange({
+    required String slideKey,
+    required Widget child,
+  }) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 320),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeOutCubic,
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        alignment: Alignment.centerLeft,
+        clipBehavior: Clip.hardEdge,
+        children: [
+          ...previousChildren,
+          if (currentChild != null) currentChild,
+        ],
+      ),
+      transitionBuilder: (child, animation) {
+        // ValueKey<String> on BOTH sides — a ValueKey<Object> would
+        // never compare equal (runtimeType check in Key equality).
+        final incoming = child.key == ValueKey<String>(slideKey);
+        final Offset slideFrom = incoming
+            ? Offset(_slideForward ? 0.35 : -0.35, 0)
+            : Offset(_slideForward ? -0.35 : 0.35, 0);
+        return IgnorePointer(
+          ignoring: !incoming,
+          child: FadeTransition(
+            opacity: incoming
+                ? Tween<double>(begin: 0.35, end: 1.0).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOut))
+                : Tween<double>(begin: 0.0, end: 1.0).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeIn)),
+            child: SlideTransition(
+              position: Tween<Offset>(begin: slideFrom, end: Offset.zero)
+                  .animate(CurvedAnimation(
+                  parent: animation, curve: Curves.easeOutCubic)),
+              child: child,
+            ),
+          ),
+        );
+      },
+      child: KeyedSubtree(
+        key: ValueKey<String>(slideKey),
+        child: child,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Track-change slide: consume a pending swipe/button direction
+    // when (and only when) the song actually changed.
+    _consumeSlideIntentIfNeeded();
     final metadata = widget.metadata;
     final state = widget.playbackState;
 
@@ -1362,10 +1454,12 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
             onHorizontalDragEnd: (d) {
               final v = d.primaryVelocity ?? 0;
               if (v < -300) {
-                // Swipe left → next.
+                // Swipe left → next (content slides leftward).
+                _noteSlideIntent(true);
                 audioHandler.skipToNext();
               } else if (v > 300) {
-                // Swipe right → previous.
+                // Swipe right → previous (content slides rightward).
+                _noteSlideIntent(false);
                 audioHandler.skipToPrevious();
               }
             },
@@ -1424,33 +1518,24 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                         const EdgeInsets.symmetric(horizontal: 10),
                         child: Row(
                           children: [
-                            _Artwork(metadata: metadata),
+                            // Artwork slides on track change — old art
+                            // exits, new art enters, in the swipe/button
+                            // direction (clipped to this slot).
+                            _slideOnChange(
+                              slideKey: metadata.id,
+                              child: _Artwork(metadata: metadata),
+                            ),
                             Expanded(
-                              child: AnimatedSwitcher(
-                                duration:
-                                const Duration(milliseconds: 300),
-                                switchInCurve: Curves.easeIn,
-                                switchOutCurve: Curves.easeOut,
-                                layoutBuilder:
-                                    (currentChild, previousChildren) =>
-                                    Stack(
-                                      alignment: Alignment.centerLeft,
-                                      children: [
-                                        ...previousChildren,
-                                        if (currentChild != null)
-                                          currentChild,
-                                      ],
-                                    ),
-                                transitionBuilder: (child, animation) =>
-                                    FadeTransition(
-                                        opacity: animation,
-                                        child: child),
-                                child: KeyedSubtree(
-                                  key: ValueKey(metadata.id),
-                                  child: _Metadata(
-                                    title: metadata.title,
-                                    artist: metadata.artist ?? '',
-                                  ),
+                              // Title/artist slide on track change, in
+                              // sync with the artwork (same duration +
+                              // curve + direction — the intent is
+                              // consumed once per song change, at the
+                              // top of build).
+                              child: _slideOnChange(
+                                slideKey: 'meta-${metadata.id}',
+                                child: _Metadata(
+                                  title: metadata.title,
+                                  artist: metadata.artist ?? '',
                                 ),
                               ),
                             ),
@@ -1460,6 +1545,7 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                                   !audioHandler.isRadioMode,
                               totalDuration:
                               metadata.duration ?? Duration.zero,
+                              onNextIntent: () => _noteSlideIntent(true),
                             ),
                           ],
                         ),
@@ -1582,11 +1668,16 @@ class _Controls extends StatelessWidget {
     required this.playbackState,
     required this.hasNext,
     required this.totalDuration,
+    this.onNextIntent,
   });
 
   final PlaybackState playbackState;
   final bool hasNext;
   final Duration totalDuration;
+  // Records the slide direction for the track-change animation just
+  // before the skip fires (mini player has no previous button, so
+  // this is always "forward").
+  final VoidCallback? onNextIntent;
 
   @override
   Widget build(BuildContext context) {
@@ -1600,7 +1691,10 @@ class _Controls extends StatelessWidget {
         if (hasNext) ...[
           const SizedBox(width: 4),
           IconButton(
-            onPressed: audioHandler.skipToNext,
+            onPressed: () {
+              onNextIntent?.call();
+              audioHandler.skipToNext();
+            },
             splashColor: Colors.transparent,
             highlightColor: Colors.transparent,
             icon: const Icon(

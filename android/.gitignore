@@ -7,6 +7,14 @@ gradle-wrapper.jar
 GeneratedPluginRegistrant.java
 .cxx/
 
+# Kotlin 2.x compiler session metadata — created by every build,
+# never source. (Newer than the stock template above.)
+.kotlin/
+
+# Gradle build output at ANY level under android/: project-level
+# android/build/ (problems-report.html) and module android/app/build/.
+build/
+
 # Remember to never publicly share your keystore.
 # See https://flutter.dev/to/reference-keystore
 key.properties

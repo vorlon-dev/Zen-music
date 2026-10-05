@@ -43,10 +43,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Serves the downloaded APK to the system installer -->
+        <!-- Serves the downloaded APK to the system installer.
+             Authority is HARDCODED to the applicationId: it must match
+             InstallApkPlugin's "${activity.packageName}.fileprovider"
+             lookup. Do NOT use the ${applicationName} placeholder here —
+             it resolves to Flutter's Application CLASS name, not the
+             package, and the installer lookup silently fails. If the
+             applicationId ever changes, change this line with it. -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationName}.fileprovider"
+            android:authorities="com.zen.music.zenmusic.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

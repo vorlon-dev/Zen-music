@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- ROOT: FileProvider has no tag for code_cache/, which is where
+         the OTA update APK lands (Directory.systemTemp → code_cache on
+         Android). A hardcoded subpath (data/data/<pkg>/...) would break
+         in multi-user environments (work profile: /data/user/10/...),
+         so the root covers everything. Provider stays exported=false;
+         read access is granted per-intent only. -->
+    <root-path name="root" path="." />
+
     <cache-path name="cache" path="." />
     <files-path name="internal_files" path="." />
     <external-path name="external_storage" path="." />

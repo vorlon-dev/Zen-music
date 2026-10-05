@@ -96,6 +96,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   final _yt = YoutubeService();
 
+  // ── Track-change slide state ──
+  // Direction of the artwork/title slide when the song changes.
+  // Explicit gestures (artwork swipe, prev/next buttons) record an
+  // intent just before skipping; the intent is consumed when the NEW
+  // song's data actually arrives. Auto-advance / radio default to
+  // forward.
+  bool _slideForward = true;
+  bool? _pendingSlideForward;
+  DateTime _slideIntentAt = DateTime.fromMillisecondsSinceEpoch(0);
+  String? _lastSlideSongId;
+
   @override
   void initState() {
     super.initState();
@@ -156,6 +167,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// Opens/closes the lyrics pane.
   void _setLyricsOpen(bool open) {
     setState(() => _showLyrics = open);
+  }
+
+  /// Records the swipe/button direction so the NEXT song change slides
+  /// the artwork and titles the way the user moved. Skips resolve
+  /// asynchronously, so the intent is stored until the song changes.
+  void _noteSlideIntent(bool forward) {
+    _pendingSlideForward = forward;
+    _slideIntentAt = DateTime.now();
+  }
+
+  /// Consumes a pending slide intent — but ONLY when the song id
+  /// actually changed and the intent is still fresh. An unrelated
+  /// rebuild between the gesture and the track resolution must not
+  /// eat the direction; a stale intent (skip that never happened)
+  /// must not hijack a later, unrelated track change.
+  void _consumeSlideIntentIfNeeded(Song song) {
+    if (song.id == _lastSlideSongId) return;
+    final pending = _pendingSlideForward;
+    if (pending != null &&
+        DateTime.now().difference(_slideIntentAt) <
+            const Duration(milliseconds: 3000)) {
+      _slideForward = pending;
+    }
+    _pendingSlideForward = null;
+    _lastSlideSongId = song.id;
   }
 
   @override
@@ -429,6 +465,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _lyricsSynced = false;
     }
 
+    // Track-change slide: consume a pending swipe/button direction
+    // when (and only when) the song actually changed.
+    _consumeSlideIntentIfNeeded(song);
+
     // ── Fullscreen video mode: edge-to-edge, landscape, immersive ──
     if (_videoFullscreen && _showVideo && _videoUrl != null) {
       return WillPopScope(
@@ -658,6 +698,59 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
+  /// Wraps a song-bound subtree so that when [slideKey] (the song id)
+  /// changes, the old content slides out and the new content slides in —
+  /// right-to-left for "next", left-to-right for "previous". The
+  /// outgoing child is pointer-disabled and clipped to this subtree's
+  /// bounds, so slides never bleed over neighboring widgets.
+  Widget _slideOnChange({
+    required String slideKey,
+    required Widget child,
+    AlignmentGeometry stackAlignment = Alignment.center,
+  }) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 380),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeOutCubic,
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        alignment: stackAlignment,
+        clipBehavior: Clip.hardEdge,
+        children: [
+          ...previousChildren,
+          if (currentChild != null) currentChild,
+        ],
+      ),
+      transitionBuilder: (child, animation) {
+        // ValueKey<String> on BOTH sides — a ValueKey<Object> would
+        // never compare equal (runtimeType check in Key equality).
+        final incoming = child.key == ValueKey<String>(slideKey);
+        final Offset slideFrom = incoming
+            ? Offset(_slideForward ? 0.26 : -0.26, 0)
+            : Offset(_slideForward ? -0.26 : 0.26, 0);
+        return IgnorePointer(
+          ignoring: !incoming,
+          child: FadeTransition(
+            opacity: incoming
+                ? Tween<double>(begin: 0.35, end: 1.0).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOut))
+                : Tween<double>(begin: 0.0, end: 1.0).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeIn)),
+            child: SlideTransition(
+              position: Tween<Offset>(begin: slideFrom, end: Offset.zero)
+                  .animate(CurvedAnimation(
+                  parent: animation, curve: Curves.easeOutCubic)),
+              child: child,
+            ),
+          ),
+        );
+      },
+      child: KeyedSubtree(
+        key: ValueKey<String>(slideKey),
+        child: child,
+      ),
+    );
+  }
+
   Widget _lyricsBody(Song song, dynamic handler) {
     return Column(
       children: [
@@ -691,58 +784,65 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ? const SizedBox(height: 24)
                   : Padding(
                 padding: const EdgeInsets.fromLTRB(28, 16, 28, 20),
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onHorizontalDragEnd: (d) {
-                    final v = d.primaryVelocity ?? 0;
-                    if (v < -300) {
-                      _maybeHaptic();
-                      handler.skipToNext();
-                    } else if (v > 300) {
-                      _maybeHaptic();
-                      handler.skipToPrevious();
-                    }
-                  },
-                  child: AspectRatio(
-                    aspectRatio: 1,
-                    child: Hero(
-                      tag: 'artwork-${song.id}',
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(
-                              AppearancePrefs.thumbRadius.value),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.45),
-                              blurRadius: 24,
-                              offset: const Offset(0, 12),
+                // Artwork slides on track change — old art exits,
+                // new art enters, in the swipe/button direction.
+                child: _slideOnChange(
+                  slideKey: song.id,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onHorizontalDragEnd: (d) {
+                      final v = d.primaryVelocity ?? 0;
+                      if (v < -300) {
+                        _maybeHaptic();
+                        _noteSlideIntent(true);
+                        handler.skipToNext();
+                      } else if (v > 300) {
+                        _maybeHaptic();
+                        _noteSlideIntent(false);
+                        handler.skipToPrevious();
+                      }
+                    },
+                    child: AspectRatio(
+                      aspectRatio: 1,
+                      child: Hero(
+                        tag: 'artwork-${song.id}',
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(
+                                AppearancePrefs.thumbRadius.value),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.45),
+                                blurRadius: 24,
+                                offset: const Offset(0, 12),
+                              ),
+                            ],
+                          ),
+                          // Crop any thumbnail aspect (16:9 video
+                          // stills included) into the 1:1 art frame —
+                          // no black bars, ever.
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(
+                                AppearancePrefs.thumbRadius.value),
+                            child: LayoutBuilder(
+                              builder: (context, box) {
+                                final size = box.maxWidth;
+                                return Image.network(
+                                  song.thumbnail,
+                                  width: size,
+                                  height: size,
+                                  fit: BoxFit.cover,
+                                  alignment: Alignment.center,
+                                  errorBuilder: (_, __, ___) => Container(
+                                    color: SpotifyColors.surfaceLight,
+                                    child: const Icon(
+                                        Icons.music_note_rounded,
+                                        size: 64,
+                                        color: SpotifyColors.textTertiary),
+                                  ),
+                                );
+                              },
                             ),
-                          ],
-                        ),
-                        // Crop any thumbnail aspect (16:9 video
-                        // stills included) into the 1:1 art frame —
-                        // no black bars, ever.
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(
-                              AppearancePrefs.thumbRadius.value),
-                          child: LayoutBuilder(
-                            builder: (context, box) {
-                              final size = box.maxWidth;
-                              return Image.network(
-                                song.thumbnail,
-                                width: size,
-                                height: size,
-                                fit: BoxFit.cover,
-                                alignment: Alignment.center,
-                                errorBuilder: (_, __, ___) => Container(
-                                  color: SpotifyColors.surfaceLight,
-                                  child: const Icon(
-                                      Icons.music_note_rounded,
-                                      size: 64,
-                                      color: SpotifyColors.textTertiary),
-                                ),
-                              );
-                            },
                           ),
                         ),
                       ),
@@ -773,114 +873,121 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Flexible(
-                            child: MarqueeText(
-                              text: song.title,
-                              style: const TextStyle(
-                                fontSize: 21,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.3,
-                                color: SpotifyColors.textPrimary,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => pushSharedAxisY(
-                          context,
-                          ArtistScreen(artistName: song.artist),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                  // Title/artist/badges slide on track change, in sync
+                  // with the artwork (same duration + curve, same
+                  // direction — consumed once per song change).
+                  child: _slideOnChange(
+                    slideKey: 'meta-${song.id}',
+                    stackAlignment: Alignment.centerLeft,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             Flexible(
-                              child: Text(
-                                song.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              child: MarqueeText(
+                                text: song.title,
                                 style: const TextStyle(
-                                  fontSize: 14,
-                                  color: SpotifyColors.textSecondary,
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.3,
+                                  color: SpotifyColors.textPrimary,
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 2),
-                            const Icon(
-                              Icons.chevron_right_rounded,
-                              size: 16,
-                              color: SpotifyColors.textTertiary,
                             ),
                           ],
                         ),
-                      ),
-                      // ── Quality badge (hideable) + VIDEO chip ──
-                      const SizedBox(height: 6),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: AppearancePrefs.showQualityBadge,
-                        builder: (context, show, _) => Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (show)
+                        const SizedBox(height: 4),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => pushSharedAxisY(
+                            context,
+                            ArtistScreen(artistName: song.artist),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
                               Flexible(
-                                child: StreamBuilder<Map<String, String?>>(
-                                  stream: audioHandler.audioQualityStream,
-                                  builder: (context, snap) {
-                                    final type = snap.data?['type'];
-                                    final bitrate = snap.data?['bitrate'];
-                                    if (type == null || type.isEmpty) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    return Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 7, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: SpotifyColors.green
-                                            .withOpacity(0.15),
-                                        borderRadius:
-                                        BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        '${type.toUpperCase()}'
-                                            '${bitrate != null && bitrate.isNotEmpty ? ' · $bitrate kbps' : ''}',
-                                        style: const TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w700,
-                                            color: SpotifyColors.green),
-                                      ),
-                                    );
-                                  },
+                                child: Text(
+                                  song.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: SpotifyColors.textSecondary,
+                                  ),
                                 ),
                               ),
-                            if (_showVideo) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 7, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: Colors.redAccent.withOpacity(0.18),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: const Text('VIDEO',
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 0.5,
-                                        color: Colors.redAccent)),
+                              const SizedBox(width: 2),
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                size: 16,
+                                color: SpotifyColors.textTertiary,
                               ),
                             ],
-                          ],
+                          ),
                         ),
-                      ),
-                    ],
+                        // ── Quality badge (hideable) + VIDEO chip ──
+                        const SizedBox(height: 6),
+                        ValueListenableBuilder<bool>(
+                          valueListenable: AppearancePrefs.showQualityBadge,
+                          builder: (context, show, _) => Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (show)
+                                Flexible(
+                                  child: StreamBuilder<Map<String, String?>>(
+                                    stream: audioHandler.audioQualityStream,
+                                    builder: (context, snap) {
+                                      final type = snap.data?['type'];
+                                      final bitrate = snap.data?['bitrate'];
+                                      if (type == null || type.isEmpty) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 7, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: SpotifyColors.green
+                                              .withOpacity(0.15),
+                                          borderRadius:
+                                          BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          '${type.toUpperCase()}'
+                                              '${bitrate != null && bitrate.isNotEmpty ? ' · $bitrate kbps' : ''}',
+                                          style: const TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: SpotifyColors.green),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              if (_showVideo) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 7, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.redAccent.withOpacity(0.18),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text('VIDEO',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 0.5,
+                                          color: Colors.redAccent)),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -954,7 +1061,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
           const SizedBox(height: 8),
           _PlayerControls(
-              handler: handler, controller: controller, song: song),
+            handler: handler,
+            controller: controller,
+            song: song,
+            onSkipIntent: _noteSlideIntent,
+          ),
           // ── Audio output row: current device + name, tap opens the
           // device sheet (always visible — shows Phone speaker when
           // nothing else is connected).
@@ -1147,6 +1258,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
                 onPressed: () {
                   _maybeHaptic();
+                  _noteSlideIntent(false);
                   handler.skipToPrevious();
                 },
               ),
@@ -1188,6 +1300,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
                 onPressed: () {
                   _maybeHaptic();
+                  _noteSlideIntent(true);
                   handler.skipToNext();
                 },
               ),
@@ -2170,11 +2283,15 @@ class _PlayerControls extends StatefulWidget {
   final dynamic handler;
   final dynamic controller;
   final Song song;
+  // Records the slide direction for the track-change animation just
+  // before a skip fires (true = next, false = previous).
+  final ValueChanged<bool>? onSkipIntent;
 
   const _PlayerControls({
     required this.handler,
     required this.controller,
     required this.song,
+    this.onSkipIntent,
   });
 
   @override
@@ -2242,6 +2359,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
                 ? null
                 : () {
               _maybeHaptic();
+              widget.onSkipIntent?.call(false);
               handler.skipToPrevious();
             },
           ),
@@ -2257,6 +2375,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
                 ? null
                 : () {
               _maybeHaptic();
+              widget.onSkipIntent?.call(true);
               handler.skipToNext();
             },
           ),
