@@ -1227,9 +1227,10 @@ class _DailyDiscoverPager extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════
-// MINI PLAYER — floating card. With extendBody, the app background
-// behind it is scrolling content, so the default 'surface' setting is
-// TRANSPARENT (no black slab behind the content); 'gradient' and
+// MINI PLAYER — floating OPAQUE card. With extendBody, content
+// scrolls BEHIND the card but never through it: the 'surface'
+// setting is a solid surface card (the transparent variant was
+// user-rejected — unreadable over busy shelves), 'gradient' and
 // 'blur' keep their looks.
 // ═════════════════════════════════════════════
 
@@ -1469,12 +1470,13 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
               builder: (context, miniBg, _) => Container(
                 height: MiniPlayer._playerHeight,
                 decoration: BoxDecoration(
-                  // 'surface' = TRANSPARENT (extendBody shows scrolling
-                  // content behind — no black slab). gradient/blur keep
-                  // their looks. No boxShadow — the dark halo is gone.
-                  color: miniBg == 'surface'
-                      ? Colors.transparent
-                      : SpotifyColors.surface,
+                  // OPAQUE surface card in EVERY mode: scrolling
+                  // content passes behind the card (extendBody) but
+                  // never shows through it. The old transparent
+                  // 'surface' variant made the player unreadable
+                  // over busy shelves (user-rejected). No boxShadow —
+                  // the dark halo stays gone. gradient/blur unchanged.
+                  color: SpotifyColors.surface,
                   gradient: miniBg == 'gradient'
                       ? const LinearGradient(
                     begin: Alignment.topLeft,
