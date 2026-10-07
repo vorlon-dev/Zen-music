@@ -1077,7 +1077,7 @@ class YoutubeService {
       print('getRelatedStreams failed: $e');
     }
 
-    // Tier 3: filtered music search fallback.
+    // Tier 3: filtered zen search fallback.
     try {
       await _ensureExtractorInit();
       final page = await _extractor
@@ -1119,7 +1119,7 @@ class YoutubeService {
         ));
         if (songs.length >= 20) break;
       }
-      print('↳ related fallback (music search): ${songs.length} songs');
+      print('↳ related fallback (zen search): ${songs.length} songs');
       return songs;
     } catch (e) {
       print('related fallback failed: $e');

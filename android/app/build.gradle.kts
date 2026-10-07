@@ -43,6 +43,14 @@ kotlin {
 }
 
 dependencies {
+    // Parametric EQ DSP: preset parsing, validation, biquad math +
+    // magnitude response (zen/dsp channel).
+    implementation(project(":dsp-core"))
+
+    // Parametric-EQ audio processors + controller (state bridging now,
+    // audio-pipeline injection in the forked-just_audio round).
+    implementation(project(":audio-dsp"))
+
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:5.1.0")

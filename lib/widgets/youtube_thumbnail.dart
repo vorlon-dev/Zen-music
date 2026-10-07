@@ -50,7 +50,7 @@ class YoutubeThumbnail extends StatelessWidget {
 
     if (imageUrl.isEmpty) {
       // No imageUrl — go straight to the YouTube thumbnail; if that
-      // also fails, show the music-note fallback.
+      // also fails, show the zen-note fallback.
       return ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
         child: CachedNetworkImage(

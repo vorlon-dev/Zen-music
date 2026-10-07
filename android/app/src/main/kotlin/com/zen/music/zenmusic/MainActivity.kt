@@ -20,13 +20,18 @@ import android.view.WindowManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import cc.tomko.outify.SpotifyPlaybackBridge
 import com.ryanheise.audioservice.AudioServiceActivity
+import com.zen.music.zenmusic.dsp.core.BiquadFilter
+import com.zen.music.zenmusic.dsp.core.models.FilterType
+import com.zen.music.zenmusic.dsp.core.models.ParametricEQ
+import com.zen.music.zenmusic.dsp.core.models.ParametricEQBand
+import com.zen.music.zenmusic.dsp.core.parser.ParametricEQParser
 import com.zen.music.zenmusic.extensions.ZenExtensionManager
 import com.zen.music.zenmusic.innertubex.InnerTubeXResolver
 import com.zen.music.zenmusic.innertubex.itxDebugLogs
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
 import timber.log.Timber
@@ -66,15 +71,12 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        SpotifyPlaybackBridge.registerChannels(
-            applicationContext,
-            flutterEngine.dartExecutor.binaryMessenger,
-        )
         registerExtensions(flutterEngine)
         registerAudioDeviceEvents(flutterEngine)
         registerVolumeEvents(flutterEngine)
         registerAudioChannel(flutterEngine)
         registerInnertubexChannel(flutterEngine)
+        registerDspChannel(flutterEngine)
         // In-app APK installer channel (OTA updates)
         InstallApkPlugin.register(flutterEngine, this)
         // Flutter apps have no BuildConfig — use the runtime debuggable
@@ -192,8 +194,7 @@ class MainActivity : AudioServiceActivity() {
 
     // ═══════════════════════════════════════════
     // INNERTUBEX — Tier-0 stream extraction (cipher-resilient,
-    // benchmarked client catalog). Round A: channel only; the Dart
-    // tier-0 wiring lands in Round B.
+    // benchmarked client catalog).
     // ═══════════════════════════════════════════
 
     private fun registerInnertubexChannel(flutterEngine: FlutterEngine) {
@@ -257,6 +258,159 @@ class MainActivity : AudioServiceActivity() {
                 }
             }
     }
+
+    // ═══════════════════════════════════════════
+    // DSP — parametric EQ via the :dsp-core JVM module. Stateless
+    // math: preset parsing/validation (AutoEq text format) and
+    // biquad magnitude response for curve rendering + system-EQ
+    // projection. NO audio flows through here — the module computes
+    // numbers; playback filtering is the audio pipeline's business
+    // (the forked-just_audio round).
+    // ═══════════════════════════════════════════
+
+    private fun registerDspChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/dsp")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "available" -> result.success(true)
+                    "parsePresetText" -> {
+                        val text = call.argument<String>("text") ?: ""
+                        Thread {
+                            // Parse failures resolve to null (Dart
+                            // contract), never an error — unparseable
+                            // text is a normal user outcome.
+                            val eq = try {
+                                ParametricEQParser.parseText(text)
+                            } catch (_: Throwable) {
+                                null
+                            }
+                            mainHandler.post {
+                                result.success(eq?.let { eqToMap(it) })
+                            }
+                        }.start()
+                    }
+                    "validatePreset" -> {
+                        val eq = eqFromCall(call)
+                        if (eq == null) {
+                            result.error("BAD_ARGS", "bands list expected", null)
+                        } else {
+                            result.success(ParametricEQParser.validate(eq))
+                        }
+                    }
+                    "magnitudeResponseDb" -> {
+                        val eq = eqFromCall(call)
+                        if (eq == null) {
+                            result.error("BAD_ARGS", "bands list expected", null)
+                        } else {
+                            val points = (call.argument<Any?>("points")
+                                    as? Number)?.toInt()?.coerceIn(8, 512) ?: 128
+                            val minHz = (call.argument<Any?>("minHz")
+                                    as? Number)?.toDouble()?.coerceIn(1.0, 999.0) ?: 20.0
+                            val maxHz = (call.argument<Any?>("maxHz")
+                                    as? Number)?.toDouble() ?: 20000.0
+                            Thread {
+                                val out = magnitudeResponse(eq, points, minHz, maxHz)
+                                mainHandler.post { result.success(out) }
+                            }.start()
+                        }
+                    }
+                    "responseAtFrequencies" -> {
+                        val eq = eqFromCall(call)
+                        // JVM payloads are star-projected — `dynamic`
+                        // is Kotlin/JS-only and does not compile on
+                        // the JVM toolchain.
+                        val freqsRaw: List<*> =
+                            call.argument("frequencies") ?: emptyList<Any?>()
+                        val freqs = freqsRaw.mapNotNull { (it as? Number)?.toDouble() }
+                        if (eq == null) {
+                            result.error("BAD_ARGS", "bands list expected", null)
+                        } else {
+                            Thread {
+                                val filters = activeFilters(eq)
+                                val out = freqs.map { f ->
+                                    dBAt(filters, eq.preamp, f)
+                                }
+                                mainHandler.post { result.success(out) }
+                            }.start()
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /// Response over a LOG-SPACED grid:
+    ///   f(i) = minHz * (maxHz/minHz)^(i / (points - 1))
+    /// Dart's DspService.frequencyGrid mirrors this exactly — the two
+    /// implementations must stay in lockstep (contract).
+    private fun magnitudeResponse(
+        eq: ParametricEQ, points: Int, minHz: Double, maxHz: Double
+    ): List<Double> {
+        val safeMax = if (maxHz > minHz * 2.0) maxHz else minHz * 100.0
+        val filters = activeFilters(eq)
+        val ratio = safeMax / minHz
+        val out = ArrayList<Double>(points)
+        for (i in 0 until points) {
+            val t = if (points <= 1) 0.0 else i.toDouble() / (points - 1)
+            val f = minHz * Math.pow(ratio, t)
+            out.add(dBAt(filters, eq.preamp, f))
+        }
+        return out
+    }
+
+    private fun activeFilters(eq: ParametricEQ): List<BiquadFilter> =
+        eq.bands.filter { it.enabled }.map {
+            BiquadFilter(44100, it.frequency, it.gain, it.q, it.filterType)
+        }
+
+    private fun dBAt(filters: List<BiquadFilter>, preamp: Double, f: Double): Double {
+        var mag = 1.0
+        for (fl in filters) mag *= fl.magnitudeAt(f)
+        val db = if (mag <= 0.0) -120.0 else 20.0 * Math.log10(mag)
+        return db + preamp
+    }
+
+    private fun bandFromMap(m: Map<*, *>): ParametricEQBand {
+        val ft = when ((m["filterType"] as? String)?.uppercase()) {
+            "LSC" -> FilterType.LSC
+            "HSC" -> FilterType.HSC
+            "LPQ" -> FilterType.LPQ
+            "HPQ" -> FilterType.HPQ
+            else -> FilterType.PK
+        }
+        return ParametricEQBand(
+            frequency = (m["frequency"] as? Number)?.toDouble() ?: 0.0,
+            gain = (m["gain"] as? Number)?.toDouble() ?: 0.0,
+            q = (m["q"] as? Number)?.toDouble() ?: 1.41,
+            filterType = ft,
+            enabled = (m["enabled"] as? Boolean) ?: true,
+        )
+    }
+
+    private fun eqFromCall(call: MethodCall): ParametricEQ? {
+        // JVM payloads are star-projected — `dynamic` is
+        // Kotlin/JS-only and does not compile on the JVM toolchain.
+        val bandsRaw: List<*> = call.argument("bands") ?: return null
+        val bands = bandsRaw.mapNotNull { b ->
+            (b as? Map<*, *>)?.let { bandFromMap(it) }
+        }
+        val preamp = (call.argument<Any?>("preamp") as? Number)?.toDouble() ?: 0.0
+        return ParametricEQ(preamp = preamp, bands = bands)
+    }
+
+    private fun eqToMap(eq: ParametricEQ): Map<String, Any?> = mapOf(
+        "preamp" to eq.preamp,
+        "bands" to eq.bands.map { b ->
+            mapOf(
+                "filterType" to b.filterType.name,
+                "frequency" to b.frequency,
+                "gain" to b.gain,
+                "q" to b.q,
+                "enabled" to b.enabled,
+            )
+        },
+        "metadata" to eq.metadata,
+    )
 
     // ═══════════════════════════════════════════
     // VOLUME EVENTS — STREAM_MUSIC {volume, max} on change + subscribe.

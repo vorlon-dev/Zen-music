@@ -49,7 +49,7 @@ class ShareIntentService {
       if (m == null) continue;
       final videoId = m.group(1)!;
 
-      // The watch page plays the video's own audio — pause the music
+      // The watch page plays the video's own audio — pause the zen
       // queue so the two don't overlap.
       audioHandler.pause();
 

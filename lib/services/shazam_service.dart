@@ -3,7 +3,7 @@ import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
-/// Shazam music recognition — Dart port of Echo's ShazamKit network
+/// Shazam zen recognition — Dart port of Echo's ShazamKit network
 /// layer (Shazam.kt). Rate-limited, exponential-backoff retries on 429,
 /// 5-minute result cache keyed by signature.
 ///
@@ -36,7 +36,7 @@ class ShazamService {
     'America/Los_Angeles', 'Asia/Tokyo', 'Asia/Dubai',
   ];
 
-  /// Recognize music from a DejaVu audio signature.
+  /// Recognize zen from a DejaVu audio signature.
   Future<ShazamResult> recognize(
       String signature, int sampleDurationMs) async {
     final cacheKey = signature.hashCode.toString();

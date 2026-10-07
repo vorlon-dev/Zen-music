@@ -78,3 +78,7 @@ google-services.json.orig
 # OS junk
 Thumbs.db
 Desktop.ini
+
+# Kotlin DSP modules (root-level Gradle subprojects — build output)
+/dsp-core/build/
+/audio-dsp/build/

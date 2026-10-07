@@ -148,7 +148,7 @@ class AppleCanvasService {
           }
           albumId ??= attributes['collectionId'] as String?;
           // Fallback: parse from the item URL
-          // (music.apple.com/region/album/name/ID?i=songId).
+          // (zen.apple.com/region/album/name/ID?i=songId).
           if (albumId == null || albumId.isEmpty) {
             final url = attributes['url'] as String?;
             if (url != null) {
@@ -239,7 +239,7 @@ class AppleCanvasService {
       final nameLower = albumName.toLowerCase();
       const blacklist = [
         'playlist', 'set list', 'essentials', 'dj mix', 'mixed',
-        'apple music', "today's hits", 'session',
+        'apple zen', "today's hits", 'session',
       ];
       for (final b in blacklist) {
         if (nameLower.contains(b)) {
@@ -278,8 +278,8 @@ class AppleCanvasService {
 
   Map<String, String> _headers(String token) => {
     'Authorization': 'Bearer $token',
-    'Origin': 'https://music.apple.com',
-    'Referer': 'https://music.apple.com/',
+    'Origin': 'https://zen.apple.com',
+    'Referer': 'https://zen.apple.com/',
     'User-Agent': _ua,
   };
 
@@ -316,7 +316,7 @@ class AppleCanvasService {
     final c = resultCollection.toLowerCase();
     const blacklist = [
       'playlist', 'set list', 'essentials', 'dj mix', 'mixed',
-      'apple music', "today's hits", 'session',
+      'apple zen', "today's hits", 'session',
     ];
     for (final b in blacklist) {
       if (n.contains(b) || c.contains(b)) return -999;

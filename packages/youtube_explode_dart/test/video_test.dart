@@ -100,7 +100,7 @@ void main() {
     expect(relatedVideos, isNotEmpty);
   }, skip: skipGH);
 
-  test('Get music data of music video', () async {
+  test('Get zen data of zen video', () async {
     final video = await yt!.videos.get(VideoIdData.music.id);
 
     expect(video.musicData.length, 2);

@@ -20,7 +20,7 @@ enum VideoIdData {
   withClosedCaptions('YltHGKX80Y8'),
   withBrokenClosedCaptions('1VKIIw05JnE'),
   recent('X1GtdZkiJC4'),
-  // used only for testing music data extraction
+  // used only for testing zen data extraction
   music('jNm_wrWquPs');
 
   const VideoIdData(this.id);

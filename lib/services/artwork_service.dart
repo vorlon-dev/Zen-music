@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 /// proper square album covers and raises resolution.
 ///
 /// YouTube serves square crops of any thumbnail by swapping the filename
-/// (hq720 → hq1200 etc. keeps aspect, but the music catalog exposes
+/// (hq720 → hq1200 etc. keeps aspect, but the zen catalog exposes
 /// square crops through the "maxresdefault"-style names). For songs
 /// resolved from YTMusic, the thumbnails already carry the square crop
 /// in the "w1200-h1200"-style URLs — this service rewrites those, and
@@ -28,7 +28,7 @@ class ArtworkService {
     String candidate = rawUrl;
 
     // YTMusic catalog URLs sometimes embed a rectangle size — rewrite
-    // to the square variant YouTube generates for music covers.
+    // to the square variant YouTube generates for zen covers.
     candidate = candidate
         .replaceAll(RegExp(r'w\d+-h\d+'), 'w1200-h1200')
         .replaceAll(RegExp(r'=w\d+-h\d+.*$'), '=w1200-h1200');

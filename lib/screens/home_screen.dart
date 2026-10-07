@@ -271,7 +271,7 @@ class _HomeTabState extends State<HomeTab> {
       final hitsF = _homeService.getBiggestHits();
       final ytF = _homeService.getYtTrendingSongs();
       final ytmHotF = _homeService.getYtmShelf('top hits this week');
-      final ytmFreshF = _homeService.getYtmShelf('new music this week', limit: 12);
+      final ytmFreshF = _homeService.getYtmShelf('new zen this week', limit: 12);
       final recommendedF = _homeService.getRecommendedToday();
       final personalF =
       _homeService.getPersonalizedVideos(_recentlyPlayed.take(3).toList());
@@ -593,7 +593,7 @@ class _HomeTabState extends State<HomeTab> {
           ),
           if (_ytmFresh.isNotEmpty)
             MediaShelfRow(
-              title: 'Fresh music',
+              title: 'Fresh zen',
               items: [for (final s in _ytmFresh) ShelfItem.fromSong(s)],
               onTapItem: (i) => _playSong(_ytmFresh[i]),
               onShuffle: () => _shufflePlay(_ytmFresh),

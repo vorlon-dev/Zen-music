@@ -27,7 +27,7 @@ class ExtensionBridge {
     return Map<String, dynamic>.from(r);
   }
 
-  /// Selects the active music extension. Returns true on success;
+  /// Selects the active zen extension. Returns true on success;
   /// readiness arrives via search working afterwards.
   static Future<bool> select(String id) async {
     try {

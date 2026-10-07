@@ -167,7 +167,7 @@ class YtmArtistService {
   }
 
   /// Full artist OR plain-channel page. Strategy:
-  ///   1. Home-tab browse (ONE call) — header, music shelves, and any
+  ///   1. Home-tab browse (ONE call) — header, zen shelves, and any
   ///      videos the home layout carries.
   ///   2. Only when [videosTab] is set AND nothing was found, a second
   ///      browse requests the channel's Videos tab explicitly.
@@ -182,7 +182,7 @@ class YtmArtistService {
     final header = _parseArtistHeader(root);
     var topSongs = _parseShelfSongs(root, limit: 25);
     if (topSongs.isEmpty) {
-      // Not a YT Music artist page (no music shelf) — try the plain
+      // Not a YT Music artist page (no zen shelf) — try the plain
       // YouTube-channel shapes in this same response.
       topSongs = _scanChannelVideos(root, header?.name ?? '');
     }
@@ -531,7 +531,7 @@ class YtmArtistService {
   }
 
   /// Text from either runs (joined) or simpleText — covers both the
-  /// music and plain-channel renderer vocabularies.
+  /// zen and plain-channel renderer vocabularies.
   String? _textOf(_JsonMap? node) {
     if (node == null) return null;
     final runs = runsText(node);

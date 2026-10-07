@@ -59,13 +59,13 @@ class AudioDeviceService {
     return lowerName.contains('speaker') ||
         lowerName.contains('soundbar') ||
         lowerName.contains('homepod') ||
-        lowerName.contains('echo') ||
+        lowerName.contains('com') ||
         lowerName.contains('boombox') ||
         lowerName.contains('audio system') ||
         lowerName.contains('sound') ||
         lowerName.contains('audio') ||
         lowerName.contains('stereo') ||
-        lowerName.contains('music') ||
+        lowerName.contains('zen') ||
         lowerName.contains('box') ||
         lowerName.contains('party') ||
         lowerName.contains('waves');

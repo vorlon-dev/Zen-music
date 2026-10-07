@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/song.dart';
+import 'dsp_service.dart';
 
 class StorageService {
   static const _historyBoxName = 'search_history';
@@ -10,6 +11,8 @@ class StorageService {
   static const _likesBoxName = 'liked_songs';
   static const _userPlaylistsBoxName = 'user_playlists';
   static const _listeningStatsBoxName = 'listening_stats';
+  // EQ (parametric) profiles — new box; 'search_history' untouched.
+  static const _eqProfilesBoxName = 'eq_profiles';
 
   static const _maxHistory = 50;
   static const _maxQueries = 10;
@@ -22,6 +25,7 @@ class StorageService {
   late Box<String> _likesBox;
   late Box<String> _userPlaylistsBox;
   late Box<String> _listeningStatsBox;
+  late Box<String> _eqProfilesBox;
 
   /// Must be called once at startup.
   Future<void> init() async {
@@ -33,6 +37,7 @@ class StorageService {
     _likesBox = await Hive.openBox<String>(_likesBoxName);
     _userPlaylistsBox = await Hive.openBox<String>(_userPlaylistsBoxName);
     _listeningStatsBox = await Hive.openBox<String>(_listeningStatsBoxName);
+    _eqProfilesBox = await Hive.openBox<String>(_eqProfilesBoxName);
   }
 
   // ═════════════════════════════════════════════
@@ -371,6 +376,50 @@ class StorageService {
       _listeningStatsBox.put('stats', jsonEncode(stats));
 
   Future<void> clearListeningStats() => _listeningStatsBox.clear();
+
+  // ═════════════════════════════════════════════
+  // PARAMETRIC EQ PROFILES (eq_profiles box)
+  // ═════════════════════════════════════════════
+
+  List<EqProfile> getEqProfiles() {
+    final out = <EqProfile>[];
+    for (final key in _eqProfilesBox.keys) {
+      try {
+        final map = jsonDecode(_eqProfilesBox.get(key) as String)
+        as Map<String, dynamic>;
+        out.add(EqProfile.fromJson(map, fallbackId: key as String));
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  Future<void> saveEqProfile(EqProfile profile) =>
+      _eqProfilesBox.put(profile.id, jsonEncode(profile.toJson()));
+
+  Future<void> deleteEqProfile(String id) => _eqProfilesBox.delete(id);
+
+  EqProfile? getActiveEqProfile() {
+    for (final p in getEqProfiles()) {
+      if (p.isActive) return p;
+    }
+    return null;
+  }
+
+  /// Marks [id] as the single active profile; null deactivates all.
+  Future<void> setActiveEqProfile(String? id) async {
+    for (final key in _eqProfilesBox.keys) {
+      final raw = _eqProfilesBox.get(key);
+      if (raw == null) continue;
+      try {
+        final map = jsonDecode(raw) as Map<String, dynamic>;
+        final isActive = id != null && key == id;
+        if ((map['isActive'] as bool? ?? false) != isActive) {
+          map['isActive'] = isActive;
+          await _eqProfilesBox.put(key as String, jsonEncode(map));
+        }
+      } catch (_) {}
+    }
+  }
 }
 
 class LastSession {

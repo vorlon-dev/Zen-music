@@ -92,7 +92,7 @@ class _RecognizeScreenState extends State<RecognizeScreen>
           switch (st.phase) {
             case RecognitionPhase.listening:
               _pulse.repeat(reverse: true);
-              return _orb('Listening…', 'Play music near your phone');
+              return _orb('Listening…', 'Play zen near your phone');
             case RecognitionPhase.processing:
               _pulse.stop();
               return _orb('Identifying…', null,

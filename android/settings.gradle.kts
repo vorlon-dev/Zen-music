@@ -21,6 +21,13 @@ plugins {
     id("com.android.application") version "9.1.0" apply false
     id("org.jetbrains.kotlin.android") version "2.4.0" apply false
     id("org.jetbrains.kotlin.plugin.serialization") version "2.4.0" apply false
+    // JVM library plugin for the :dsp-core module. Same kotlin-gradle-plugin
+    // artifact/version as kotlin.android above — one JAR, two plugin ids.
+    id("org.jetbrains.kotlin.jvm") version "2.4.0" apply false
 }
 
 include(":app")
+include(":dsp-core")
+project(":dsp-core").projectDir = file("../dsp-core")
+include(":audio-dsp")
+project(":audio-dsp").projectDir = file("../audio-dsp")

@@ -314,7 +314,7 @@ class _ListenTogetherScreenState extends State<ListenTogetherScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            isHost ? 'You control the music' : 'Following the host',
+            isHost ? 'You control the zen' : 'Following the host',
             style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -998,7 +998,7 @@ class _ListenTogetherScreenState extends State<ListenTogetherScreen> {
           _Step('2. Join a friend',
               'Enter their room code to join their session instantly.'),
           _Step('3. Listen in sync',
-              'The host controls the music — everyone hears the same song at the same moment.'),
+              'The host controls the zen — everyone hears the same song at the same moment.'),
         ],
       ),
     );

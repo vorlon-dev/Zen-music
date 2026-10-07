@@ -11,7 +11,6 @@ import '../models/song.dart';
 import '../services/appearance_prefs.dart';
 import '../services/extension_bridge.dart';
 import '../services/listening_stats_service.dart';
-import '../services/spotify_bridge.dart';
 import '../services/update_service.dart';
 import '../theme/spotify_theme.dart';
 import '../utilities/zen_transitions.dart';
@@ -29,7 +28,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool? _spotifyConnected;
   int _cacheCount = 0;
   int _historyCount = 0;
   String _audioQuality = 'high';
@@ -57,7 +55,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     await AppearancePrefs.load();
-    final connected = await SpotifyBridge.hasCachedCredentials();
     final cache = await storage.getUrlCacheSize();
     final history = storage.getPlayedHistory().length;
     final extensions = await ExtensionBridge.list();
@@ -67,7 +64,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     if (!mounted) return;
     setState(() {
-      _spotifyConnected = connected;
       _cacheCount = cache;
       _historyCount = history;
       _audioQuality = storage.getAudioQuality();
@@ -801,30 +797,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ]),
-          _category('Spotify', FluentIcons.music_note_2_24_regular, [
-            _prefRow(
-              FluentIcons.music_note_2_24_regular,
-              'Spotify account',
-              _spotifyConnected == null
-                  ? 'Checking...'
-                  : (_spotifyConnected!
-                  ? 'Connected — tap to disconnect'
-                  : 'Not connected — engine parked'),
-              _spotifyConnected == null
-                  ? null
-                  : () {
-                if (_spotifyConnected!) {
-                  _confirm('Disconnect Spotify',
-                      'Remove stored Spotify credentials?', () async {
-                        await SpotifyBridge.logout();
-                        _toast('Spotify disconnected');
-                        _load();
-                      });
-                } else {
-                  _toast('Spotify streaming is parked — connect later');
-                }
-              },
-            ),
+          _category('Import', FluentIcons.arrow_upload_24_regular, [
             _prefRow(
               FluentIcons.arrow_upload_24_regular,
               'Import Spotify playlist',

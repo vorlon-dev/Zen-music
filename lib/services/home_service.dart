@@ -85,7 +85,7 @@ class HomeService {
   }
 
   /// YT Music songs-shelf search — real track rows from YouTube Music
-  /// for editorial-style queries ("top hits", "new music"...).
+  /// for editorial-style queries ("top hits", "new zen"...).
   Future<List<Song>> getYtmShelf(String query, {int limit = 12}) async {
     try {
       return await _ytm.searchSongs(query, limit: limit);
@@ -166,7 +166,7 @@ class HomeService {
     await _ensureExtractorInit();
     try {
       final page = await _extractor.search(
-        'trending music videos',
+        'trending zen videos',
         filter: SearchFilter.musicVideos,
       );
       for (final item in page.items) {
@@ -216,7 +216,7 @@ class HomeService {
     await _ensureExtractorInit();
     try {
       final page = await _extractor.search(
-        'recommended music today',
+        'recommended zen today',
         filter: SearchFilter.musicVideos,
       );
       final songs = <Song>[];

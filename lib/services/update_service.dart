@@ -34,11 +34,11 @@ class UpdateService {
   static final UpdateService instance = UpdateService._();
 
   /// Your repo, "owner/name".
-  static const _repo = 'vorlon-dev/Zen-music';
+  static const _repo = 'vorlon-dev/Zen-zen';
 
   static bool _checkedThisSession = false;
   final http.Client _client = http.Client();
-  static const _channel = MethodChannel('com.zen.music.install_apk');
+  static const _channel = MethodChannel('com.zen.zen.install_apk');
 
   // ═══════════════════════════════════════════
   // PERSISTED DOWNLOAD CACHE

@@ -72,7 +72,7 @@ void main() {
     }
   });
 
-  test('Get videos of YT music playlist', () async {
+  test('Get videos of YT zen playlist', () async {
     final videos = await yt!.playlists
         .getVideos('RDCLAK5uy_m9Rw_g5eCJtMhuRgP1eqU3H-XW7UL6uWQ')
         .toList();

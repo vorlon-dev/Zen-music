@@ -151,7 +151,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   // ═════════════════════════════════════════════
   // STRICT SOURCE POLICY — resolve non-JioSaavn songs to proper
-  // music-catalog songs (JioSaavn 320kbps / YTMusic song) before
+  // zen-catalog songs (JioSaavn 320kbps / YTMusic song) before
   // playing. The whole queue is resolved ahead in the background, so
   // no raw YouTube entries (16:9 thumbnails, video-only sources) stay
   // in the queue.
@@ -175,7 +175,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _strictSources = enabled;
   }
 
-  /// Resolves [song] to a proper music-catalog song when needed, swaps
+  /// Resolves [song] to a proper zen-catalog song when needed, swaps
   /// it into the queue at [index], and returns the song to play.
   Future<Song> _resolveSongSource(Song song, int index) async {
     if (followRemote || song.isFromJiosaavn || storage.getOfflineMode()) {
@@ -919,7 +919,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     final generation = ++_loadGeneration;
     await _abortCrossfade();
     _currentIndex = index;
-    // STRICT SOURCE POLICY: resolve to a proper music-catalog song
+    // STRICT SOURCE POLICY: resolve to a proper zen-catalog song
     // (JioSaavn / YTMusic) BEFORE the player shows it, so the artwork
     // is the 1:1 album art and the stream is the high-quality version.
     final song = await _resolveSongSource(_queue[index], index);

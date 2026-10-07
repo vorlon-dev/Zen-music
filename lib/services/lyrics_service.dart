@@ -119,7 +119,7 @@ class LyricsService {
     var t = raw;
     final patterns = [
       RegExp(
-          r'\s*[\(\[]\s*(official|lyric|audio|video|hd|4k|mv|music video)[^\)\]]*[\)\]]',
+          r'\s*[\(\[]\s*(official|lyric|audio|video|hd|4k|mv|zen video)[^\)\]]*[\)\]]',
           caseSensitive: false),
       RegExp(
           r'\s*[\(\[]\s*(remix|extended|edit|version)[^\)\]]*[\)\]]',

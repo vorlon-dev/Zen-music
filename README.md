@@ -174,7 +174,7 @@ ZenMusic targets **Android only**.
 
 ```bash
 git clone https://github.com/vorlon-dev/Zen-music.git
-cd Zen-music
+cd Zen-zen
 flutter pub get
 flutter run                  # with a connected Android device or emulator
 ```

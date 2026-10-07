@@ -19,7 +19,7 @@ class WelcomeDialog {
   static const _instagramUrl = 'https://instagram.com/neod.evx';
   static const _instagramHandle = '@neod.evx';
   static const _githubUrl = 'https://github.com/vorlon-dev';
-  static const _repoUrl = 'https://github.com/vorlon-dev/Zen-music';
+  static const _repoUrl = 'https://github.com/vorlon-dev/Zen-zen';
 
   static const _shownKey = 'welcome_shown_v1';
 

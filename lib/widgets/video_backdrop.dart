@@ -25,7 +25,7 @@ import 'package:video_player/video_player.dart';
 ///   (only while ≥1.5s is buffered ahead), 0.9x when ahead, back to
 ///   1.0x when aligned. No flush, no fetch spike, visually seamless.
 /// - Hard seeks happen ONLY for explicit audio jumps (slider, host
-///   seek, crossfade, track change — echo-guarded) and drift past
+///   seek, crossfade, track change — com-guarded) and drift past
 ///   4s. No corrections inside 2s of a rebuffer, ever.
 /// - The AUDIO position is extrapolated to "now" between stream
 ///   events (a frozen sample vs a live video clock manufactured
@@ -285,7 +285,7 @@ class _VideoBackdropState extends State<VideoBackdrop> {
 
     final absJump = jump.abs();
     if (absJump <= const Duration(milliseconds: 1200)) {
-      // Normal playback tick — resets the echo window.
+      // Normal playback tick — resets the com window.
       _lastJumpForward = null;
       return;
     }
@@ -294,7 +294,7 @@ class _VideoBackdropState extends State<VideoBackdrop> {
     final now = DateTime.now();
 
     // Boomerang guard: a huge jump in the OPPOSITE direction within
-    // 1.5s of the previous one is the echo of a stale stream tick,
+    // 1.5s of the previous one is the com of a stale stream tick,
     // not a user action. Skip it.
     final isEcho = _lastJumpForward != null &&
         _lastJumpForward != forward &&
@@ -304,7 +304,7 @@ class _VideoBackdropState extends State<VideoBackdrop> {
     _lastJumpAt = now;
 
     if (isEcho) {
-      debugPrint('VideoBackdrop: skipped echo jump '
+      debugPrint('VideoBackdrop: skipped com jump '
           '${forward ? "+" : "-"}${absJump.inMilliseconds}ms');
       return;
     }

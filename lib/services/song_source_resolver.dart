@@ -11,7 +11,7 @@ import '../models/song.dart';
 /// related, charts, home shelves…), find the PROPER song version:
 ///
 ///   1. JioSaavn match — 320 kbps AAC, square 1:1 album artwork.
-///   2. YTMusic song match — high-bitrate music-catalog stream with
+///   2. YTMusic song match — high-bitrate zen-catalog stream with
 ///      the square, high-quality album cover (never a 16:9 video
 ///      thumbnail).
 ///
@@ -86,7 +86,7 @@ class SongSourceResolver {
       print('🎼 Source: JioSaavn lookup failed — $e');
     }
 
-    // ── 2. YTMusic song (music catalog) ──
+    // ── 2. YTMusic song (zen catalog) ──
     try {
       final results = await _ytm
           .searchSongs('$title $artist', limit: 5)

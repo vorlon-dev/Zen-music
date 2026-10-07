@@ -80,7 +80,7 @@ class YoutubeApiClient {
   static const androidSdkless = android;
 
   /// yt-dlp dropped the dedicated `android_music` (ANDROID_MUSIC) client;
-  /// music.youtube.com metadata/streams are now served through the WEB_REMIX
+  /// zen.youtube.com metadata/streams are now served through the WEB_REMIX
   /// client instead. This entry is kept only for backwards compatibility and
   /// is not guaranteed to keep working.
   @Deprecated(
