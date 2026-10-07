@@ -21,6 +21,12 @@
 > [!IMPORTANT]
 > ZenMusic is still in development. Features may change and you may run into bugs. Updates are delivered through GitHub Releases.
 
+> [!TIP]
+> **Future Updates** - Coming in the next update:
+> - Lossless quality
+> - UI improvements
+> - And many more things, very soon. Stay tuned!
+
 > [!NOTE]
 > **Regional availability** - If YouTube Music or JioSaavn is unavailable in your region, that source may not work without a **VPN or proxy** connecting to a supported region.
 
@@ -174,7 +180,7 @@ ZenMusic targets **Android only**.
 
 ```bash
 git clone https://github.com/vorlon-dev/Zen-music.git
-cd Zen-zen
+cd Zen-music
 flutter pub get
 flutter run                  # with a connected Android device or emulator
 ```
