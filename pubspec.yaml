@@ -67,6 +67,7 @@ dependencies:
   url_launcher: ^6.3.2
   device_info_plus: ^13.2.0
   stream_transform: ^2.1.2
+  google_fonts: ^9.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -23,6 +23,15 @@ const _readChunkSize = 64 * 1024;
 /// and a slow network moment stops being audible.
 ///
 /// The buffer file is dropped as soon as another song takes over.
+///
+/// LENGTH CONTRACT (do not regress): when [totalBytes] is known (> 0),
+/// the response promises exactly that many bytes — a download that ends
+/// SHORT must throw, never return silently. just_audio enforces the
+/// declared length and throws an UNHANDLED "No content even though
+/// contentLength was specified" when the stream ends early (the
+/// dead-URL 402-spam bug). When totalBytes is unknown (HEAD failed,
+/// e.g. an already-dead 410 URL), lengths are declared null instead
+/// and the stream simply ends when the data does.
 // just_audio still marks its byte-serving source API experimental. It is
 // the only way to feed the player from something other than a URL or a
 // finished file, so the warning is accepted here.
@@ -68,12 +77,16 @@ class BufferedStreamAudioSource extends StreamAudioSource {
     _ensureDownloadStarted();
 
     final from = start ?? 0;
-    final to = end ?? totalBytes;
+    // Known length: serve the requested window. Unknown length (HEAD
+    // failed / dead URL): declare null lengths and stream until the
+    // data ends — a zero-length promise is a guaranteed violation.
+    final known = totalBytes > 0;
+    final to = known ? (end ?? totalBytes) : null;
 
     // ignore: experimental_member_use
     return StreamAudioResponse(
-      sourceLength: totalBytes,
-      contentLength: to - from,
+      sourceLength: known ? totalBytes : null,
+      contentLength: known ? (to! - from) : null,
       offset: from,
       stream: _read(from, to),
       contentType: 'audio/mpeg',
@@ -129,9 +142,11 @@ class BufferedStreamAudioSource extends StreamAudioSource {
       // Ranged download — the exact mechanism that makes YouTube serve
       // bytes faster than a single long request.
       var position = 0;
-      while (position < totalBytes) {
+      while (totalBytes <= 0 || position < totalBytes) {
         if (_discarded) return;
-        final end = min(position + _readChunkSize * 8, totalBytes) - 1;
+        final end = totalBytes > 0
+            ? min(position + _readChunkSize * 8, totalBytes) - 1
+            : position + _readChunkSize * 8;
         final request = http.Request('GET', Uri.parse(streamUrl))
           ..headers.addAll({
             ...headers,
@@ -158,6 +173,10 @@ class BufferedStreamAudioSource extends StreamAudioSource {
         // If the server ignored the Range header and sent the whole
         // body, don't loop forever.
         if (response.statusCode == 200) break;
+        // Unknown total: one window at a time until the server says
+        // the range is beyond the end (416) or the stream runs dry —
+        // the read side ends the moment _downloadDone is set.
+        if (totalBytes <= 0) break;
       }
 
       await handle.flush();
@@ -172,13 +191,14 @@ class BufferedStreamAudioSource extends StreamAudioSource {
     }
   }
 
-  Stream<List<int>> _read(int from, int to) async* {
+  /// Streams bytes from [from] to [to] (null = until the data ends).
+  Stream<List<int>> _read(int from, int? to) async* {
     var position = from;
     var waited = Duration.zero;
     RandomAccessFile? handle;
 
     try {
-      while (position < to) {
+      while (to == null || position < to) {
         if (_discarded) return;
         if (_downloadError != null) {
           throw Exception('Stream buffer failed for $songId: $_downloadError');
@@ -186,8 +206,22 @@ class BufferedStreamAudioSource extends StreamAudioSource {
 
         final available = _downloadedBytes - position;
         if (available <= 0) {
-          // Nothing more is coming: the player has everything there is.
-          if (_downloadDone) return;
+          if (_downloadDone) {
+            if (to != null && position < to) {
+              // The download ended SHORT of the promised length (a
+              // dead URL serving a truncated body, or a lying HEAD
+              // length). Returning silently would violate the
+              // response contract — just_audio then throws an
+              // UNHANDLED "No content even though contentLength…".
+              // Surface it as a proper playback error instead: the
+              // handler's retry loop catches it, detects the dead
+              // URL, busts the caches and re-resolves fresh.
+              throw Exception(
+                  'Stream buffer ended early for $songId: '
+                      'got $position of $to bytes');
+            }
+            return;
+          }
           if (waited >= _readStallTimeout) {
             throw TimeoutException('Stream buffer stalled for $songId');
           }
@@ -201,7 +235,8 @@ class BufferedStreamAudioSource extends StreamAudioSource {
         await handle.setPosition(position);
 
         final bytes = await handle.read(
-          min(min(available, to - position), _readChunkSize),
+          min(min(available, (to ?? position + _readChunkSize) - position),
+              _readChunkSize),
         );
         if (bytes.isEmpty) {
           await Future<void>.delayed(_readPollInterval);

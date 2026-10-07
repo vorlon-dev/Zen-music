@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/song.dart';
 import 'innertubex_bridge.dart';
+import '../utilities/format_utils.dart';
 
 typedef _JsonMap = Map<String, dynamic>;
 
@@ -23,6 +24,10 @@ class YtmHomeChip {
 /// the WHOLE response for musicPlayButtonRenderer nodes (each has
 /// playNavigationEndpoint → watchEndpoint → videoId) and pair with
 /// musicMultiRowListItemRenderer titles by order (counts match 1:1).
+///
+/// STATUS: DORMANT — the chips UI was rolled back; this client is
+/// kept for a future revival. Titles are format-cleaned via
+/// formatSongTitle at both song-creation points.
 class YtmHomeChipsService {
   static const _base = 'https://music.youtube.com/youtubei/v1';
   static const _apiKey = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30';
@@ -188,7 +193,7 @@ class YtmHomeChipsService {
             '';
         songs.add(Song(
           id: vid,
-          title: title,
+          title: formatSongTitle(title),
           artist: artist.isNotEmpty ? artist : 'Unknown',
           thumbnail: art.isNotEmpty
               ? art
@@ -277,7 +282,7 @@ class YtmHomeChipsService {
 
     return Song(
       id: videoId,
-      title: title,
+      title: formatSongTitle(title),
       artist: artist,
       thumbnail: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
       duration: _parseDuration(fixedColumnText(item)) ?? Duration.zero,

@@ -5,7 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt_explode;
 import '../models/song.dart';
 import 'jiosaavn_service.dart';
-
+import 'qobuz_service.dart';
+import '../utilities/format_utils.dart';
 class VideoStreamResult {
   final String url;
   final Map<String, String> headers;
@@ -32,6 +33,7 @@ class YoutubeService {
   final _extractor = YtExtractor();
   final _yt = yt_explode.YoutubeExplode();
   final _jiosaavn = JiosaavnService();
+  final _qobuz = QobuzService();
   final _probe = http.Client();
   final _ytmClient = http.Client();
 
@@ -223,7 +225,7 @@ class YoutubeService {
     'context': {
       'client': {
         'clientName': 'WEB_REMIX',
-        'clientVersion': '1.20240101.01.00',
+        'clientVersion': '1.20260818.01.00',
         'hl': 'en',
       },
     },
@@ -305,7 +307,7 @@ class YoutubeService {
 
         songs.add(Song(
           id: vid,
-          title: title,
+          title: formatSongTitle(title),
           artist: artist,
           thumbnail: thumb,
           duration: duration ?? Duration.zero,
@@ -373,7 +375,7 @@ class YoutubeService {
         if (vid == null) continue;
         combined.add(Song(
           id: vid,
-          title: item.name,
+          title: formatSongTitle(item.name),
           artist: item.uploaderName ?? 'Unknown',
           thumbnail: 'https://i.ytimg.com/vi/$vid/maxresdefault.jpg',
           duration: Duration(seconds: item.duration ?? 0),
@@ -395,7 +397,7 @@ class YoutubeService {
       for (final v in results) {
         songs.add(Song(
           id: v.id.value,
-          title: v.title,
+          title: formatSongTitle(v.title),
           artist: v.author,
           thumbnail: 'https://i.ytimg.com/vi/${v.id.value}/maxresdefault.jpg',
           duration: v.duration ?? Duration.zero,
@@ -449,6 +451,23 @@ class YoutubeService {
       if (url != null && url.isNotEmpty) {
         return VideoStreamResult(url, const {}, 'AAC', 320);
       }
+    }
+
+    // Tier 1.5: Qobuz lossless via the self-hosted matcher — a
+    // quality upgrade ahead of every lossy YouTube tier. Non-JioSaavn
+    // only (our id IS the YouTube id there). The client negative-
+    // caches misses (30 min) and hard-times-out at 8s, so a cold
+    // server or a catalog miss costs at most one bounded stall.
+    try {
+      final flac = await _qobuz.tryLossless(song);
+      if (flac != null) {
+        print('✅ Audio: Qobuz FLAC ok (${song.id}, '
+            '${flac.kbps ?? '?'}kbps)');
+        return VideoStreamResult(
+            flac.url, flac.headers, 'FLAC', flac.kbps);
+      }
+    } catch (_) {
+      // The lossless tier must never break the chain.
     }
 
     // Tier 2: visionOs audio-only + UA headers, quality-capped.
@@ -1065,7 +1084,7 @@ class YoutubeService {
         if (vid == null || vid == youtubeId) continue;
         songs.add(Song(
           id: vid,
-          title: item.name,
+          title: formatSongTitle(item.name),
           artist: item.uploaderName ?? 'Unknown',
           thumbnail: 'https://i.ytimg.com/vi/$vid/maxresdefault.jpg',
           duration: Duration(seconds: item.duration ?? 0),
@@ -1077,7 +1096,7 @@ class YoutubeService {
       print('getRelatedStreams failed: $e');
     }
 
-    // Tier 3: filtered zen search fallback.
+    // Tier 3: filtered search fallback.
     try {
       await _ensureExtractorInit();
       final page = await _extractor
@@ -1112,14 +1131,14 @@ class YoutubeService {
 
         songs.add(Song(
           id: vid,
-          title: item.name,
+          title: formatSongTitle(item.name),
           artist: item.uploaderName ?? 'Unknown',
           thumbnail: 'https://i.ytimg.com/vi/$vid/maxresdefault.jpg',
           duration: Duration(seconds: item.duration ?? 0),
         ));
         if (songs.length >= 20) break;
       }
-      print('↳ related fallback (zen search): ${songs.length} songs');
+      print('↳ related fallback (search): ${songs.length} songs');
       return songs;
     } catch (e) {
       print('related fallback failed: $e');
@@ -1148,6 +1167,7 @@ class YoutubeService {
   void dispose() {
     _yt.close();
     _jiosaavn.dispose();
+    _qobuz.dispose();
     _probe.close();
     _ytmClient.close();
   }

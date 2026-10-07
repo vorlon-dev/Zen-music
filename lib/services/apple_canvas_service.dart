@@ -9,7 +9,21 @@ import 'package:http/http.dart' as http;
 /// Strategy: AMP catalog search → per-result scoring (Echo's algorithm:
 /// playlist blacklisting, strict artist match, name/album/edition
 /// scoring) → `editorialVideo` HLS extraction (direct in the search
-/// result, or via the full album lookup). Results cached 24h.
+/// result, or via the full album lookup). Results cached 24h — but
+/// ONLY genuine misses ("no canvas exists"); API/token failures are
+/// never cached, so recovery is instant.
+///
+/// TOKEN HISTORY (do not regress): Apple's web player migrated from
+/// WebPlayKit JWTs (kid "WebPlayKit", iss "AMPWebPlay", served from
+/// amp-api.music.apple.com) to a NEW issuer (kid rotates, e.g.
+/// "LT2ZDZSXNQ", iss "5IKPP2IECQ") served from
+/// amp-api-edge.music.apple.com. Every scraper anchored to the old
+/// header went 401 at once. The provider below hunts BOTH formats and
+/// holds a manual override token (exp ~Dec 2026).
+///
+/// If a fresh-format token ever 401s on the primary host, flip
+/// [_ampBase] to 'https://amp-api-edge.music.apple.com' — the edge
+/// host serves the new issuer's tokens natively.
 class AppleCanvasService {
   AppleCanvasService._();
   static final AppleCanvasService instance = AppleCanvasService._();
@@ -44,10 +58,16 @@ class AppleCanvasService {
     if (hit != null && hit.expires.isAfter(DateTime.now())) {
       return hit.value;
     }
-    final value =
+    final result =
     await _searchAndFetch(_norm(song), _norm(artist), album, 'songs');
-    _cache[key] = _CacheEntry(value, DateTime.now().add(_ttl));
-    return value;
+    // Cache ONLY genuine outcomes: a hit, or a real 200-search that
+    // found no canvas. API/token failures are NOT cached — the next
+    // song (or a retried one) must be able to succeed once the token
+    // recovers.
+    if (result.ok) {
+      _cache[key] = _CacheEntry(result.art, DateTime.now().add(_ttl));
+    }
+    return result.art;
   }
 
   Future<CanvasArtwork?> getByAlbumArtist(String album, String artist) async {
@@ -56,15 +76,19 @@ class AppleCanvasService {
     if (hit != null && hit.expires.isAfter(DateTime.now())) {
       return hit.value;
     }
-    final value =
+    final result =
     await _searchAndFetch(_norm(album), _norm(artist), album, 'albums');
-    _cache[key] = _CacheEntry(value, DateTime.now().add(_ttl));
-    return value;
+    if (result.ok) {
+      _cache[key] = _CacheEntry(result.art, DateTime.now().add(_ttl));
+    }
+    return result.art;
   }
 
   // ── Search + resolve (Echo's searchAndFetchMotion) ──
 
-  Future<CanvasArtwork?> _searchAndFetch(
+  /// (art, ok): ok=false means infrastructure failure (token/API) —
+  /// never cached. ok=true + art=null means a genuine miss — cached.
+  Future<({CanvasArtwork? art, bool ok})> _searchAndFetch(
       String term, String artist, String? album, String type) async {
     try {
       var query = term.toLowerCase().contains(artist.toLowerCase())
@@ -89,15 +113,25 @@ class AppleCanvasService {
       final resp = await _client
           .get(uri, headers: _headers(token))
           .timeout(const Duration(seconds: 25));
+      if (resp.statusCode == 401 || resp.statusCode == 403) {
+        // Token rejected — drop the cached token so the next attempt
+        // re-scrapes instead of reusing the dead one.
+        _AppleTokenProvider.invalidate();
+        print('AppleCanvas: search rejected (${resp.statusCode}) — '
+            'token invalidated for re-scrape');
+        return (art: null, ok: false);
+      }
       if (resp.statusCode != 200) {
         print('AppleCanvas: search failed ${resp.statusCode}');
-        return null;
+        return (art: null, ok: false);
       }
 
       final root = jsonDecode(resp.body) as Map<String, dynamic>;
       final results =
       ((root['results'] as Map?)?[type] as Map?)?['data'] as List?;
-      if (results == null || results.isEmpty) return null;
+      if (results == null || results.isEmpty) {
+        return (art: null, ok: true);
+      }
 
       // Score results, best first.
       final scored = <MapEntry<int, Map<String, dynamic>>>[];
@@ -148,7 +182,7 @@ class AppleCanvasService {
           }
           albumId ??= attributes['collectionId'] as String?;
           // Fallback: parse from the item URL
-          // (zen.apple.com/region/album/name/ID?i=songId).
+          // (music.apple.com/region/album/name/ID?i=songId).
           if (albumId == null || albumId.isEmpty) {
             final url = attributes['url'] as String?;
             if (url != null) {
@@ -174,12 +208,15 @@ class AppleCanvasService {
             final collName = (attributes['collectionName'] ?? '') as String;
             final resolvedAlbum = objType == 'songs' ? collName : resultName;
             print('AppleCanvas: direct editorialVideo for "$resultName"');
-            return CanvasArtwork(
+            return (
+            art: CanvasArtwork(
               name: resultName,
               artist: resultArtist,
               albumId: albumId,
               albumName: resolvedAlbum,
               animated: hls,
+            ),
+            ok: true,
             );
           }
         }
@@ -191,13 +228,14 @@ class AppleCanvasService {
           titleOverride: objType == 'songs' ? resultName : null,
           artistOverride: objType == 'songs' ? resultArtist : null,
         );
-        if (fetched != null) return fetched;
+        if (fetched != null) return (art: fetched, ok: true);
       }
-      print('AppleCanvas: no canvas for "$term" after ${scored.length} results');
-      return null;
+      print(
+          'AppleCanvas: no canvas for "$term" after ${scored.length} results');
+      return (art: null, ok: true);
     } catch (e) {
       print('AppleCanvas: search error for "$term": $e');
-      return null;
+      return (art: null, ok: false);
     }
   }
 
@@ -223,6 +261,9 @@ class AppleCanvasService {
           .timeout(const Duration(seconds: 25));
       if (resp.statusCode != 200) {
         print('AppleCanvas: album fetch failed $albumId (${resp.statusCode})');
+        if (resp.statusCode == 401 || resp.statusCode == 403) {
+          _AppleTokenProvider.invalidate();
+        }
         return null;
       }
       final root = jsonDecode(resp.body) as Map<String, dynamic>;
@@ -239,7 +280,7 @@ class AppleCanvasService {
       final nameLower = albumName.toLowerCase();
       const blacklist = [
         'playlist', 'set list', 'essentials', 'dj mix', 'mixed',
-        'apple zen', "today's hits", 'session',
+        'apple music', "today's hits", 'session',
       ];
       for (final b in blacklist) {
         if (nameLower.contains(b)) {
@@ -278,8 +319,8 @@ class AppleCanvasService {
 
   Map<String, String> _headers(String token) => {
     'Authorization': 'Bearer $token',
-    'Origin': 'https://zen.apple.com',
-    'Referer': 'https://zen.apple.com/',
+    'Origin': 'https://music.apple.com',
+    'Referer': 'https://music.apple.com/',
     'User-Agent': _ua,
   };
 
@@ -316,7 +357,7 @@ class AppleCanvasService {
     final c = resultCollection.toLowerCase();
     const blacklist = [
       'playlist', 'set list', 'essentials', 'dj mix', 'mixed',
-      'apple zen', "today's hits", 'session',
+      'apple music', "today's hits", 'session',
     ];
     for (final b in blacklist) {
       if (n.contains(b) || c.contains(b)) return -999;
@@ -407,38 +448,184 @@ class _CacheEntry {
   final DateTime expires;
 }
 
-/// Echo's AppleMusicTokenProvider: scrapes the web player's index.js for
-/// the public unauthenticated JWT, caches it, falls back to a pinned
-/// token on failure.
+/// Apple web-player JWT provider.
+///
+/// FORMAT MIGRATION (Oct 2026): the web player stopped using WebPlayKit
+/// JWTs (kid "WebPlayKit", iss "AMPWebPlay") and moved to a rotating-kid
+/// issuer ("LT2ZDZSXNQ" era, iss "5IKPP2IECQ") served via
+/// amp-api-edge.music.apple.com. The scrape below matches BOTH header
+/// shapes:
+///   1. Legacy: {"alg":"ES256","typ":"JWT","kid":"WebPlayKit"}
+///   2. Current: {"typ":"JWT","alg":"ES256","kid":"<rotating>"} —
+///      anchored on the stable typ/alg/kid-key prefix, so future kid
+///      rotations keep matching. Payload validated for an apple.com
+///      root origin + future exp.
+///
+/// The manual override holds a fresh-format token (exp ~Dec 11 2026)
+/// captured from the live web player — it takes precedence over
+/// scraping while valid.
 class _AppleTokenProvider {
+  /// Manual override: a fresh JWT captured from beta.music.apple.com
+  /// (DevTools → Network → amp-api → Authorization header). Expires
+  /// ~Dec 11, 2026 — when it does, the validator drops it and the
+  /// scrape strategies take over automatically.
+  static String? _manualToken =
+      'eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6IkxUMlpEWlNYTlEifQ.eyJpc3MiOiI1SUtQUDJJRUNRIiwiaWF0IjoxNzkwODk0NTM2LCJleHAiOjE3OTY5NDI1MzYsInJvb3RfaHR0cHNfb3JpZ2luIjpbImFwcGxlLmNvbSJdfQ.KJTFfyPQziYsFmwsSChaikYjjlnSwgXlrH4Y9YkO8DgwSwQWakhXtEfMwXssA6gbhG69Mqigy3pofEH_7MQQAg';
+
   static String? _cached;
+  static DateTime _scrapeBlockedUntil =
+  DateTime.fromMillisecondsSinceEpoch(0);
   static final _client = http.Client();
 
-  static const _fallback =
-      'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IldlYlBsYXlLaWQifQ.eyJpc3MiOiJBTVBXZWJQbGF5IiwiaWF0IjoxNzc0NDU2MzgyLCJleHAiOjE3ODE3MTM5ODIsInJvb3RfaHR0cHNfb3JpZ2luIjpbImFwcGxlLmNvbSJdfQ.4n8qYF4qa18sL1E0G9A3qX35cD8wQ-IJcS9Bh8ZT8JV_yLBtVq46B-9-2ZS3EvWHuw3yK9BYFYAhAdTaDm38vQ';
+  static const _hosts = [
+    'https://beta.music.apple.com',
+    'https://music.apple.com',
+  ];
+
+  /// Legacy WebPlayKit JWTs — fixed base64url header.
+  static final RegExp _jwtLegacyRe = RegExp(
+      r'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IldlYlBsYXlLaWQifQ\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+');
+
+  /// Current (rotating-kid) JWTs — the header's typ/alg/kid-key prefix
+  /// is stable across kid rotations:
+  /// {"typ":"JWT","alg":"ES256","kid":"..."}
+  static final RegExp _jwtEdgeRe = RegExp(
+      r'eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6I[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+');
+
+  /// Any /assets/*.js script reference (src or href, quoted either way).
+  static final RegExp _scriptRe =
+  RegExp(r'''(?:src|href)=["']([^"']*?/assets/[^"']+?\.js)["']''');
 
   static Future<String> getToken() async {
-    if (_cached != null) return _cached!;
-    try {
-      final html = await _client
-          .get(Uri.parse('https://beta.music.apple.com'))
-          .timeout(const Duration(seconds: 15));
-      final m =
-      RegExp(r'src="(/assets/index-[^"]+\.js)"').firstMatch(html.body);
-      if (m == null) throw Exception('index.js not found');
-      final js = await _client
-          .get(Uri.parse('https://beta.music.apple.com${m.group(1)}'))
-          .timeout(const Duration(seconds: 15));
-      final tm = RegExp(
-          r'eyJ[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+')
-          .firstMatch(js.body);
-      if (tm == null) throw Exception('token not found');
-      _cached = tm.group(0)!;
-      print('AppleCanvas: token acquired');
-      return _cached!;
-    } catch (e) {
-      print('AppleCanvas: token scrape failed, using pinned fallback ($e)');
-      return _fallback;
+    final manual = _validate(_manualToken);
+    if (manual != null) return manual;
+
+    if (_cached != null) {
+      final still = _validate(_cached);
+      if (still != null) return still;
+      _cached = null; // expired (or expiring) — re-scrape
     }
+
+    if (DateTime.now().isBefore(_scrapeBlockedUntil)) {
+      throw Exception('token scrape backing off (recent failure)');
+    }
+
+    try {
+      final token = await _scrape();
+      _cached = token;
+      print('AppleCanvas: token acquired (valid '
+          '${_expiryOf(token) != null ? "until ${_expiryOf(token)}" : "— expiry unknown"})');
+      return token;
+    } catch (e) {
+      _scrapeBlockedUntil =
+          DateTime.now().add(const Duration(minutes: 10));
+      rethrow;
+    }
+  }
+
+  /// Called by the service on a 401/403 — the token looked valid but
+  /// was rejected, so drop it and let the next attempt re-scrape.
+  /// NOTE: with a valid manual token, a 401 here most likely means
+  /// Apple requires the EDGE host for this issuer — flip _ampBase in
+  /// AppleCanvasService to amp-api-edge.music.apple.com.
+  static void invalidate() {
+    _cached = null;
+  }
+
+  static Future<String> _scrape() async {
+    for (final host in _hosts) {
+      String? html;
+      try {
+        final resp = await _client
+            .get(Uri.parse(host))
+            .timeout(const Duration(seconds: 10));
+        if (resp.statusCode == 200) html = resp.body;
+      } catch (_) {}
+
+      if (html == null) continue;
+
+      // 1. Token embedded in the HTML itself (either format).
+      final direct = _validate(_findJwt(html));
+      if (direct != null) return direct;
+
+      // 2. Enumerate asset bundles from this page.
+      final scripts = <String>[];
+      for (final m in _scriptRe.allMatches(html)) {
+        final raw = m.group(1)!;
+        scripts.add(raw.startsWith('http') ? raw : '$host$raw');
+      }
+      scripts.sort((a, b) {
+        final ai = a.contains('index') ? 0 : 1;
+        final bi = b.contains('index') ? 0 : 1;
+        return ai.compareTo(bi);
+      });
+
+      var fetched = 0;
+      for (final url in scripts) {
+        if (fetched >= 8) break;
+        fetched++;
+        try {
+          final js = await _client
+              .get(Uri.parse(url))
+              .timeout(const Duration(seconds: 8));
+          final t = _validate(_findJwt(js.body));
+          if (t != null) return t;
+        } catch (_) {}
+      }
+    }
+    throw Exception(
+        'no Apple Music JWT found on any web player host '
+            '(legacy + edge patterns tried)');
+  }
+
+  static String? _findJwt(String body) {
+    return _jwtEdgeRe.firstMatch(body)?.group(0) ??
+        _jwtLegacyRe.firstMatch(body)?.group(0);
+  }
+
+  /// Returns [jwt] only if it is plausibly valid for another 24h AND
+  /// (for the edge format) carries an apple.com root origin. Unparseable
+  /// expiry → accepted; a 401 invalidates it at runtime.
+  static String? _validate(String? jwt) {
+    if (jwt == null || jwt.isEmpty) return null;
+    // Sanity: the payload must reference apple.com (both eras do).
+    try {
+      final parts = jwt.split('.');
+      if (parts.length < 2) return null;
+      var payload = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+      while (payload.length % 4 != 0) {
+        payload += '=';
+      }
+      final map = jsonDecode(utf8.decode(base64.decode(payload))) as Map;
+      final origins = map['root_https_origin'];
+      if (origins is! List || !origins.contains('apple.com')) {
+        return null;
+      }
+    } catch (_) {
+      return null;
+    }
+    final exp = _expiryOf(jwt);
+    if (exp != null &&
+        exp.isBefore(DateTime.now().add(const Duration(hours: 24)))) {
+      return null;
+    }
+    return jwt;
+  }
+
+  static DateTime? _expiryOf(String jwt) {
+    try {
+      final parts = jwt.split('.');
+      if (parts.length < 2) return null;
+      var payload = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+      while (payload.length % 4 != 0) {
+        payload += '=';
+      }
+      final json = utf8.decode(base64.decode(payload));
+      final exp = (jsonDecode(json) as Map)['exp'];
+      if (exp is num) {
+        return DateTime.fromMillisecondsSinceEpoch(exp.toInt() * 1000);
+      }
+    } catch (_) {}
+    return null;
   }
 }

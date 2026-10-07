@@ -6,16 +6,15 @@ import '../main.dart';
 import '../models/song.dart';
 import '../services/ytm_artist_service.dart';
 import '../theme/spotify_theme.dart';
-import '../widgets/artist_hero_header.dart';
 import '../widgets/wave_spinner.dart';
 import '../widgets/youtube_thumbnail.dart';
 import 'player_screen.dart';
 
-/// Artist / channel page (Echo-style hero): full-bleed artwork, stat
-/// pills, About section, connected Play/Shuffle group, ranked songs —
-/// or, when opened from a YouTube song, THAT song's real channel with
-/// its uploads. Resolution is exact (origin video id → oEmbed
-/// author_url → UC id); the fuzzy name search is only a fallback.
+/// Artist / channel page (Musify structure, ZenMusic data, Black +
+/// Oxblood): collapsing SliverAppBar with full-bleed hero artwork →
+/// About → Play/Shuffle → action row → ranked top songs → album
+/// shelves. Resolution is exact (origin video id → oEmbed author_url
+/// → UC id); the fuzzy name search is only a fallback.
 class ArtistScreen extends StatefulWidget {
   const ArtistScreen({
     super.key,
@@ -128,6 +127,29 @@ class _ArtistScreenState extends State<ArtistScreen> {
     }
   }
 
+  /// Musify's refresh button: re-run the whole load, preserving the
+  /// current page if the refresh fails.
+  Future<void> _refresh() async {
+    final previousPage = _page;
+    final previousChannel = _channelId;
+    await _load();
+    if (!mounted) return;
+    if (_notFound && previousPage != null) {
+      setState(() {
+        _page = previousPage;
+        _channelId = previousChannel;
+        _notFound = false;
+        _loading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not refresh — showing saved page'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   Future<String?> _fallbackArtistId() async {
     try {
       final ids = await _ytm.searchArtistIds(widget.artistName, limit: 1);
@@ -186,8 +208,9 @@ class _ArtistScreenState extends State<ArtistScreen> {
     return _topSongs.isEmpty ? '' : _topSongs.first.thumbnail;
   }
 
-  // Echo's transparent-app-bar rule: transparent while the first
-  // (header) item is under 100px of scroll, solid afterwards.
+  // Echo's transparent-app-bar rule: the app-bar title fades in after
+  // 100px of scroll (the SliverAppBar is pinned; the overlay buttons
+  // stay translucent over the hero).
   bool _onScrollNotification(ScrollNotification n) {
     if (n.metrics.axis != Axis.vertical) return false;
     final solid = n.metrics.pixels > 100;
@@ -205,51 +228,71 @@ class _ArtistScreenState extends State<ArtistScreen> {
           ? const Center(child: WaveSpinner(size: 26))
           : _notFound
           ? _errorView()
-          : Stack(
-        children: [
-          NotificationListener<ScrollNotification>(
-            onNotification: _onScrollNotification,
-            child: ListView(
-              padding: const EdgeInsets.only(bottom: 24),
-              children: [
-                // Hero header bleeds to the very top — it
-                // must stay OUTSIDE SafeArea (bars are
-                // hidden app-wide).
-                ArtistHeroHeader(
-                  imageUrl: _headerImage,
-                  name: _displayName,
-                  content: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (_page?.header != null)
-                        _pills(_page!.header!),
-                      if (_topSongs.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          _resolvedFromVideo
-                              ? '${_topSongs.length} videos · YouTube channel'
-                              : '${_topSongs.length} top songs · YouTube Music',
-                          style: const TextStyle(
-                            color: SpotifyColors.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                      if (_page?.header?.description != null)
-                        _about(_page!.header!.description!),
-                      const SizedBox(height: 4),
-                      _actions(),
-                    ],
+          : NotificationListener<ScrollNotification>(
+        onNotification: _onScrollNotification,
+        child: CustomScrollView(
+          slivers: [
+            // ── Collapsing hero app bar (Musify's
+            // PlaylistSliverAppBar + PlaylistHeroArtwork) ──
+            SliverAppBar(
+              pinned: true,
+              expandedHeight: 300,
+              backgroundColor: SpotifyColors.background,
+              automaticallyImplyLeading: false,
+              title: AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                opacity: _scrolled ? 1.0 : 0.0,
+                child: Text(
+                  _displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: SpotifyColors.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'PlayfairDisplay',
                   ),
                 ),
-                _trackList(),
-                for (final shelf in _page?.shelves ?? const [])
-                  _albumShelf(shelf.title, shelf.albums),
+              ),
+              leading: Padding(
+                padding: const EdgeInsets.all(8),
+                child: _circleButton(
+                  icon: Icons.arrow_back_rounded,
+                  onTap: () => Navigator.pop(context),
+                ),
+              ),
+              actions: [
+                if (_channelId != null)
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: _circleButton(
+                      icon: Icons.link_rounded,
+                      onTap: _copyLink,
+                    ),
+                  ),
+                const SizedBox(width: 4),
               ],
+              flexibleSpace: FlexibleSpaceBar(
+                background: _hero(),
+              ),
             ),
-          ),
-          _topBarOverlay(),
-        ],
+
+            // ── Header section: About + stats ──
+            SliverToBoxAdapter(child: _headerSection()),
+
+            // ── Top songs (ranked) ──
+            SliverToBoxAdapter(child: _topSongsSection()),
+
+            // ── Album shelves ──
+            for (final shelf in _page?.shelves ?? const [])
+              SliverToBoxAdapter(
+                child: _albumShelf(shelf.title, shelf.albums),
+              ),
+
+            const SliverToBoxAdapter(
+                child: SizedBox(height: 24)),
+          ],
+        ),
       ),
     );
   }
@@ -280,6 +323,267 @@ class _ArtistScreenState extends State<ArtistScreen> {
     );
   }
 
+  // ── Hero (inside the collapsing app bar) ──
+
+  Widget _hero() {
+    final image = _headerImage;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (image.isNotEmpty)
+          Image.network(
+            image,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+              color: SpotifyColors.surfaceLight,
+              child: const Icon(
+                FluentIcons.person_24_filled,
+                size: 64,
+                color: SpotifyColors.textTertiary,
+              ),
+            ),
+          )
+        else
+          Container(
+            color: SpotifyColors.surfaceLight,
+            child: const Icon(
+              FluentIcons.person_24_filled,
+              size: 64,
+              color: SpotifyColors.textTertiary,
+            ),
+          ),
+        // Bottom scrim so the name + pills read over the artwork.
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.transparent,
+                Colors.transparent,
+                Colors.black87,
+              ],
+              stops: [0.0, 0.45, 1.0],
+            ),
+          ),
+        ),
+        // Oxblood wash — the palette's signature over artwork.
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0x558E3F4B),
+                Color(0x22B9626D),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          left: 20,
+          right: 20,
+          bottom: 18,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _displayName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
+                  fontFamily: 'PlayfairDisplay',
+                  height: 1.1,
+                ),
+              ),
+              if (_page?.header != null) ...[
+                const SizedBox(height: 8),
+                _pills(_page!.header!),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Header section: About + play/shuffle + action row ──
+
+  Widget _headerSection() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_resolvedFromVideo)
+            Text(
+              '${_topSongs.length} videos · YouTube channel',
+              style: const TextStyle(
+                color: SpotifyColors.textSecondary,
+                fontSize: 12,
+              ),
+            )
+          else if (_topSongs.isNotEmpty)
+            Text(
+              '${_topSongs.length} top songs · YouTube Music',
+              style: const TextStyle(
+                color: SpotifyColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+          if (_page?.header?.description != null)
+            _about(_page!.header!.description!),
+          const SizedBox(height: 16),
+          _playbackButtons(),
+          const SizedBox(height: 12),
+          _actionRow(),
+        ],
+      ),
+    );
+  }
+
+  // ── Musify's PlaylistActionButtons: Play (filled primary) +
+  // Shuffle (tonal), side by side. ──
+
+  Widget _playbackButtons() {
+    final disabled = _topSongs.isEmpty;
+    return Row(
+      children: [
+        Expanded(
+          child: Material(
+            color:
+            disabled ? SpotifyColors.surfaceLight : SpotifyColors.green,
+            borderRadius: BorderRadius.circular(26),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(26),
+              onTap: disabled ? null : () => _playAll(),
+              child: SizedBox(
+                height: 52,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.play_arrow_rounded,
+                      size: 22,
+                      color: disabled
+                          ? SpotifyColors.textTertiary
+                          : SpotifyColors.textPrimary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      disabled
+                          ? 'Play'
+                          : (_resolvedFromVideo
+                          ? 'Play videos'
+                          : 'Play top songs'),
+                      style: TextStyle(
+                        color: disabled
+                            ? SpotifyColors.textTertiary
+                            : SpotifyColors.textPrimary,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Material(
+            color: SpotifyColors.surfaceLight,
+            borderRadius: BorderRadius.circular(26),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(26),
+              onTap: disabled ? null : () => _playAll(shuffle: true),
+              child: SizedBox(
+                height: 52,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.shuffle_rounded,
+                      size: 20,
+                      color: disabled
+                          ? SpotifyColors.textTertiary
+                          : SpotifyColors.textPrimary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Shuffle',
+                      style: TextStyle(
+                        color: disabled
+                            ? SpotifyColors.textTertiary
+                            : SpotifyColors.textPrimary,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Musify's action row (like / add / download / refresh) adapted
+  // to what ZenMusic actually supports: copy link + refresh.
+  // Artist-level like/add/download need per-artist storage we don't
+  // have — omitted honestly rather than faked. ──
+
+  Widget _actionRow() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (_channelId != null)
+          _tonalAction(
+            icon: FluentIcons.link_24_regular,
+            tooltip: 'Copy channel link',
+            onTap: _copyLink,
+          ),
+        const SizedBox(width: 10),
+        _tonalAction(
+          icon: FluentIcons.arrow_sync_24_filled,
+          tooltip: 'Refresh',
+          onTap: _refresh,
+        ),
+      ],
+    );
+  }
+
+  Widget _tonalAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: SpotifyColors.surfaceLight,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: Icon(icon, size: 22, color: SpotifyColors.textPrimary),
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Echo stat pills (subscribers / monthly listeners) ──
 
   Widget _pills(YtmArtistHeader header) {
@@ -291,13 +595,10 @@ class _ArtistScreenState extends State<ArtistScreen> {
             '${header.monthlyListeners} monthly listeners'),
     ];
     if (pills.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: pills,
-      ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: pills,
     );
   }
 
@@ -305,7 +606,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: SpotifyColors.surface,
+        color: SpotifyColors.surface.withOpacity(0.85),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -326,7 +627,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
     );
   }
 
-  // ── Echo About section — collapsible at 3 lines ──
+  // ── About section — collapsible at 3 lines ──
 
   Widget _about(String text) {
     final isLong = text.length > 160;
@@ -370,7 +671,7 @@ class _ArtistScreenState extends State<ArtistScreen> {
                 child: Text(
                   _aboutExpanded ? 'Less' : 'More',
                   style: const TextStyle(
-                    color: SpotifyColors.green,
+                    color: SpotifyColors.highlight,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
                   ),
@@ -378,63 +679,6 @@ class _ArtistScreenState extends State<ArtistScreen> {
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  // ── Floating top bar (Echo parity): translucent-circle back + link
-  // buttons always; the bar background and title fade in on scroll. ──
-
-  Widget _topBarOverlay() {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        color: _scrolled
-            ? SpotifyColors.background
-            : Colors.transparent,
-        child: SafeArea(
-          bottom: false,
-          child: SizedBox(
-            height: 56,
-            child: Row(
-              children: [
-                const SizedBox(width: 8),
-                _circleButton(
-                  icon: Icons.arrow_back_rounded,
-                  onTap: () => Navigator.pop(context),
-                ),
-                Expanded(
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 200),
-                    opacity: _scrolled ? 1.0 : 0.0,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        _displayName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: SpotifyColors.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                if (_channelId != null)
-                  _circleButton(
-                    icon: Icons.link_rounded,
-                    onTap: _copyLink,
-                  ),
-                const SizedBox(width: 8),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -460,119 +704,51 @@ class _ArtistScreenState extends State<ArtistScreen> {
     );
   }
 
-  // ── Echo connected button group: Play (green, leading rounded) +
-  // Shuffle (surface, trailing rounded), 52dp, 2dp gap. ──
+  // ── Top songs (ranked, Musify order) ──
 
-  Widget _actions() {
-    final disabled = _topSongs.isEmpty;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: Material(
-              color:
-              disabled ? SpotifyColors.surfaceLight : SpotifyColors.green,
-              borderRadius: const BorderRadius.horizontal(
-                left: Radius.circular(26),
-              ),
-              child: InkWell(
-                borderRadius: const BorderRadius.horizontal(
-                  left: Radius.circular(26),
-                ),
-                onTap: disabled ? null : () => _playAll(),
-                child: SizedBox(
-                  height: 52,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.play_arrow_rounded,
-                        size: 22,
-                        color: disabled
-                            ? SpotifyColors.textTertiary
-                            : Colors.black,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        disabled
-                            ? 'Play'
-                            : (_resolvedFromVideo
-                            ? 'Play videos'
-                            : 'Play top songs'),
-                        style: TextStyle(
-                          color: disabled
-                              ? SpotifyColors.textTertiary
-                              : Colors.black,
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 2),
-          Expanded(
-            child: Material(
-              color: SpotifyColors.surface,
-              borderRadius: const BorderRadius.horizontal(
-                right: Radius.circular(26),
-              ),
-              child: InkWell(
-                borderRadius: const BorderRadius.horizontal(
-                  right: Radius.circular(26),
-                ),
-                onTap: disabled ? null : () => _playAll(shuffle: true),
-                child: SizedBox(
-                  height: 52,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.shuffle_rounded,
-                        size: 20,
-                        color: disabled
-                            ? SpotifyColors.textTertiary
-                            : SpotifyColors.textPrimary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Shuffle',
-                        style: TextStyle(
-                          color: disabled
-                              ? SpotifyColors.textTertiary
-                              : SpotifyColors.textPrimary,
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _trackList() {
+  Widget _topSongsSection() {
+    if (_topSongs.isEmpty) return const SizedBox.shrink();
     final currentId = audioHandler.currentSong?.id;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (var i = 0; i < _topSongs.length; i++)
-            _ArtistTrackTile(
-              index: i + 1,
-              song: _topSongs[i],
-              isCurrent: currentId == _topSongs[i].id,
-              onTap: () => _playFrom(_topSongs, i),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+            child: Row(
+              children: [
+                const Icon(
+                  FluentIcons.music_note_2_24_filled,
+                  size: 16,
+                  color: SpotifyColors.highlight,
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Top songs',
+                  style: TextStyle(
+                    color: SpotifyColors.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              children: [
+                for (var i = 0; i < _topSongs.length; i++)
+                  _ArtistTrackTile(
+                    index: i + 1,
+                    song: _topSongs[i],
+                    isCurrent: currentId == _topSongs[i].id,
+                    onTap: () => _playFrom(_topSongs, i),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -587,21 +763,32 @@ class _ArtistScreenState extends State<ArtistScreen> {
     );
   }
 
-  // ── Albums / Singles shelf (Echo carousel) ──
+  // ── Album shelves (Musify's ArtistShelf layout) ──
 
   Widget _albumShelf(String title, List<YtmAlbumCard> cards) {
+    if (cards.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
-          child: Text(
-            title,
-            style: const TextStyle(
-              color: SpotifyColors.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-            ),
+          child: Row(
+            children: [
+              const Icon(
+                FluentIcons.cd_16_regular,
+                size: 16,
+                color: SpotifyColors.highlight,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: SpotifyColors.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
         ),
         SizedBox(
@@ -836,6 +1023,7 @@ class _AlbumScreenState extends State<_AlbumScreen> {
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.4,
+                    fontFamily: 'PlayfairDisplay',
                   ),
                 ),
                 if (widget.card.subtitle.isNotEmpty) ...[
@@ -877,12 +1065,13 @@ class _AlbumScreenState extends State<_AlbumScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.play_arrow_rounded,
-                                  color: Colors.black, size: 24),
+                                  color: SpotifyColors.textPrimary,
+                                  size: 24),
                               SizedBox(width: 6),
                               Text(
                                 'Play album',
                                 style: TextStyle(
-                                  color: Colors.black,
+                                  color: SpotifyColors.textPrimary,
                                   fontSize: 14,
                                   fontWeight: FontWeight.w800,
                                 ),
@@ -991,7 +1180,7 @@ class _ArtistTrackTile extends StatelessWidget {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Icon(Icons.graphic_eq_rounded,
-                          size: 20, color: SpotifyColors.green),
+                          size: 20, color: SpotifyColors.highlight),
                     ),
                   ),
               ],
@@ -1007,7 +1196,7 @@ class _ArtistTrackTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isCurrent
-                          ? SpotifyColors.green
+                          ? SpotifyColors.highlight
                           : SpotifyColors.textPrimary,
                       fontWeight: FontWeight.w600,
                       fontSize: 14,

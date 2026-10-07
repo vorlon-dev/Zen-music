@@ -35,7 +35,8 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
-class _SearchScreenState extends State<SearchScreen> {
+class _SearchScreenState extends State<SearchScreen>
+    with WidgetsBindingObserver {
   final _searchBar = TextEditingController();
   final _inputNode = FocusNode();
   final _ytm = YtMusicService();
@@ -58,8 +59,16 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Collection> _newAlbums = [];
   bool _albumsLoading = true;
 
-  // Echo quick-search overlay.
-  bool _expanded = false;
+  // ── Echo search states ──
+  // _searchActive: the bar's left icon shows a back arrow and the
+  // area below the bar shows suggestions/history INLINE (the bar
+  // itself stays a pill — Echo's current design does NOT morph the
+  // bar to full-bleed).
+  // _showSearchContent: Echo's 100ms delay so the activation settles
+  // before the suggestion list appears.
+  bool _searchActive = false;
+  bool _showSearchContent = false;
+  Timer? _contentDelay;
 
   Timer? _debounce;
   int _latestSuggestionRequest = 0;
@@ -74,9 +83,14 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _history = storage.getRecentQueries().reversed.toList();
     _searchBar.addListener(() {
       if (mounted) setState(() {});
+    });
+    // Echo: gaining focus activates search (suggestions below the bar).
+    _inputNode.addListener(() {
+      if (_inputNode.hasFocus && !_searchActive) _activateSearch();
     });
     _loadExplore();
     _loadLibrary();
@@ -84,11 +98,21 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchBar.dispose();
     _inputNode.dispose();
     _debounce?.cancel();
+    _contentDelay?.cancel();
     _homeService.dispose();
     super.dispose();
+  }
+
+  // Echo's lifecycle observer: app paused → keyboard down, focus gone.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused && mounted) {
+      _inputNode.unfocus();
+    }
   }
 
   Future<void> _loadExplore() async {
@@ -118,6 +142,30 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() => _librarySongs = merged);
   }
 
+  // ── Echo activation/deactivation ──
+
+  void _activateSearch() {
+    if (_searchActive) return;
+    setState(() => _searchActive = true);
+    // Echo's 100ms delay before the suggestion content appears.
+    _contentDelay?.cancel();
+    _contentDelay = Timer(const Duration(milliseconds: 100), () {
+      if (mounted && _searchActive) {
+        setState(() => _showSearchContent = true);
+      }
+    });
+  }
+
+  void _deactivateSearch() {
+    _contentDelay?.cancel();
+    if (!_searchActive && !_showSearchContent) return;
+    setState(() {
+      _searchActive = false;
+      _showSearchContent = false;
+    });
+    _inputNode.unfocus();
+  }
+
   Future<void> _submitSearch([String? query]) async {
     if (query != null) {
       _searchBar.text = query;
@@ -128,7 +176,7 @@ class _SearchScreenState extends State<SearchScreen> {
     _latestSuggestionRequest++;
     _debounce?.cancel();
     _suggestions = [];
-    if (_expanded && mounted) setState(() => _expanded = false);
+    _deactivateSearch();
     await _search();
     if (mounted) _inputNode.unfocus();
   }
@@ -146,7 +194,8 @@ class _SearchScreenState extends State<SearchScreen> {
   /// explicit so the source resolver can never substitute a different
   /// catalog song, and playback falls through to the exact video's
   /// audio. Video mode stays available from the player screen as
-  /// usual.
+  /// usual. (Deliberately different from Echo's direct-queue: the
+  /// explicit-pick contract is load-bearing here.)
   Future<void> _playPastedVideo(String videoId) async {
     var title = 'YouTube video';
     var artist = '';
@@ -317,7 +366,8 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Echo's long-click more-menu.
+  /// ZenMusic's long-press actions sheet (stands in for Echo's menu
+  /// system until the shared SongMenuSheet round lands).
   void _songActions(Song song) {
     showModalBottomSheet(
       context: context,
@@ -337,8 +387,6 @@ class _SearchScreenState extends State<SearchScreen> {
                   style: TextStyle(color: SpotifyColors.textPrimary)),
               onTap: () {
                 Navigator.pop(sheetContext);
-                // Persist the preference; the player's current-song
-                // hook auto-enters video mode for this id.
                 VideoPreferenceService.instance
                     .setPreferred(song.id, true);
                 _playWithRadio(song);
@@ -446,138 +494,33 @@ class _SearchScreenState extends State<SearchScreen> {
 
     return WillPopScope(
       onWillPop: () async {
-        if (_expanded) {
-          setState(() => _expanded = false);
-          _inputNode.unfocus();
+        // Echo's BackHandler: back while suggesting deactivates the
+        // search state; otherwise the pop proceeds.
+        if (_searchActive) {
+          _deactivateSearch();
           return false;
         }
         return true;
       },
-      child: Stack(
-        children: [
-          SafeArea(
-            child: Column(
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 245),
-                  curve: Curves.fastOutSlowIn,
-                  padding: EdgeInsets.fromLTRB(
-                      _expanded ? 0 : 20, _expanded ? 0 : 12, _expanded ? 0 : 20, 8),
-                  child: _searchBarView(expanded: false),
-                ),
-                Expanded(
-                  child: hasResults
-                      ? _resultsView()
-                      : (_searching && _hasSearchedOnce
-                      ? _skeletonResults()
-                      : _idleExplore()),
-                ),
-              ],
-            ),
-          ),
-          if (_expanded) _quickSearchOverlay(),
-        ],
-      ),
-    );
-  }
-
-  Widget _searchBarView({required bool expanded}) {
-    final hasText = _searchBar.text.isNotEmpty;
-    return GestureDetector(
-      onTap: expanded
-          ? null
-          : () {
-        setState(() => _expanded = true);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _inputNode.requestFocus();
-        });
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 245),
-        curve: Curves.fastOutSlowIn,
-        height: 56,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        decoration: BoxDecoration(
-          color: SpotifyColors.surface,
-          borderRadius:
-          BorderRadius.circular(expanded ? 0 : 28),
-        ),
-        child: Row(
+      child: SafeArea(
+        child: Column(
           children: [
-            if (expanded)
-              IconButton(
-                onPressed: () {
-                  setState(() => _expanded = false);
-                  _inputNode.unfocus();
-                },
-                icon: const Icon(Icons.arrow_back_rounded,
-                    color: SpotifyColors.textPrimary),
-              )
-            else
-              const Padding(
-                padding: EdgeInsets.only(left: 10),
-                child: Icon(Icons.search_rounded,
-                    size: 24, color: SpotifyColors.textSecondary),
-              ),
+            // Echo's bar geometry: 16dp horizontal, 8dp top, 16dp
+            // below — identical in BOTH states (the pill never
+            // morphs to full-bleed).
+        Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: _echoSearchBar(),
+      ),
+            const SizedBox(height: 16),
             Expanded(
-              child: TextField(
-                controller: _searchBar,
-                focusNode: _inputNode,
-                textInputAction: TextInputAction.search,
-                style: const TextStyle(
-                    color: SpotifyColors.textPrimary, fontSize: 16),
-                decoration: InputDecoration(
-                  hintText: _source == 'library'
-                      ? 'Search your library'
-                      : 'Songs, artists, albums...',
-                  hintStyle:
-                  const TextStyle(color: SpotifyColors.textTertiary),
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                  prefixIcon: _searching
-                      ? const Padding(
-                    padding: EdgeInsets.all(13),
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child:
-                      WaveSpinner(size: 20, strokeWidth: 2.2),
-                    ),
-                  )
-                      : null,
-                ),
-                onChanged: _onChanged,
-                onSubmitted: (_) => _submitSearch(),
-              ),
-            ),
-            if (hasText)
-              IconButton(
-                onPressed: _clearSearch,
-                icon: const Icon(Icons.close_rounded,
-                    color: SpotifyColors.textSecondary),
-              ),
-            IconButton(
-              onPressed: () =>
-                  pushSharedAxisY(context, const RecognizeScreen()),
-              tooltip: 'Recognize a song',
-              icon: const Icon(Icons.graphic_eq_rounded,
-                  color: SpotifyColors.textSecondary, size: 22),
-            ),
-            IconButton(
-              onPressed: _toggleSource,
-              tooltip: _source == 'library'
-                  ? 'Search online'
-                  : 'Search your library',
-              icon: Icon(
-                _source == 'library'
-                    ? Icons.library_music_rounded
-                    : Icons.public_rounded,
-                color: _source == 'library'
-                    ? SpotifyColors.green
-                    : SpotifyColors.textSecondary,
-                size: 22,
-              ),
+              child: _searchActive && _showSearchContent
+                  ? _quickList()
+                  : hasResults
+                  ? _resultsView()
+                  : (_searching && _hasSearchedOnce
+                  ? _skeletonResults()
+                  : _idleExplore()),
             ),
           ],
         ),
@@ -585,27 +528,117 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  Widget _quickSearchOverlay() {
-    return Positioned.fill(
-      child: Material(
-        color: SpotifyColors.background,
-        child: SafeArea(
-          child: Column(
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 245),
-                curve: Curves.fastOutSlowIn,
-                padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
-                child: _searchBarView(expanded: true),
-              ),
-              Expanded(child: _quickList()),
-            ],
+  /// Echo's bar: back/search toggle (left) · source-aware field ·
+  /// clear + recognize + source toggle (right). Stays a 28-radius
+  /// pill in every state.
+  Widget _echoSearchBar() {
+    final hasText = _searchBar.text.isNotEmpty;
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(
+        color: SpotifyColors.surface,
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Row(
+        children: [
+          // Echo: search icon when idle, back arrow when active —
+          // back deactivates the search state.
+          IconButton(
+            onPressed: () {
+              if (_searchActive) {
+                _deactivateSearch();
+                _searchBar.clear();
+                _latestSearchRequest++;
+                setState(() {
+                  _songResults = [];
+                  _videoResults = [];
+                  _playlistResults = [];
+                  _albumResults = [];
+                  _searching = false;
+                  _hasSearchedOnce = false;
+                });
+              } else {
+                _activateSearch();
+                _inputNode.requestFocus();
+              }
+            },
+            icon: Icon(
+              _searchActive
+                  ? Icons.arrow_back_rounded
+                  : Icons.search_rounded,
+              color: SpotifyColors.textPrimary,
+            ),
           ),
-        ),
+          Expanded(
+            child: TextField(
+              controller: _searchBar,
+              focusNode: _inputNode,
+              textInputAction: TextInputAction.search,
+              style: const TextStyle(
+                  color: SpotifyColors.textPrimary, fontSize: 16),
+              decoration: InputDecoration(
+                hintText: _source == 'library'
+                    ? 'Search your library'
+                    : 'Search songs, artists, playlists',
+                hintStyle:
+                const TextStyle(color: SpotifyColors.textTertiary),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                prefixIcon: _searching
+                    ? const Padding(
+                  padding: EdgeInsets.all(13),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child:
+                    WaveSpinner(size: 20, strokeWidth: 2.2),
+                  ),
+                )
+                    : null,
+              ),
+              onChanged: _onChanged,
+              onSubmitted: (_) => _submitSearch(),
+            ),
+          ),
+          if (hasText)
+            IconButton(
+              onPressed: _clearSearch,
+              icon: const Icon(Icons.close_rounded,
+                  color: SpotifyColors.textSecondary),
+            ),
+          IconButton(
+            onPressed: () =>
+                pushSharedAxisY(context, const RecognizeScreen()),
+            tooltip: 'Recognize a song',
+            icon: const Icon(Icons.graphic_eq_rounded,
+                color: SpotifyColors.textSecondary, size: 22),
+          ),
+          IconButton(
+            onPressed: _toggleSource,
+            tooltip: _source == 'library'
+                ? 'Search online'
+                : 'Search your library',
+            icon: Icon(
+              _source == 'library'
+                  ? Icons.library_music_rounded
+                  : Icons.public_rounded,
+              color: _source == 'library'
+                  ? SpotifyColors.green
+                  : SpotifyColors.textSecondary,
+              size: 22,
+            ),
+          ),
+        ],
       ),
     );
   }
 
+  /// Suggestions / history — shown INLINE below the bar while the
+  /// search is active (Echo's LocalSearchScreen/OnlineSearchScreen
+  /// slot). Bottom padding clears the floating mini player + nav bar
+  /// (extendBody).
   Widget _quickList() {
     if (_source == 'library') {
       final q = _searchBar.text.trim().toLowerCase();
@@ -639,7 +672,7 @@ class _SearchScreenState extends State<SearchScreen> {
         );
       }
       return ListView.builder(
-        padding: const EdgeInsets.only(top: 4),
+        padding: const EdgeInsets.only(top: 4, bottom: 170),
         itemCount: matches.length,
         itemBuilder: (context, i) {
           final song = matches[i];
@@ -681,7 +714,7 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
     return ListView.builder(
-      padding: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.only(top: 4, bottom: 170),
       itemCount: items.length,
       itemBuilder: (context, i) {
         final isSuggestion = _suggestions.isNotEmpty;
@@ -715,7 +748,10 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Widget _idleExplore() {
     return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
+      // Bottom padding clears the floating mini player + nav bar
+      // (extendBody) — closes the blueprint's pending search-padding
+      // item.
+      padding: const EdgeInsets.only(bottom: 170),
       children: [
         if (_history.isNotEmpty) ...[
           const ShelfHeaderBar(title: 'Recent searches'),
@@ -831,7 +867,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _skeletonResults() {
     return ListView(
       physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(top: 8, bottom: 24),
+      padding: const EdgeInsets.only(top: 8, bottom: 170),
       children: const [
         SkeletonTile(),
         SkeletonTile(),
@@ -845,7 +881,9 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Widget _resultsView() {
     return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
+      // Bottom padding clears the floating mini player + nav bar
+      // (extendBody).
+      padding: const EdgeInsets.only(bottom: 170),
       children: [
         if (_songResults.isNotEmpty)
           ThreeTracksRow(

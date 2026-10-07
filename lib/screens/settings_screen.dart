@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../main.dart';
 import '../models/song.dart';
@@ -118,6 +119,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Musify's ConfirmationDialog structure: icon badge, centered
+  /// content, red accent for dangerous actions.
   void _confirm(
       String title,
       String message,
@@ -129,29 +132,172 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (context) => AlertDialog(
         backgroundColor: SpotifyColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        icon: Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: dangerous
+                ? Colors.redAccent.withOpacity(0.14)
+                : SpotifyColors.highlight.withOpacity(0.14),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            dangerous
+                ? FluentIcons.warning_24_regular
+                : FluentIcons.question_circle_24_regular,
+            color: dangerous ? Colors.redAccent : SpotifyColors.highlight,
+            size: 26,
+          ),
+        ),
         title: Text(title,
+            textAlign: TextAlign.center,
             style: TextStyle(
                 color:
                 dangerous ? Colors.redAccent : SpotifyColors.textPrimary,
                 fontSize: 17,
                 fontWeight: FontWeight.w700)),
         content: Text(message,
+            textAlign: TextAlign.center,
             style:
             const TextStyle(color: SpotifyColors.textSecondary, fontSize: 14)),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                onYes();
-              },
-              child: Text(dangerous ? 'Delete' : 'Yes',
-                  style: TextStyle(
-                      color:
-                      dangerous ? Colors.redAccent : SpotifyColors.green))),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(context),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: SpotifyColors.surfaceLighter),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Cancel',
+                style: TextStyle(color: SpotifyColors.textSecondary)),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              onYes();
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor:
+              dangerous ? Colors.redAccent : SpotifyColors.green,
+              foregroundColor: SpotifyColors.textPrimary,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text(dangerous ? 'Delete' : 'Yes'),
+          ),
         ],
+      ),
+    );
+  }
+
+  // ── Licenses sheet (Musify's Licenses entry, ZenMusic's stack) ──
+
+  static const _licenses = <({String name, String license, String url})>[
+    (
+    name: 'ZenMusic',
+    license: 'GPL-3.0',
+    url: 'https://github.com/vorlon-dev/Zen-music',
+    ),
+    (
+    name: 'Echo',
+    license: 'GPL-3.0',
+    url: 'https://github.com/brahmkshatriya/echo',
+    ),
+    (
+    name: 'Musify',
+    license: 'GPL-3.0',
+    url: 'https://github.com/gokadzev/Musify',
+    ),
+    (
+    name: 'InnerTubeX',
+    license: 'MIT (upstream)',
+    url: 'https://github.com/MetrolistGroup/innertubex',
+    ),
+    (
+    name: 'just_audio / audio_service',
+    license: 'MIT',
+    url: 'https://pub.dev/packages/just_audio',
+    ),
+    (
+    name: 'youtube_explode_dart / yt_extractor',
+    license: 'MIT',
+    url: 'https://pub.dev/packages/youtube_explode_dart',
+    ),
+    (
+    name: 'Google Fonts (Inter, Playfair Display)',
+    license: 'OFL',
+    url: 'https://fonts.google.com',
+    ),
+  ];
+
+  void _showLicenseSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: SpotifyColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Open-source licenses',
+                  style: TextStyle(
+                      color: SpotifyColors.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: 12),
+                itemCount: _licenses.length,
+                itemBuilder: (context, i) {
+                  final l = _licenses[i];
+                  return ListTile(
+                    leading: const Icon(
+                        FluentIcons.document_24_regular,
+                        color: SpotifyColors.textSecondary),
+                    title: Text(l.name,
+                        style: const TextStyle(
+                            color: SpotifyColors.textPrimary,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w600)),
+                    subtitle: Text(l.license,
+                        style: const TextStyle(
+                            color: SpotifyColors.textSecondary,
+                            fontSize: 12)),
+                    trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        color: SpotifyColors.textTertiary),
+                    onTap: () => launchUrl(
+                      Uri.parse(l.url),
+                      mode: LaunchMode.externalApplication,
+                    ),
+                  );
+                },
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Text(
+                'ZenMusic is free software under GPL-3.0. '
+                    'Full license texts live in the repository.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: SpotifyColors.textTertiary, fontSize: 11.5),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -272,7 +418,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: Text(names[i],
                 style: const TextStyle(color: SpotifyColors.textPrimary)),
             trailing: _audioQuality == qualities[i]
-                ? const Icon(Icons.check_rounded, color: SpotifyColors.green)
+                ? const Icon(Icons.check_rounded, color: SpotifyColors.highlight)
                 : null,
             onTap: () {
               storage.setAudioQuality(qualities[i]);
@@ -328,7 +474,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const TextStyle(color: SpotifyColors.textPrimary)),
               trailing: current == item.value
                   ? const Icon(Icons.check_rounded,
-                  color: SpotifyColors.green)
+                  color: SpotifyColors.highlight)
                   : null,
               onTap: () {
                 Navigator.pop(context);
@@ -369,7 +515,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               Text(label(temp),
                   style: const TextStyle(
-                      color: SpotifyColors.green,
+                      color: SpotifyColors.highlight,
                       fontSize: 15,
                       fontWeight: FontWeight.w700)),
               Slider(
@@ -405,7 +551,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     },
                     child: const Text('OK',
                         style: TextStyle(
-                            color: SpotifyColors.green,
+                            color: SpotifyColors.highlight,
                             fontWeight: FontWeight.w700))),
               ],
             ),
@@ -893,6 +1039,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   () => WelcomeDialog.show(context),
             ),
             _prefRow(
+              FluentIcons.document_24_regular,
+              'Open-source licenses',
+              'GPL-3.0 · the stack behind ZenMusic',
+              _showLicenseSheet,
+            ),
+            _prefRow(
               FluentIcons.info_24_regular,
               'Version',
               'v$_appVersion',
@@ -938,7 +1090,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // ── Echo preference building blocks ──
+  // ── Preference building blocks ──
 
   Widget _category(String title, IconData icon, List<Widget> rows) {
     return Column(
@@ -967,8 +1119,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Echo's OutlinedButton preference row: 64dp stadium pill, 24dp
-  /// padding, leading icon, 16sp title with summary below.
+  /// Preference row: 64dp stadium pill, leading icon, title with
+  /// summary below.
   Widget _prefRow(
       IconData icon,
       String title,

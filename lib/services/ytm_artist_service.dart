@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/song.dart';
-
+import '../utilities/format_utils.dart';
 typedef _JsonMap = Map<String, dynamic>;
 
 /// Artist-page header data (from the artist/channel browse response).
@@ -22,31 +22,59 @@ class YtmArtistHeader {
 }
 
 /// One album/EP/single card from an artist-page carousel shelf.
+/// [releaseType] ('Album' | 'Single' | 'EP') comes from the carousel
+/// the card was found in — Musify-style discography labeling.
 class YtmAlbumCard {
   final String browseId;
   final String title;
   final String subtitle;
   final String imageUrl;
+  final String? releaseType;
 
   const YtmAlbumCard({
     required this.browseId,
     required this.title,
     required this.subtitle,
     required this.imageUrl,
+    this.releaseType,
   });
 }
 
-/// Full artist/channel page: header info, top songs (or, for plain
-/// YouTube channels, the channel's videos) and album-style shelves.
+/// A related/suggested artist from the artist page ("Fans might also
+/// like" carousel) — circular-avatar shelf entries.
+class YtmRelatedArtist {
+  final String channelId;
+  final String name;
+  final String imageUrl;
+
+  const YtmRelatedArtist({
+    required this.channelId,
+    required this.name,
+    required this.imageUrl,
+  });
+}
+
+/// Full artist/channel page: header info, top songs (with a PARALLEL
+/// play-count list — counts ride next to the songs, never inside
+/// them, so Song stays queue/persistence-clean: Musify's pattern),
+/// album-style shelves, and related artists.
 class YtmArtistPage {
   final YtmArtistHeader? header;
   final List<Song> topSongs;
+
+  /// Play counts for [topSongs], positionally aligned (null when the
+  /// row carried none).
+  final List<String?> topSongPlayCounts;
+
   final List<({String title, List<YtmAlbumCard> albums})> shelves;
+  final List<YtmRelatedArtist> relatedArtists;
 
   const YtmArtistPage({
     required this.header,
     required this.topSongs,
+    this.topSongPlayCounts = const [],
     required this.shelves,
+    this.relatedArtists = const [],
   });
 }
 
@@ -167,8 +195,8 @@ class YtmArtistService {
   }
 
   /// Full artist OR plain-channel page. Strategy:
-  ///   1. Home-tab browse (ONE call) — header, zen shelves, and any
-  ///      videos the home layout carries.
+  ///   1. Home-tab browse (ONE call) — header, zen shelves, related
+  ///      artists, and any videos the home layout carries.
   ///   2. Only when [videosTab] is set AND nothing was found, a second
   ///      browse requests the channel's Videos tab explicitly.
   Future<YtmArtistPage?> getArtistPage(String channelId,
@@ -180,11 +208,14 @@ class YtmArtistService {
     if (root == null) return null;
 
     final header = _parseArtistHeader(root);
-    var topSongs = _parseShelfSongs(root, limit: 25);
+    final shelf = _parseShelfSongs(root, limit: 25);
+    var topSongs = shelf.songs;
+    var playCounts = shelf.playCounts;
     if (topSongs.isEmpty) {
       // Not a YT Music artist page (no zen shelf) — try the plain
       // YouTube-channel shapes in this same response.
       topSongs = _scanChannelVideos(root, header?.name ?? '');
+      playCounts = List<String?>.filled(topSongs.length, null);
     }
 
     // Plain channel and the home tab listed nothing — pull the Videos
@@ -197,14 +228,19 @@ class YtmArtistService {
       });
       if (vids != null) {
         final scanned = _scanChannelVideos(vids, header?.name ?? '');
-        if (scanned.isNotEmpty) topSongs = scanned;
+        if (scanned.isNotEmpty) {
+          topSongs = scanned;
+          playCounts = List<String?>.filled(scanned.length, null);
+        }
       }
     }
 
     return YtmArtistPage(
       header: header,
       topSongs: topSongs,
+      topSongPlayCounts: playCounts,
       shelves: _parseAlbumShelves(root),
+      relatedArtists: _parseRelatedArtists(root),
     );
   }
 
@@ -367,7 +403,7 @@ class YtmArtistService {
         if (title == null || title.isEmpty) continue;
         songs.add(Song(
           id: id,
-          title: title,
+          title: formatSongTitle(title),
           artist: channelName.isNotEmpty ? channelName : 'Unknown',
           thumbnail: _bestThumbFrom(v.getMap('thumbnail')) ??
               'https://i.ytimg.com/vi/$id/hqdefault.jpg',
@@ -383,21 +419,56 @@ class YtmArtistService {
     return songs;
   }
 
-  List<Song> _parseShelfSongs(_JsonMap root, {int limit = 25}) {
+  /// Zen-shelf songs + their play counts (positionally aligned). The
+  /// count rides in the row's subtitle columns ("…· 331K plays") —
+  /// ⚠️ response-shape dependent; absent tokens → null entries and
+  /// the UI hides them. Defensive by contract.
+  ({List<Song> songs, List<String?> playCounts}) _parseShelfSongs(
+      _JsonMap root,
+      {int limit = 25}) {
     final shelf = firstRenderer(root, 'musicShelfRenderer');
-    if (shelf == null) return [];
+    if (shelf == null) {
+      return (songs: const <Song>[], playCounts: const <String?>[]);
+    }
 
     final songs = <Song>[];
+    final playCounts = <String?>[];
     final seen = <String>{};
     for (final item
     in findRenderers(shelf, 'musicResponsiveListItemRenderer')) {
       final videoId = _videoIdOf(item);
       if (videoId == null || !seen.add(videoId)) continue;
       final song = _songFromRow(item, videoId);
-      if (song != null) songs.add(song);
+      if (song != null) {
+        songs.add(song);
+        playCounts.add(_playCountOf(item));
+      }
       if (songs.length >= limit) break;
     }
-    return songs;
+    return (songs: songs, playCounts: playCounts);
+  }
+
+  /// Play-count token from a row's subtitle columns ("123K plays").
+  static final RegExp _playsRe =
+  RegExp(r'([\d.,]+\s*[KMB]?)\s*plays?\b', caseSensitive: false);
+
+  String? _playCountOf(_JsonMap item) {
+    final columns = item.getList('flexColumns');
+    if (columns == null) return null;
+    for (var i = 1; i < columns.length; i++) {
+      final column = columns[i];
+      if (column is! Map) continue;
+      final text = runsText((_JsonMap.from(column))
+          .getMap('musicResponsiveListItemFlexColumnRenderer')
+          ?.getMap('text'));
+      if (text == null) continue;
+      final m = _playsRe.firstMatch(text);
+      if (m != null) {
+        final token = m.group(1)?.trim();
+        if (token != null && token.isNotEmpty) return token;
+      }
+    }
+    return null;
   }
 
   List<({String title, List<YtmAlbumCard> albums})> _parseAlbumShelves(
@@ -411,9 +482,16 @@ class YtmArtistService {
           '')
           .trim();
       final normalized = title.toLowerCase();
-      if (normalized != 'albums' &&
-          normalized != 'singles' &&
-          normalized != 'eps') {
+      // Musify's discography split: only the release carousels become
+      // shelves, and each card is labeled with its release type.
+      String? releaseType;
+      if (normalized == 'albums') {
+        releaseType = 'Album';
+      } else if (normalized == 'singles') {
+        releaseType = 'Single';
+      } else if (normalized == 'eps') {
+        releaseType = 'EP';
+      } else {
         continue;
       }
 
@@ -460,10 +538,77 @@ class YtmArtistService {
           title: cardTitle,
           subtitle: subtitle,
           imageUrl: art,
+          releaseType: releaseType,
         ));
         if (cards.length >= 12) break;
       }
       if (cards.isNotEmpty) out.add((title: title, albums: cards));
+    }
+    return out;
+  }
+
+  /// Related/suggested artists ("Fans might also like" carousel) —
+  /// ⚠️ title and shape are response-dependent; an absent carousel
+  /// simply yields an empty list (UI hides it). Circular-avatar shelf.
+  List<YtmRelatedArtist> _parseRelatedArtists(_JsonMap root) {
+    final out = <YtmRelatedArtist>[];
+    for (final carousel in findRenderers(root, 'musicCarouselShelfRenderer')) {
+      final title = (runsText(carousel
+          .getMap('header')
+          ?.getMap('musicCarouselShelfBasicHeaderRenderer')
+          ?.getMap('title')) ??
+          '')
+          .trim()
+          .toLowerCase();
+      if (title != 'fans might also like' && title != 'related artists') {
+        continue;
+      }
+
+      for (final raw in carousel.getList('contents') ?? []) {
+        if (raw is! Map) continue;
+        final two = _JsonMap.from(raw).getMap('musicTwoRowItemRenderer');
+        if (two == null) continue;
+
+        final channelId = two
+            .getMap('navigationEndpoint')
+            ?.getMap('browseEndpoint')
+            ?.getValue<String>('browseId');
+        if (channelId == null || !channelId.startsWith('UC')) continue;
+        final pageType = two
+            .getMap('navigationEndpoint')
+            ?.getMap('browseEndpoint')
+            ?.getMap('browseEndpointContextSupportedConfigs')
+            ?.getMap('browseEndpointContextMusicConfig')
+            ?.getValue<String>('pageType');
+        if (pageType != null && pageType != 'MUSIC_PAGE_TYPE_ARTIST') {
+          continue;
+        }
+
+        final name = runsText(two.getMap('title')) ?? '';
+        if (name.isEmpty) continue;
+        if (out.any((a) => a.channelId == channelId)) continue;
+
+        final art = _bestThumbFrom(
+          two
+              .getMap('thumbnailRenderer')
+              ?.getMap('musicThumbnailRenderer')
+              ?.getMap('thumbnail'),
+        ) ??
+            _bestThumbFrom(
+              two
+                  .getMap('thumbnail')
+                  ?.getMap('musicThumbnailRenderer')
+                  ?.getMap('thumbnail'),
+            ) ??
+            '';
+
+        out.add(YtmRelatedArtist(
+          channelId: channelId,
+          name: name,
+          imageUrl: art,
+        ));
+        if (out.length >= 12) break;
+      }
     }
     return out;
   }
@@ -484,7 +629,7 @@ class YtmArtistService {
 
     return Song(
       id: videoId,
-      title: title,
+      title: formatSongTitle(title),
       artist: artist,
       thumbnail: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
       duration: _parseDuration(fixedColumnText(item)) ?? Duration.zero,

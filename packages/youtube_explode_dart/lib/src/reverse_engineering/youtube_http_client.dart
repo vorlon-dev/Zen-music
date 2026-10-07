@@ -24,10 +24,10 @@ class YoutubeHttpClient extends http.BaseClient {
 
   static const Map<String, String> defaultHeaders = {
     'user-agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.7827.232 Safari/537.36',
     'cookie': 'CONSENT=YES+cb',
     'accept':
-        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
     'accept-language': 'en-US,en;q=0.5',
   };
 
@@ -64,12 +64,12 @@ class YoutubeHttpClient extends http.BaseClient {
 
   ///
   Future<String> getString(
-    dynamic url, {
-    Map<String, String> headers = const {},
-    bool validate = true,
-  }) async {
+      dynamic url, {
+        Map<String, String> headers = const {},
+        bool validate = true,
+      }) async {
     final response =
-        await get(url is String ? Uri.parse(url) : url, headers: headers);
+    await get(url is String ? Uri.parse(url) : url, headers: headers);
     if (_closed) throw HttpClientClosedException();
 
     if (validate) {
@@ -81,10 +81,10 @@ class YoutubeHttpClient extends http.BaseClient {
 
   @override
   Future<http.Response> get(
-    Uri url, {
-    Map<String, String>? headers = const {},
-    bool validate = false,
-  }) async {
+      Uri url, {
+        Map<String, String>? headers = const {},
+        bool validate = false,
+      }) async {
     final response = await super.get(url, headers: headers);
     if (_closed) throw HttpClientClosedException();
 
@@ -101,14 +101,14 @@ class YoutubeHttpClient extends http.BaseClient {
 
   @override
   Future<http.Response> post(
-    Uri url, {
-    Map<String, String>? headers,
-    Object? body,
-    Encoding? encoding,
-    bool validate = false,
-  }) async {
+      Uri url, {
+        Map<String, String>? headers,
+        Object? body,
+        Encoding? encoding,
+        bool validate = false,
+      }) async {
     final response =
-        await super.post(url, headers: headers, body: body, encoding: encoding);
+    await super.post(url, headers: headers, body: body, encoding: encoding);
     if (_closed) throw HttpClientClosedException();
 
     if (validate) {
@@ -119,11 +119,11 @@ class YoutubeHttpClient extends http.BaseClient {
 
   ///
   Future<String> postString(
-    dynamic url, {
-    Map<String, dynamic>? body,
-    Map<String, String> headers = const {},
-    bool validate = true,
-  }) async {
+      dynamic url, {
+        Map<String, dynamic>? body,
+        Map<String, String> headers = const {},
+        bool validate = true,
+      }) async {
     assert(url is String || url is Uri);
     if (url is String) {
       url = Uri.parse(url);
@@ -139,13 +139,13 @@ class YoutubeHttpClient extends http.BaseClient {
   }
 
   Stream<List<int>> getStream(
-    StreamInfo streamInfo, {
-    Map<String, String> headers = const {},
-    bool validate = true,
-    int start = 0,
-    int errorCount = 0,
-    required StreamClient streamClient,
-  }) {
+      StreamInfo streamInfo, {
+        Map<String, String> headers = const {},
+        bool validate = true,
+        int start = 0,
+        int errorCount = 0,
+        required StreamClient streamClient,
+      }) {
     if (streamInfo.fragments.isNotEmpty) {
       // DASH(fragmented) stream
       return _getFragmentedStream(
@@ -171,31 +171,31 @@ class YoutubeHttpClient extends http.BaseClient {
   }
 
   Stream<List<int>> _getFragmentedStream(
-    StreamInfo streamInfo, {
-    Map<String, String> headers = const {},
-    bool validate = true,
-    int start = 0,
-    int errorCount = 0,
-  }) async* {
+      StreamInfo streamInfo, {
+        Map<String, String> headers = const {},
+        bool validate = true,
+        int start = 0,
+        int errorCount = 0,
+      }) async* {
     // This is the base url.
     final url = streamInfo.url;
     for (final fragment in streamInfo.fragments) {
       final req = await retry(
         this,
-        () => get(Uri.parse(url.toString() + fragment.path), headers: headers),
+            () => get(Uri.parse(url.toString() + fragment.path), headers: headers),
       );
       yield req.bodyBytes;
     }
   }
 
   Stream<List<int>> _getStream(
-    StreamInfo streamInfo, {
-    Map<String, String> headers = const {},
-    bool validate = true,
-    int start = 0,
-    int errorCount = 0,
-    required StreamClient streamClient,
-  }) async* {
+      StreamInfo streamInfo, {
+        Map<String, String> headers = const {},
+        bool validate = true,
+        int start = 0,
+        int errorCount = 0,
+        required StreamClient streamClient,
+      }) async* {
     var url = streamInfo.url;
     var bytesCount = start;
     while (!_closed && bytesCount != streamInfo.size.totalBytes) {
@@ -203,8 +203,8 @@ class YoutubeHttpClient extends http.BaseClient {
         final response = await retry(this, () async {
           final from = bytesCount;
           final to = (streamInfo.isThrottled
-                  ? (bytesCount + 10379935)
-                  : streamInfo.size.totalBytes) -
+              ? (bytesCount + 10379935)
+              : streamInfo.size.totalBytes) -
               1;
 
           late final http.Request request;
@@ -228,7 +228,7 @@ class YoutubeHttpClient extends http.BaseClient {
             _validateResponse(response, response.statusCode);
           } on FatalFailureException {
             final newManifest =
-                await streamClient.getManifest(streamInfo.videoId);
+            await streamClient.getManifest(streamInfo.videoId);
             final stream = newManifest.streams
                 .firstWhereOrNull((e) => e.tag == streamInfo.tag);
             if (stream == null) {
@@ -242,7 +242,7 @@ class YoutubeHttpClient extends http.BaseClient {
         }
         final stream = StreamController<List<int>>();
         response.stream.listen(
-          (data) {
+              (data) {
             bytesCount += data.length;
             stream.add(data);
           },
@@ -274,10 +274,10 @@ class YoutubeHttpClient extends http.BaseClient {
 
   ///
   Future<int?> getContentLength(
-    dynamic url, {
-    Map<String, String> headers = const {},
-    bool validate = true,
-  }) async {
+      dynamic url, {
+        Map<String, String> headers = const {},
+        bool validate = true,
+      }) async {
     final response = await head(url, headers: headers);
     if (_closed) throw HttpClientClosedException();
 
@@ -289,10 +289,10 @@ class YoutubeHttpClient extends http.BaseClient {
   }
 
   Future<JsonMap> sendContinuation(
-    String action,
-    String token, {
-    Map<String, String>? headers,
-  }) async =>
+      String action,
+      String token, {
+        Map<String, String>? headers,
+      }) async =>
       sendPost(action, {'continuation': token}, headers: headers);
 
   /// Sends a call to the youtube api endpoint.
@@ -302,11 +302,11 @@ class YoutubeHttpClient extends http.BaseClient {
   /// [FatalFailureException]; pass `true` to have those raised instead of
   /// silently returning whatever body the server sent back.
   Future<JsonMap> sendPost(
-    String action,
-    Map<String, dynamic> data, {
-    Map<String, String>? headers,
-    bool validate = false,
-  }) {
+      String action,
+      Map<String, dynamic> data, {
+        Map<String, String>? headers,
+        bool validate = false,
+      }) {
     assert(action == 'next' || action == 'browse' || action == 'search');
 
     final url = Uri.parse(
@@ -317,10 +317,10 @@ class YoutubeHttpClient extends http.BaseClient {
       'context': const {
         'client': {
           'browserName': 'Chrome',
-          'browserVersion': '105.0.0.0',
+          'browserVersion': '149.0.7827.232',
           'clientFormFactor': 'UNKNOWN_FORM_FACTOR',
           'clientName': "WEB",
-          'clientVersion': "2.20220921.00.00",
+          'clientVersion': "2.20260708.00.00",
         },
       },
       ...data,

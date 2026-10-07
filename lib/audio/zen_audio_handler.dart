@@ -131,6 +131,16 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     return null;
   }
 
+  /// True when [e] indicates the resolved URL ITSELF is dead —
+  /// 410 Gone (expired signed URL) or 403 Forbidden. Retrying the same
+  /// URL can never succeed; every cache layer must be busted so the
+  /// next attempt resolves fresh. Matches both the buffered source's
+  /// "Buffered download failed: HTTP 410" and ExoPlayer's
+  /// "Response code: 410" shapes.
+  static final _deadUrlRe = RegExp(r'(?:HTTP|Response code:) ?(410|403)');
+  static bool _isDefinitiveStreamDeath(Object e) =>
+      _deadUrlRe.hasMatch(e.toString());
+
   /// Re-attempts the last failed song (Retry on the error card):
   /// plays it in place when still in the queue, else as a
   /// single-song queue.
@@ -939,14 +949,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       if (generation != _loadGeneration) return;
       try {
-        VideoStreamResult stream;
-        if (attempt == 1) {
-          stream = await _getStreamUrl(song);
-        } else {
-          _urlCache.remove(song.id);
-          if (attempt >= 4) _staleStreamIds.add(song.id);
-          stream = await _getStreamUrl(song);
-        }
+        final stream = await _getStreamUrl(song);
         _broadcastAudioQuality(song, stream);
         if (generation != _loadGeneration) return;
 
@@ -987,6 +990,24 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
         return;
       } catch (e) {
         if (generation != _loadGeneration) return;
+        if (_isDefinitiveStreamDeath(e)) {
+          // 410 Gone / 403 Forbidden: this exact URL can never work
+          // again. Bust the memory cache AND stop trusting the
+          // persisted cache immediately — the old loop re-served the
+          // same dead URL from Hive on attempts 2 and 3 before
+          // distrusting it at attempt 4. The fresh resolve below
+          // also overwrites the stale persisted entry.
+          _urlCache.remove(song.id);
+          _staleStreamIds.add(song.id);
+          print('🪦 Dead URL for ${song.title} — caches busted, '
+              'next attempt resolves fresh');
+        } else {
+          // Non-definitive failure (timeout, flake): drop the memory
+          // copy so the retry re-resolves; the persisted cache stops
+          // being trusted after three failed attempts.
+          _urlCache.remove(song.id);
+          if (attempt >= 4) _staleStreamIds.add(song.id);
+        }
         if (attempt < maxAttempts) {
           print('🔁 Load attempt $attempt/$maxAttempts failed for '
               '${song.title} — retrying');

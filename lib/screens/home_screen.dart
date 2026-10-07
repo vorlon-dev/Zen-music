@@ -15,17 +15,13 @@ import '../models/song.dart';
 import '../services/appearance_prefs.dart';
 import '../services/downloads_service.dart';
 import '../services/home_service.dart';
-import '../services/listening_stats_service.dart';
 import '../services/update_service.dart';
 import '../theme/spotify_theme.dart';
-import '../utilities/listening_stats_utils.dart';
 import '../utilities/zen_transitions.dart';
 import '../widgets/collection_card.dart';
-import '../widgets/listening_recap_card.dart';
 import '../widgets/marquee.dart';
 import '../widgets/media_shelf.dart';
 import '../widgets/playlist_sheets.dart';
-import '../widgets/section_header.dart';
 import '../widgets/skeleton.dart';
 import '../widgets/welcome_dialog.dart';
 import '../widgets/wave_spinner.dart';
@@ -88,7 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: SpotifyColors.background,
       // extendBody: the body scrolls BEHIND the floating mini player +
-      // nav bar — no black slot rectangle behind them.
+      // nav bar — no slot rectangle behind them.
       extendBody: true,
       body: NotificationListener<UserScrollNotification>(
         onNotification: (n) {
@@ -101,14 +97,10 @@ class _HomeScreenState extends State<HomeScreen> {
             return false;
           }
           // Only EXPLICIT directions change state. IDLE (finger
-          // release / fling settle) KEEPS the current state — that was
-          // the bug where the bar reappeared the moment a downward
-          // swipe was released.
+          // release / fling settle) KEEPS the current state.
           if (n.direction == ScrollDirection.reverse) {
-            // Scrolling toward the bottom — hide.
             if (_navVisible && mounted) setState(() => _navVisible = false);
           } else if (n.direction == ScrollDirection.forward) {
-            // Scrolling back toward the top — show.
             if (!_navVisible && mounted) setState(() => _navVisible = true);
           }
           return false;
@@ -198,12 +190,14 @@ class _TabStack extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════
-// HOME TAB — Echo Nightly layout logic:
-//   Speed Dial (paged grid + randomize + dots) →
-//   Quick Picks (2-row horizontal song grid) →
-//   Daily Discover (hero cards) → Keep Listening →
-//   Forgotten Favorites → collections → shelves →
-//   infinite charts.
+// HOME TAB — Spotify layout on the Black + Oxblood theme, with
+// ZenMusic's own polish:
+//   · subtle oxblood wash at the top (one DecoratedBox — delete for
+//     a flat home)
+//   · tick-rule section titles
+//   · the breathing Liked-Songs heart
+// Sections: greeting → shortcut tiles → Made for you → New releases
+// → Playlists for you → Videos → trending shelves → charts.
 // ═════════════════════════════════════════════
 
 class HomeTab extends StatefulWidget {
@@ -213,7 +207,7 @@ class HomeTab extends StatefulWidget {
   State<HomeTab> createState() => _HomeTabState();
 }
 
-class _HomeTabState extends State<HomeTab> {
+class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
   final _homeService = HomeService();
   final _scroll = ScrollController();
 
@@ -223,13 +217,12 @@ class _HomeTabState extends State<HomeTab> {
   List<Song> _ytmHot = [];
   List<Song> _personalVideos = [];
   List<Song> _topCharts = [];
-  List<Song> _startListening = [];
   List<Song> _recentlyPlayed = [];
-  List<Song> _forgottenFavorites = [];
   List<Song> _ytmFresh = [];
   List<Song> _recommendedToday = [];
   List<Collection> _collections = [];
   List<Collection> _newAlbums = [];
+  List<Song> _downloads = [];
 
   // Infinite append state — dynamic YTM chart shelves.
   final List<({String title, List<Song> songs})> _chartShelves = [];
@@ -240,12 +233,24 @@ class _HomeTabState extends State<HomeTab> {
 
   bool _loading = true;
   bool _isRefreshing = false;
-  bool _randomizing = false;
+
+  // The breathing Liked-Songs heart: 1.0 → 1.06 over 2.8s, reversed,
+  // paused while the tile is pressed.
+  late final AnimationController _breath = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2800),
+    value: 0,
+  );
+  late final Animation<double> _breathScale = Tween<double>(
+    begin: 1.0,
+    end: 1.06,
+  ).animate(CurvedAnimation(parent: _breath, curve: Curves.easeInOut));
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    _breath.repeat(reverse: true);
     _loadAll();
   }
 
@@ -253,6 +258,7 @@ class _HomeTabState extends State<HomeTab> {
   void dispose() {
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
+    _breath.dispose();
     _homeService.dispose();
     super.dispose();
   }
@@ -271,12 +277,11 @@ class _HomeTabState extends State<HomeTab> {
       final hitsF = _homeService.getBiggestHits();
       final ytF = _homeService.getYtTrendingSongs();
       final ytmHotF = _homeService.getYtmShelf('top hits this week');
-      final ytmFreshF = _homeService.getYtmShelf('new zen this week', limit: 12);
+      final ytmFreshF = _homeService.getYtmShelf('new music this week', limit: 12);
       final recommendedF = _homeService.getRecommendedToday();
       final personalF =
       _homeService.getPersonalizedVideos(_recentlyPlayed.take(3).toList());
       final topChartsF = _homeService.getTopCharts();
-      final startF = _homeService.getStartListening();
       final collectionsF = _homeService.getHomeCollections();
       final albumsF = _homeService.getNewReleaseAlbums();
 
@@ -288,7 +293,6 @@ class _HomeTabState extends State<HomeTab> {
       final recommendedToday = await recommendedF;
       final personalVideos = await personalF;
       final topCharts = await topChartsF;
-      final startListening = await startF;
       final collections = await collectionsF;
       final newAlbums = await albumsF;
 
@@ -302,7 +306,6 @@ class _HomeTabState extends State<HomeTab> {
         _recommendedToday = recommendedToday;
         _personalVideos = personalVideos;
         _topCharts = topCharts;
-        _startListening = startListening;
         _collections = collections;
         _newAlbums = newAlbums;
         _loading = false;
@@ -328,9 +331,8 @@ class _HomeTabState extends State<HomeTab> {
     if (mounted) setState(() {});
   }
 
-  /// Appends the next YTM chart shelf while scrolling (Echo's
-  /// load-more-when-near-bottom logic). Stops after the rotation pool
-  /// fails to add genuinely-new content twice in a row.
+  /// Appends the next YTM chart shelf while scrolling. Stops after the
+  /// rotation pool fails to add genuinely-new content twice in a row.
   Future<void> _loadMore() async {
     if (_loadingMore) return;
     setState(() => _loadingMore = true);
@@ -393,40 +395,11 @@ class _HomeTabState extends State<HomeTab> {
     _openPlayer();
   }
 
-  /// Echo's Randomize: pick one random song from the whole loaded pool
-  /// and start radio on it.
-  void _randomize() {
-    if (_randomizing) return;
-    final pool = [
-      ..._startListening,
-      ..._trendingNow,
-      ..._biggestHits,
-      ..._topCharts,
-      ..._recentlyPlayed,
-    ]..removeWhere((s) => s.id.isEmpty);
-    if (pool.isEmpty) return;
-    setState(() => _randomizing = true);
-    final pick = pool[math.Random().nextInt(pool.length)];
-    Future.delayed(const Duration(milliseconds: 700), () {
-      if (!mounted) return;
-      setState(() => _randomizing = false);
-    });
-    audioHandler.startRadio(pick);
-    _openPlayer();
-  }
-
   void _loadRecent() {
     if (!mounted) return;
     final played = storage.getPlayedHistory();
-    final recentIds = played.take(30).map((s) => s.id).toSet();
-    // Echo's Forgotten Favorites: liked songs you haven't played recently.
-    final forgotten = storage
-        .getLikedSongs()
-        .where((s) => !recentIds.contains(s.id))
-        .toList();
     setState(() {
       _recentlyPlayed = played.take(10).toList();
-      _forgottenFavorites = forgotten.take(12).toList();
     });
   }
 
@@ -460,6 +433,25 @@ class _HomeTabState extends State<HomeTab> {
         .then((_) => _loadRecent());
   }
 
+  String get _greeting {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  /// The Spotify-style shortcut songs: most recent plays/downloads
+  /// (deduped, max 5) — they pair with the Liked tile.
+  List<Song> _shortcutSongs() {
+    final out = <Song>[];
+    final seen = <String>{};
+    for (final s in [..._recentlyPlayed, ..._downloads]) {
+      if (out.length >= 5) break;
+      if (seen.add(s.id)) out.add(s);
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
@@ -468,248 +460,429 @@ class _HomeTabState extends State<HomeTab> {
       onRefresh: _loadAll,
       child: _loading
           ? _buildSkeletons()
-          : ListView(
-        controller: _scroll,
-        physics: const AlwaysScrollableScrollPhysics(),
-        // Bottom padding clears the floating mini player + nav bar
-        // (extendBody: content scrolls behind them).
-        padding: const EdgeInsets.fromLTRB(0, 6, 0, 170),
+          : Stack(
         children: [
-          if (_isRefreshing)
-            const Padding(
-              padding: EdgeInsets.all(14),
-              child: Center(child: WaveSpinner(size: 26)),
-            ),
-
-          _echoHeader(),
-
-          if (wrappedEnabled.value &&
-              listeningStatsService.hasStats &&
-              listeningStatsService.availableMonthKeys.isNotEmpty)
-            _recapSection(
-                listeningStatsService.availableMonthKeys.first),
-
-          // ── Speed Dial (Echo): paged grid + randomize + dots ──
-          if (_startListening.isNotEmpty) ...[
-            ShelfHeaderBar(title: 'Speed dial'),
-            _SpeedDialGrid(
-              items: _startListening,
-              isRandomizing: _randomizing,
-              onItemTap: _playSong,
-              onRandomize: _randomize,
-            ),
-            const SizedBox(height: 8),
-          ],
-
-          // ── Quick Picks (Echo): 2-row horizontal song grid ──
-          if (_trendingNow.length >= 4) ...[
-            ShelfHeaderBar(title: 'Quick picks'),
-            _QuickPicksGrid(
-              songs: _trendingNow.take(12).toList(),
-              onTap: _playSong,
-            ),
-            const SizedBox(height: 8),
-          ],
-
-          // ── Recently played (Keep Listening) ──
-          if (_recentlyPlayed.isNotEmpty)
-            MediaShelfRow(
-              title: 'Keep listening',
-              items: [
-                for (final s in _recentlyPlayed) ShelfItem.fromSong(s)
-              ],
-              onTapItem: (i) => _playSong(_recentlyPlayed[i]),
-              playingIdStream: audioHandler.currentSongStream,
-            ),
-
-          // ── Forgotten favorites (Echo): old liked songs ──
-          if (_forgottenFavorites.length >= 4)
-            MediaShelfRow(
-              title: 'Forgotten favorites',
-              items: [
-                for (final s in _forgottenFavorites) ShelfItem.fromSong(s)
-              ],
-              onTapItem: (i) => _playSong(_forgottenFavorites[i]),
-              onShuffle: () => _shufflePlay(_forgottenFavorites),
-              playingIdStream: audioHandler.currentSongStream,
-            ),
-
-          // ── Daily Discover (Echo): hero cards ──
-          if (_recommendedToday.length >= 3) ...[
-            ShelfHeaderBar(title: 'Daily discover'),
-            _DailyDiscoverPager(
-              songs: _recommendedToday.take(10).toList(),
-              seedArtist: _recentlyPlayed.isEmpty
-                  ? ''
-                  : _recentlyPlayed.first.artist.split(',').first.trim(),
-              onTap: _playSong,
-            ),
-            const SizedBox(height: 8),
-          ],
-
-          if (_collections.isNotEmpty)
-            _collectionRow('Playlists for you', _collections),
-          if (_newAlbums.isNotEmpty)
-            _collectionRow('New releases', _newAlbums),
-
-          if (_personalVideos.isNotEmpty)
-            MediaShelfRow(
-              title: _videoShelfTitle,
-              items: [
-                for (final s in _personalVideos) ShelfItem.fromSong(s)
-              ],
-              // Videos open the dedicated watch page (YouTube-style).
-              onTapItem: (i) => _openVideo(_personalVideos[i]),
-              playingIdStream: audioHandler.currentSongStream,
-            ),
-
-          MediaShelfRow(
-            title: "Today's biggest hits",
-            items: [for (final s in _biggestHits) ShelfItem.fromSong(s)],
-            onTapItem: (i) => _playSong(_biggestHits[i]),
-            onShuffle: () => _shufflePlay(_biggestHits),
-            playingIdStream: audioHandler.currentSongStream,
-          ),
-          MediaShelfRow(
-            title: 'Trending on YouTube Music',
-            items: [for (final s in _ytTrending) ShelfItem.fromSong(s)],
-            onTapItem: (i) => _playSong(_ytTrending[i]),
-            onShuffle: () => _shufflePlay(_ytTrending),
-            playingIdStream: audioHandler.currentSongStream,
-          ),
-          MediaShelfRow(
-            title: 'Hot on YouTube Music',
-            items: [for (final s in _ytmHot) ShelfItem.fromSong(s)],
-            onTapItem: (i) => _playSong(_ytmHot[i]),
-            onShuffle: () => _shufflePlay(_ytmHot),
-            playingIdStream: audioHandler.currentSongStream,
-          ),
-          MediaShelfRow(
-            title: 'Top charts',
-            items: [for (final s in _topCharts) ShelfItem.fromSong(s)],
-            onTapItem: (i) => _playSong(_topCharts[i]),
-            onShuffle: () => _shufflePlay(_topCharts),
-            playingIdStream: audioHandler.currentSongStream,
-          ),
-          if (_ytmFresh.isNotEmpty)
-            MediaShelfRow(
-              title: 'Fresh zen',
-              items: [for (final s in _ytmFresh) ShelfItem.fromSong(s)],
-              onTapItem: (i) => _playSong(_ytmFresh[i]),
-              onShuffle: () => _shufflePlay(_ytmFresh),
-              playingIdStream: audioHandler.currentSongStream,
-            ),
-
-          // ── Infinite chart shelves (appended on scroll) ──
-          for (final shelf in _chartShelves)
-            MediaShelfRow(
-              title: shelf.title,
-              items: [for (final s in shelf.songs) ShelfItem.fromSong(s)],
-              onTapItem: (i) => _playSong(shelf.songs[i]),
-              onShuffle: () => _shufflePlay(shelf.songs),
-              playingIdStream: audioHandler.currentSongStream,
-            ),
-
-          if (_loadingMore)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: WaveSpinner(size: 22)),
-            )
-          else if (_endReached)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 28),
-              child: Center(
-                child: Text(
-                  'You\'re all caught up — pull to refresh',
-                  style: TextStyle(
-                    color: SpotifyColors.textTertiary,
-                    fontSize: 13,
+          // ── Subtle oxblood wash at the top (unique polish;
+          // delete this Positioned block for a flat dark home).
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 320,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      SpotifyColors.greenDark.withOpacity(0.30),
+                      SpotifyColors.background,
+                    ],
+                    stops: const [0.0, 1.0],
                   ),
                 ),
               ),
+            ),
+          ),
+          ListView(
+            controller: _scroll,
+            physics: const AlwaysScrollableScrollPhysics(),
+            // Bottom padding clears the floating mini player +
+            // nav bar (extendBody: content scrolls behind them).
+            padding: const EdgeInsets.fromLTRB(0, 6, 0, 170),
+            children: [
+              if (_isRefreshing)
+                const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: Center(child: WaveSpinner(size: 26)),
+                ),
+
+              _header(),
+
+              // ── Shortcut grid ──
+              _shortcutGrid(),
+
+              // ── Made for you ──
+              if (_recommendedToday.length >= 3) ...[
+                const _SectionTitle(title: 'Made for you'),
+                _DailyDiscoverPager(
+                  songs: _recommendedToday.take(10).toList(),
+                  seedArtist: _recentlyPlayed.isEmpty
+                      ? ''
+                      : _recentlyPlayed.first.artist
+                      .split(',')
+                      .first
+                      .trim(),
+                  onTap: _playSong,
+                ),
+                const SizedBox(height: 8),
+              ],
+
+              // ── New releases / playlists ──
+              if (_newAlbums.isNotEmpty)
+                _collectionRow('New releases', _newAlbums),
+              if (_collections.isNotEmpty)
+                _collectionRow('Playlists for you', _collections),
+
+              // ── Videos ──
+              if (_personalVideos.isNotEmpty)
+                MediaShelfRow(
+                  title: _videoShelfTitle,
+                  items: [
+                    for (final s in _personalVideos)
+                      ShelfItem.fromSong(s)
+                  ],
+                  // Videos open the dedicated watch page.
+                  onTapItem: (i) => _openVideo(_personalVideos[i]),
+                  playingIdStream: audioHandler.currentSongStream,
+                ),
+
+              // ── Trending shelves ──
+              if (_biggestHits.isNotEmpty)
+                MediaShelfRow(
+                  title: "Popular right now",
+                  items: [
+                    for (final s in _biggestHits)
+                      ShelfItem.fromSong(s)
+                  ],
+                  onTapItem: (i) => _playSong(_biggestHits[i]),
+                  onShuffle: () => _shufflePlay(_biggestHits),
+                  playingIdStream: audioHandler.currentSongStream,
+                ),
+              if (_ytTrending.isNotEmpty)
+                MediaShelfRow(
+                  title: 'Trending on YouTube Music',
+                  items: [
+                    for (final s in _ytTrending)
+                      ShelfItem.fromSong(s)
+                  ],
+                  onTapItem: (i) => _playSong(_ytTrending[i]),
+                  onShuffle: () => _shufflePlay(_ytTrending),
+                  playingIdStream: audioHandler.currentSongStream,
+                ),
+              if (_ytmHot.isNotEmpty)
+                MediaShelfRow(
+                  title: 'Hot on YouTube Music',
+                  items: [
+                    for (final s in _ytmHot) ShelfItem.fromSong(s)
+                  ],
+                  onTapItem: (i) => _playSong(_ytmHot[i]),
+                  onShuffle: () => _shufflePlay(_ytmHot),
+                  playingIdStream: audioHandler.currentSongStream,
+                ),
+              if (_topCharts.isNotEmpty)
+                MediaShelfRow(
+                  title: 'Top charts',
+                  items: [
+                    for (final s in _topCharts) ShelfItem.fromSong(s)
+                  ],
+                  onTapItem: (i) => _playSong(_topCharts[i]),
+                  onShuffle: () => _shufflePlay(_topCharts),
+                  playingIdStream: audioHandler.currentSongStream,
+                ),
+              if (_ytmFresh.isNotEmpty)
+                MediaShelfRow(
+                  title: 'Fresh music',
+                  items: [
+                    for (final s in _ytmFresh) ShelfItem.fromSong(s)
+                  ],
+                  onTapItem: (i) => _playSong(_ytmFresh[i]),
+                  onShuffle: () => _shufflePlay(_ytmFresh),
+                  playingIdStream: audioHandler.currentSongStream,
+                ),
+
+              // ── Infinite chart shelves (appended on scroll) ──
+              for (final shelf in _chartShelves)
+                MediaShelfRow(
+                  title: shelf.title,
+                  items: [
+                    for (final s in shelf.songs)
+                      ShelfItem.fromSong(s)
+                  ],
+                  onTapItem: (i) => _playSong(shelf.songs[i]),
+                  onShuffle: () => _shufflePlay(shelf.songs),
+                  playingIdStream: audioHandler.currentSongStream,
+                ),
+
+              if (_loadingMore)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(child: WaveSpinner(size: 22)),
+                )
+              else if (_endReached)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 28),
+                  child: Center(
+                    child: Text(
+                      'You\'re all caught up — pull to refresh',
+                      style: TextStyle(
+                        color: SpotifyColors.textTertiary,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+            ],        // ListView children
+          ),          // ListView
+        ],            // Stack children
+      ),              // Stack
+    );                // RefreshIndicator
+  }
+
+  /// Spotify-style skeleton: greeting line, 6 shortcut-tile
+  /// placeholders, shelf placeholders.
+  Widget _buildSkeletons() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 170),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+          child: Container(
+            width: 180,
+            height: 28,
+            decoration: BoxDecoration(
+              color: SpotifyColors.surface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Column(
+            children: [
+              for (var r = 0; r < 3; r++)
+                Row(
+                  children: [
+                    for (var c = 0; c < 2; c++)
+                      Expanded(
+                        child: Container(
+                          height: 60,
+                          margin: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: SpotifyColors.surface,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        SkeletonShelf(itemCount: 5),
+        const SkeletonTile(),
+        const SkeletonTile(),
+      ],
+    );
+  }
+
+  /// Header: Playfair greeting on the left, Listen-Together and
+  /// settings circles on the right.
+  Widget _header() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              _greeting,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: SpotifyColors.textPrimary,
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.4,
+                fontFamily: 'PlayfairDisplay',
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () =>
+                pushSharedAxisY(context, const ListenTogetherScreen()),
+            child: Container(
+              width: 40,
+              height: 40,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: SpotifyColors.surface,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.people_outline,
+                size: 24,
+                color: SpotifyColors.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          GestureDetector(
+            onTap: () => pushSharedAxisY(context, const SettingsScreen())
+                .then((_) => _loadAll()),
+            child: Container(
+              width: 40,
+              height: 40,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: SpotifyColors.surface,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.settings_outlined,
+                  size: 24, color: SpotifyColors.textPrimary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Spotify's 2-column shortcut grid: 60dp tiles, square art on the
+  /// left, label on the right. First tile is Liked Songs.
+  Widget _shortcutGrid() {
+    final songs = _shortcutSongs();
+    final rows = ((songs.length + 1) / 2).ceil();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Column(
+        children: [
+          // Liked Songs tile always first (paired with the first song).
+          Row(
+            children: [
+              Expanded(child: _likedTile()),
+              if (songs.isNotEmpty)
+                Expanded(child: _songTile(songs[0]))
+              else
+                const Expanded(child: SizedBox()),
+            ],
+          ),
+          for (var r = 1; r < rows; r++)
+            Row(
+              children: [
+                for (var c = 0; c < 2; c++)
+                  Expanded(
+                    child: (r * 2 + c) < songs.length
+                        ? _songTile(songs[r * 2 + c])
+                        : const Expanded(child: SizedBox()),
+                  ),
+              ],
             ),
         ],
       ),
     );
   }
 
-  Widget _buildSkeletons() {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(bottom: 170),
-      children: const [
-        SizedBox(height: 8),
-        SkeletonShelf(),
-        SkeletonShelf(),
-        SkeletonTile(),
-        SkeletonTile(),
-        SkeletonTile(),
-        SkeletonShelf(itemCount: 5),
-      ],
+  Widget _likedTile() {
+    return Padding(
+      padding: const EdgeInsets.all(4),
+      child: Listener(
+        // The heart holds its breath while the tile is pressed.
+        onPointerDown: (_) => _breath.stop(),
+        onPointerUp: (_) => _breath.repeat(reverse: true),
+        onPointerCancel: (_) => _breath.repeat(reverse: true),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => pushSharedAxisY(context, const LikedSongsScreen()),
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              color: SpotifyColors.surface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        SpotifyColors.highlight,
+                        SpotifyColors.green,
+                      ],
+                    ),
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(8),
+                      bottomLeft: Radius.circular(8),
+                    ),
+                  ),
+                  child: Center(
+                    child: AnimatedBuilder(
+                      animation: _breathScale,
+                      builder: (context, _) => Transform.scale(
+                        scale: _breathScale.value,
+                        child: const Icon(
+                          FluentIcons.heart_24_filled,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Liked Songs',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: SpotifyColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
-  /// Echo-style bar: Together circle (left) · centered title ·
-  /// settings circle (right).
-  Widget _echoHeader() {
+  Widget _songTile(Song song) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: SizedBox(
-        height: 48,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            const Text(
-              'ZenMusic',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontFamily: 'PaytoneOne',
-                color: SpotifyColors.textPrimary,
-                fontSize: 20,
-                letterSpacing: 0.2,
+      padding: const EdgeInsets.all(4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _playSong(song),
+        child: Container(
+          height: 60,
+          decoration: BoxDecoration(
+            color: SpotifyColors.surface,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 60,
+                height: 60,
+                child: YoutubeThumbnail(
+                  videoId: song.id,
+                  imageUrl: song.thumbnail,
+                  borderRadius: 0,
+                ),
               ),
-            ),
-            Positioned(
-              left: 0,
-              child: GestureDetector(
-                onTap: () =>
-                    pushSharedAxisY(context, const ListenTogetherScreen()),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: SpotifyColors.surface,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.people_outline,
-                    size: 24,
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  song.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                     color: SpotifyColors.textPrimary,
                   ),
                 ),
               ),
-            ),
-            Positioned(
-              right: 0,
-              child: GestureDetector(
-                onTap: () => pushSharedAxisY(context, const SettingsScreen())
-                    .then((_) => _loadAll()),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: SpotifyColors.surface,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.settings_outlined,
-                      size: 24, color: SpotifyColors.textPrimary),
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -719,7 +892,7 @@ class _HomeTabState extends State<HomeTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ShelfHeaderBar(title: title),
+        _SectionTitle(title: title),
         SizedBox(
           height: 236,
           child: ListView.separated(
@@ -745,331 +918,55 @@ class _HomeTabState extends State<HomeTab> {
     if (artist.isEmpty) return 'Videos for you';
     return 'Because you listened to $artist';
   }
-
-  Widget _recapSection(String monthKey) {
-    final monthStats = listeningStatsService.monthStats(monthKey);
-    final songs = listeningStatsService.monthTopSongs(monthKey, limit: 3);
-    final minutes = monthDisplayMinutes(monthStats);
-    if (minutes <= 0 && songs.isEmpty) return const SizedBox.shrink();
-
-    final parts = monthKey.split('-');
-    const months = [
-      '', 'January', 'February', 'March', 'April', 'May', 'June', 'July',
-      'August', 'September', 'October', 'November', 'December'
-    ];
-    final monthName = months[int.tryParse(parts[1]) ?? 1];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SectionHeader(
-          title: 'Your month',
-          icon: FluentIcons.data_trending_24_filled,
-        ),
-        ListeningRecapCard(
-          periodLabel: monthName,
-          minutes: minutes,
-          songs: songs,
-          onSongTap: (i) {
-            if (i >= songs.length) return;
-            final map = songs[i];
-            final id = map['ytid']?.toString();
-            if (id == null || id.isEmpty) return;
-            _playSong(Song(
-              id: id,
-              title: map['title']?.toString() ?? '',
-              artist: map['artist']?.toString() ?? '',
-              thumbnail: map['image']?.toString() ?? '',
-              duration: Duration.zero,
-            ));
-          },
-        ),
-      ],
-    );
-  }
 }
 
 // ═════════════════════════════════════════════
-// SPEED DIAL GRID — Echo logic: adaptive columns from width,
-// multi-row pages in a PageView, a Randomize tile, dot
-// indicators when multiple pages.
+// SECTION TITLE — ZenMusic's tick-rule: a small burgundy bar before
+// the label. (Local to this screen — media_shelf.dart's internal
+// headers are untouched.)
 // ═════════════════════════════════════════════
 
-class _SpeedDialGrid extends StatefulWidget {
-  final List<Song> items;
-  final bool isRandomizing;
-  final ValueChanged<Song> onItemTap;
-  final VoidCallback onRandomize;
-
-  const _SpeedDialGrid({
-    required this.items,
-    required this.isRandomizing,
-    required this.onItemTap,
-    required this.onRandomize,
-  });
-
-  @override
-  State<_SpeedDialGrid> createState() => _SpeedDialGridState();
-}
-
-class _SpeedDialGridState extends State<_SpeedDialGrid> {
-  final _pageCtrl = PageController();
-
-  @override
-  void dispose() {
-    _pageCtrl.dispose();
-    super.dispose();
-  }
+class _SectionTitle extends StatelessWidget {
+  final String title;
+  const _SectionTitle({required this.title});
 
   @override
   Widget build(BuildContext context) {
-    // Echo: target ~150dp per item; columns 3..5, rows 1/2/3.
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final available = constraints.maxWidth - 32;
-        final columns = (available / 150).floor().clamp(3, 5);
-        final rows = columns >= 6 ? 1 : (columns >= 4 ? 2 : 3);
-        final perPage = columns * rows;
-        final itemW = available / columns;
-        // One speed-dial slot: square art + label.
-        final slotH = itemW * 0.72 + 38;
-        final gridH = slotH * rows + 8;
-
-        // Items + the randomize tile appended.
-        final totalSlots = widget.items.length + 1;
-        final pageCount = (totalSlots + perPage - 1) ~/ perPage;
-
-        return Column(
-          children: [
-            SizedBox(
-              height: gridH,
-              child: PageView.builder(
-                controller: _pageCtrl,
-                itemCount: pageCount,
-                itemBuilder: (context, page) {
-                  return Padding(
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 16),
-                    child: Column(
-                      children: [
-                        for (var r = 0; r < rows; r++)
-                          SizedBox(
-                            height: slotH,
-                            child: Row(
-                              children: [
-                                for (var c = 0; c < columns; c++)
-                                  SizedBox(
-                                    width: itemW,
-                                    height: slotH,
-                                    child: _buildSlot(
-                                      page * perPage + r * columns + c,
-                                      itemW,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-            if (pageCount > 1)
-              SizedBox(
-                height: 22,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (var i = 0; i < pageCount; i++)
-                      AnimatedBuilder(
-                        animation: _pageCtrl,
-                        builder: (context, _) {
-                          final p = _pageCtrl.hasClients
-                              ? (_pageCtrl.page ?? 0).round()
-                              : 0;
-                          final active = p == i;
-                          return Container(
-                            margin: const EdgeInsets.symmetric(
-                                horizontal: 3),
-                            width: active ? 16 : 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                              color: active
-                                  ? SpotifyColors.textPrimary
-                                  : SpotifyColors.textTertiary
-                                  .withOpacity(0.5),
-                              borderRadius:
-                              BorderRadius.circular(4),
-                            ),
-                          );
-                        },
-                      ),
-                  ],
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildSlot(int index, double itemW) {
-    // Randomize tile — always the last slot.
-    if (index == widget.items.length) {
-      return Padding(
-        padding: const EdgeInsets.all(4),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: widget.onRandomize,
-          child: Container(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+      child: Row(
+        children: [
+          Container(
+            width: 3.5,
+            height: 16,
             decoration: BoxDecoration(
-              color: SpotifyColors.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: SpotifyColors.green.withOpacity(0.4),
-              ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                widget.isRandomizing
-                    ? const SizedBox(
-                  width: 26,
-                  height: 26,
-                  child: WaveSpinner(size: 26, strokeWidth: 2.2),
-                )
-                    : const Icon(Icons.casino_rounded,
-                    size: 28, color: SpotifyColors.green),
-                const SizedBox(height: 6),
-                const Text('Surprise me',
-                    style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: SpotifyColors.green)),
-              ],
+              color: SpotifyColors.green,
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
-        ),
-      );
-    }
-
-    if (index >= widget.items.length) {
-      return const SizedBox.shrink();
-    }
-
-    final song = widget.items[index];
-    return Padding(
-      padding: const EdgeInsets.all(4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => widget.onItemTap(song),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: double.infinity,
-              height: itemW * 0.72,
-              child: YoutubeThumbnail(
-                videoId: song.id,
-                imageUrl: song.thumbnail,
-                borderRadius: 12,
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+                color: SpotifyColors.textPrimary,
               ),
             ),
-            const SizedBox(height: 5),
-            Text(song.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: SpotifyColors.textPrimary)),
-            Text(song.artist,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 10,
-                    color: SpotifyColors.textSecondary)),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
 // ═════════════════════════════════════════════
-// QUICK PICKS GRID — Echo logic: horizontal 2-row song grid,
-// each cell a square tile with title/artist below.
-// ═════════════════════════════════════════════
-
-class _QuickPicksGrid extends StatelessWidget {
-  final List<Song> songs;
-  final ValueChanged<Song> onTap;
-
-  const _QuickPicksGrid({required this.songs, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    const cellW = 132.0;
-    const art = 120.0;
-    const cellH = 168.0;
-
-    return SizedBox(
-      height: cellH * 2 + 8,
-      child: GridView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2, // two rows
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          mainAxisExtent: cellW,
-        ),
-        itemCount: songs.length,
-        itemBuilder: (context, i) {
-          final song = songs[i];
-          return InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () => onTap(song),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: art,
-                  height: art,
-                  child: YoutubeThumbnail(
-                    videoId: song.id,
-                    imageUrl: song.thumbnail,
-                    borderRadius: 12,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: SpotifyColors.textPrimary)),
-                Text(song.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 10,
-                        color: SpotifyColors.textSecondary)),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════
-// DAILY DISCOVER PAGER — Echo logic: near-full-width hero
-// cards, dark gradient overlay, seed-based caption
-// ("Sounds like X" / "Because you listened to X" ...),
+// DAILY DISCOVER PAGER — near-full-width hero cards (Made for you),
+// dark gradient scrim over artwork, seed-based caption,
 // deterministic per song, round play button.
 // ═════════════════════════════════════════════
 
@@ -1131,7 +1028,8 @@ class _DailyDiscoverPager extends StatelessWidget {
                       else
                         const ColoredBox(
                             color: SpotifyColors.surfaceLight),
-                      // Echo's vertical gradient scrim.
+                      // Vertical gradient scrim (over artwork — the
+                      // white text below depends on it staying dark).
                       const DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
@@ -1199,14 +1097,13 @@ class _DailyDiscoverPager extends StatelessWidget {
                                   width: 44,
                                   height: 44,
                                   decoration: BoxDecoration(
-                                    color: Colors.white
-                                        .withOpacity(0.9),
+                                    color: SpotifyColors.highlight,
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Icon(
                                     Icons.play_arrow_rounded,
                                     size: 26,
-                                    color: Colors.black,
+                                    color: SpotifyColors.greenDark,
                                   ),
                                 ),
                               ],
@@ -1227,11 +1124,8 @@ class _DailyDiscoverPager extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════
-// MINI PLAYER — floating OPAQUE card. With extendBody, content
-// scrolls BEHIND the card but never through it: the 'surface'
-// setting is a solid surface card (the transparent variant was
-// user-rejected — unreadable over busy shelves), 'gradient' and
-// 'blur' keep their looks.
+// MINI PLAYER — UNCHANGED (user instruction: the mini player stays
+// exactly as it is; it is deliberately NOT part of the redesign).
 // ═════════════════════════════════════════════
 
 class MiniPlayer extends StatelessWidget {
@@ -1322,11 +1216,6 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
   static const double _dragThreshold = 10;
 
   // ── Track-change slide state (player-screen parity) ──
-  // Direction of the artwork + title/artist slide when the song
-  // changes. Explicit gestures (mini-player swipe, next button)
-  // record an intent just before skipping; the intent is consumed
-  // when the NEW song's data actually arrives. Auto-advance and
-  // radio keep the last direction (forward on first play).
   bool _slideForward = true;
   bool? _pendingSlideForward;
   DateTime _slideIntentAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -1350,19 +1239,11 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
     super.dispose();
   }
 
-  /// Records the swipe/button direction so the NEXT song change slides
-  /// the artwork and titles the way the user moved. Skips resolve
-  /// asynchronously, so the intent is stored until the song changes.
   void _noteSlideIntent(bool forward) {
     _pendingSlideForward = forward;
     _slideIntentAt = DateTime.now();
   }
 
-  /// Consumes a pending slide intent — but ONLY when the song id
-  /// actually changed and the intent is still fresh. An unrelated
-  /// rebuild between the gesture and the track resolution must not
-  /// eat the direction; a stale intent (skip that never happened)
-  /// must not hijack a later, unrelated track change.
   void _consumeSlideIntentIfNeeded() {
     final id = widget.metadata.id;
     if (id == _lastSlideSongId) return;
@@ -1382,11 +1263,6 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
     }
   }
 
-  /// Wraps a song-bound subtree so that when [slideKey] (the song id)
-  /// changes, the old content slides out and the new content slides in —
-  /// right-to-left for "next", left-to-right for "previous". The
-  /// outgoing child is pointer-disabled and clipped to this subtree's
-  /// bounds, so slides never bleed over neighboring widgets.
   Widget _slideOnChange({
     required String slideKey,
     required Widget child,
@@ -1404,8 +1280,6 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
         ],
       ),
       transitionBuilder: (child, animation) {
-        // ValueKey<String> on BOTH sides — a ValueKey<Object> would
-        // never compare equal (runtimeType check in Key equality).
         final incoming = child.key == ValueKey<String>(slideKey);
         final Offset slideFrom = incoming
             ? Offset(_slideForward ? 0.35 : -0.35, 0)
@@ -1436,8 +1310,6 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
 
   @override
   Widget build(BuildContext context) {
-    // Track-change slide: consume a pending swipe/button direction
-    // when (and only when) the song actually changed.
     _consumeSlideIntentIfNeeded();
     final metadata = widget.metadata;
     final state = widget.playbackState;
@@ -1455,11 +1327,9 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
             onHorizontalDragEnd: (d) {
               final v = d.primaryVelocity ?? 0;
               if (v < -300) {
-                // Swipe left → next (content slides leftward).
                 _noteSlideIntent(true);
                 audioHandler.skipToNext();
               } else if (v > 300) {
-                // Swipe right → previous (content slides rightward).
                 _noteSlideIntent(false);
                 audioHandler.skipToPrevious();
               }
@@ -1470,12 +1340,6 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
               builder: (context, miniBg, _) => Container(
                 height: MiniPlayer._playerHeight,
                 decoration: BoxDecoration(
-                  // OPAQUE surface card in EVERY mode: scrolling
-                  // content passes behind the card (extendBody) but
-                  // never shows through it. The old transparent
-                  // 'surface' variant made the player unreadable
-                  // over busy shelves (user-rejected). No boxShadow —
-                  // the dark halo stays gone. gradient/blur unchanged.
                   color: SpotifyColors.surface,
                   gradient: miniBg == 'gradient'
                       ? const LinearGradient(
@@ -1495,7 +1359,6 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                   BorderRadius.circular(MiniPlayer._borderRadius),
                   child: Stack(
                     children: [
-                      // ── Blurred artwork background (optional) ──
                       if (miniBg == 'blur' &&
                           (metadata.artUri?.toString().isNotEmpty ?? false))
                         Positioned.fill(
@@ -1520,19 +1383,11 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                         const EdgeInsets.symmetric(horizontal: 10),
                         child: Row(
                           children: [
-                            // Artwork slides on track change — old art
-                            // exits, new art enters, in the swipe/button
-                            // direction (clipped to this slot).
                             _slideOnChange(
                               slideKey: metadata.id,
                               child: _Artwork(metadata: metadata),
                             ),
                             Expanded(
-                              // Title/artist slide on track change, in
-                              // sync with the artwork (same duration +
-                              // curve + direction — the intent is
-                              // consumed once per song change, at the
-                              // top of build).
                               child: _slideOnChange(
                                 slideKey: 'meta-${metadata.id}',
                                 child: _Metadata(
@@ -1590,7 +1445,7 @@ class _Artwork extends StatelessWidget {
           imageUrl: url,
           width: MiniPlayer._artworkSize,
           height: MiniPlayer._artworkSize,
-          fit: BoxFit.cover, // CROP 16:9 thumbs into 1:1 — no bars
+          fit: BoxFit.cover,
           placeholder: (_, __) => Container(
             width: MiniPlayer._artworkSize,
             height: MiniPlayer._artworkSize,
@@ -1676,9 +1531,6 @@ class _Controls extends StatelessWidget {
   final PlaybackState playbackState;
   final bool hasNext;
   final Duration totalDuration;
-  // Records the slide direction for the track-change animation just
-  // before the skip fires (mini player has no previous button, so
-  // this is always "forward").
   final VoidCallback? onNextIntent;
 
   @override
@@ -1734,8 +1586,6 @@ class _CircularPlayButton extends StatefulWidget {
 
 class _CircularPlayButtonState extends State<_CircularPlayButton>
     with TickerProviderStateMixin {
-  // Wave phase travels only while playing; amplitude breathes in/out
-  // with the play state (wavy-slider parity).
   late final AnimationController _phase = AnimationController(
     duration: const Duration(milliseconds: 2000),
     vsync: this,
@@ -1765,7 +1615,7 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
     if (playing != _playing) {
       _playing = playing;
       if (playing) {
-        _phase.repeat(); // continues from the current angle
+        _phase.repeat();
         _amp.forward();
       } else {
         _amp.reverse();
@@ -1805,7 +1655,6 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
           return Stack(
             alignment: Alignment.center,
             children: [
-              // Ring: wavy progress arc ONLY — no background circle.
               AnimatedBuilder(
                 animation: Listenable.merge([_phase, _amp]),
                 builder: (context, _) => CustomPaint(
@@ -1827,7 +1676,7 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
                   child: CircularProgressIndicator(
                     strokeWidth: 2.5,
                     valueColor:
-                    AlwaysStoppedAnimation<Color>(SpotifyColors.green),
+                    AlwaysStoppedAnimation<Color>(SpotifyColors.highlight),
                   ),
                 )
               else
@@ -1916,6 +1765,7 @@ class _LibraryTabState extends State<LibraryTab> {
                       fontWeight: FontWeight.w700,
                       letterSpacing: -0.3,
                       color: SpotifyColors.textPrimary,
+                      fontFamily: 'PlayfairDisplay',
                     ),
                   ),
                 ),
@@ -2003,17 +1853,17 @@ class _LibraryTabState extends State<LibraryTab> {
                   icon: const Icon(
                     FluentIcons.arrow_upload_24_regular,
                     size: 16,
-                    color: SpotifyColors.green,
+                    color: SpotifyColors.highlight,
                   ),
                   label: const Text(
                     'Import',
-                    style: TextStyle(fontSize: 13, color: SpotifyColors.green),
+                    style:
+                    TextStyle(fontSize: 13, color: SpotifyColors.highlight),
                   ),
                 ),
               ],
             ),
           ),
-          // ── Liked songs + New playlist quick rows ──
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
             child: Row(
@@ -2029,24 +1879,24 @@ class _LibraryTabState extends State<LibraryTab> {
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           colors: [
-                            SpotifyColors.green.withOpacity(0.85),
-                            SpotifyColors.green.withOpacity(0.45),
+                            SpotifyColors.highlight,
+                            SpotifyColors.green,
                           ],
                         ),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Row(
+                      child: const Row(
                         children: [
-                          const Icon(FluentIcons.heart_24_filled,
-                              color: Colors.black, size: 22),
-                          const SizedBox(width: 10),
+                          Icon(FluentIcons.heart_24_filled,
+                              color: Colors.white, size: 22),
+                          SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'Liked songs · $_likedCount',
+                              'Liked songs',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.black,
+                              style: TextStyle(
+                                color: Colors.white,
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -2124,7 +1974,7 @@ class _LibraryTabState extends State<LibraryTab> {
               child: Row(
                 children: [
                   const Icon(Icons.download_rounded,
-                      size: 16, color: SpotifyColors.green),
+                      size: 16, color: SpotifyColors.highlight),
                   const SizedBox(width: 6),
                   Text(
                     'Downloads · ${_downloads.length}',
@@ -2149,7 +1999,6 @@ class _LibraryTabState extends State<LibraryTab> {
                   final song = _downloads[i];
                   return GestureDetector(
                     onTap: () async {
-                      // Plays from the local file — no network.
                       await audioHandler.setQueue([song], startIndex: 0);
                       if (!context.mounted) return;
                       Navigator.push(
@@ -2226,8 +2075,6 @@ class _LibraryTabState extends State<LibraryTab> {
               ),
             )
                 : ListView.separated(
-              // Bottom padding clears the floating mini player +
-              // nav bar (extendBody).
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 160),
               itemCount: _played.length,
               separatorBuilder: (_, __) => const SizedBox(height: 4),

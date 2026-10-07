@@ -1,266 +1,70 @@
+import 'dart:async';
 import 'dart:convert';
 
-import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/song.dart';
 
-/// Qobuz lossless source. The request-signing scheme, app credentials,
-/// getFileUrl contract and track-matching rules are ported from the
-/// qobuz-web extension source. Without a user auth token the service
-/// stays dormant and the app uses its default chain unchanged.
+/// Qobuz lossless tier via the self-hosted matcher microservice
+/// (github.com/vorlon-dev/qobuz-api — MIT, based on
+/// Anattana-Labs/qobuz-api).
+///
+/// Contract: GET /?id=<youtubeVideoId> →
+/// {
+///   status: "success",
+///   ytmusic:    { videoId, title, artist, duration },
+///   matched_track: { id, title, artist, album, duration, hires,
+///                    maximum_bit_depth, maximum_sampling_rate },
+///   streams: { <name>: { label, format_id, mime_type, bit_depth,
+///                        sampling_rate, url } }
+/// }
+///
+/// The service does its own strict matching (title normalization,
+/// Jaccard artist similarity, ±3s duration) against YouTube metadata.
+/// This client adds a loose second line of defense — duration vs the
+/// song (±15s) and artist word overlap — then picks the best stream
+/// generically: FLAC preferred, then highest bit_depth × sample_rate.
+/// No stream key names are hardcoded (the service may add tiers).
+///
+/// Any failure → null and the caller falls through its normal chain.
+/// Misses are negative-cached 30 min so a catalog miss costs at most
+/// one bounded stall per song.
+///
+/// Bitrate reporting: a real 24/88.2 stream once reported "9kbps"
+/// because the chosen stream entry lacked depth/rate fields. kbps is
+/// now only computed when BOTH fields are present; otherwise the tier
+/// estimate (FLAC ≈ 900 kbps) is used, and any implausible value
+/// (<100 kbps) is replaced by it. Matched-track metadata (which
+/// reliably carries bit depth / sample rate) is preferred in logs.
 class QobuzService {
-  static const _apiBase = 'https://www.qobuz.com/api.json/0.2';
-  static const _streamAppId = '712109809';
-  static const _streamAppSecret = '589be88e4538daea11f509d29e4a23b1';
-  static const _publicAppId = '735532640';
+  /// Kill switch — flip in code if the service misbehaves. A settings
+  /// toggle can replace this in a later round if the miss latency
+  /// bothers daily use.
+  static bool serviceEnabled = true;
 
-  // Lossless ladder, hi-res first. Only format_id 5 appears in the
-  // pasted source; the lossless ids are community Qobuz-API knowledge
-  // — flagged per house rules. Unsupported ids simply fail and the
-  // ladder falls through.
-  static const List<String> _formatLadder = ['27', '7', '6'];
+  static const _serviceBase = 'https://qobuz-api.antideploy.app';
+  static const _requestTimeout = Duration(seconds: 8);
+  static const _negativeTtl = Duration(minutes: 30);
+  static const _durationToleranceSec = 15;
 
-  static const _requestTimeout = Duration(seconds: 10);
-  static const _negativeTtl = Duration(minutes: 10);
+  /// Fallback tier estimate when a stream entry omits depth/rate:
+  /// stereo FLAC averages roughly 800–1000 kbps. Used for the badge
+  /// instead of garbage.
+  static const _flacKbpsEstimate = 900;
 
   final http.Client _client = http.Client();
   final Map<String, DateTime> _negativeCache = {};
 
   void dispose() => _client.close();
 
-  static Future<String?> _token() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final t = (prefs.getString('qobuz_token') ?? '').trim();
-      return t.isEmpty ? null : t;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<bool> losslessOnlyEnabled() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool('lossless_only') ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  // ── request signing (verified against qobuzSignedURL) ──
-
-  String _signedUrl(String object, String method, Map<String, String> params) {
-    final ts = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
-    final keys = params.keys.toList()..sort();
-    final raw = StringBuffer(object + method);
-    for (final k in keys) {
-      raw
-        ..write(k)
-        ..write(params[k]!);
-    }
-    raw
-      ..write(ts)
-      ..write(_streamAppSecret);
-    final sig = md5.convert(utf8.encode(raw.toString())).toString();
-    final query = [
-      for (final k in keys)
-        '${Uri.encodeComponent(k)}=${Uri.encodeComponent(params[k]!)}',
-      'request_ts=${Uri.encodeComponent(ts)}',
-      'request_sig=${Uri.encodeComponent(sig)}',
-    ].join('&');
-    return '$_apiBase/$object/$method?$query';
-  }
-
-  Future<Map<String, dynamic>?> _getJson(
-      String url, Map<String, String> headers) async {
-    try {
-      final resp = await _client
-          .get(Uri.parse(url), headers: headers)
-          .timeout(_requestTimeout);
-      if (resp.statusCode != 200) return null;
-      final body = resp.body;
-      if (body.startsWith('<!DOCTYPE html') || body.startsWith('<html')) {
-        return null;
-      }
-      return jsonDecode(body) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  // ── search (public endpoint, widget app id — flagged) ──
-
-  Future<List<dynamic>> _searchTracks(String query) async {
-    final url = '$_apiBase/track/search?q=${Uri.encodeComponent(query)}&limit=25';
-    final data = await _getJson(url, const {
-      'X-App-Id': _publicAppId,
-      'Accept': 'application/json',
-    });
-    final tracks = data?['tracks'];
-    if (tracks is! Map) return const [];
-    final items = tracks['items'];
-    return items is List ? items : const [];
-  }
-
-  // ── matching engine (ported from the extension's matchers) ──
-
-  static String _norm(String v) => v
-      .replaceAll('&', ' and ')
-      .replaceAll(RegExp(r'[^\w\s]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim()
-      .toLowerCase();
-
-  static String _cleanTitle(String v) {
-    var out = v;
-    const patterns = [
-      'remaster', 'remastered', 'deluxe', 'bonus', 'single',
-      'album version', 'radio edit', 'original mix', 'extended',
-      'club mix', 'remix', 'live', 'acoustic', 'demo',
-    ];
-    var changed = true;
-    while (changed) {
-      changed = false;
-      out = out.replaceAllMapped(
-        RegExp(r'\(([^)]*)\)|\[([^\]]*)\]'),
-            (m) {
-          final inner =
-          ((m.group(1) ?? '') + (m.group(2) ?? '')).toLowerCase();
-          for (final p in patterns) {
-            if (inner.contains(p)) {
-              changed = true;
-              return ' ';
-            }
-          }
-          return m.group(0)!;
-        },
-      );
-    }
-    return out.replaceAll(RegExp(r'\s+'), ' ').trim();
-  }
-
-  static bool _titlesMatch(String expected, String found) {
-    final a = _norm(expected);
-    final b = _norm(found);
-    if (a.isEmpty || b.isEmpty) return false;
-    if (a == b || a.contains(b) || b.contains(a)) return true;
-    final ca = _cleanTitle(a);
-    final cb = _cleanTitle(b);
-    if (ca.isNotEmpty &&
-        cb.isNotEmpty &&
-        (ca == cb || ca.contains(cb) || cb.contains(ca))) {
-      return true;
-    }
-    return false;
-  }
-
-  static List<String> _splitArtists(String v) => v
-      .toLowerCase()
-      .replaceAll(RegExp(r'\bfeat\b'), '|')
-      .replaceAll(RegExp(r'\bfeaturing\b'), '|')
-      .replaceAll(RegExp(r'\bft\b'), '|')
-      .replaceAll(RegExp(r'\band\b'), '|')
-      .replaceAll(RegExp(r'[,&;]'), '|')
-      .replaceAll(RegExp(r'\bx\b'), '|')
-      .split('|')
-      .map(_norm)
-      .where((s) => s.isNotEmpty)
-      .toList();
-
-  static bool _artistsMatch(String expected, String found) {
-    final a = _norm(expected);
-    final b = _norm(found);
-    if (a.isEmpty || b.isEmpty) return false;
-    if (a == b || a.contains(b) || b.contains(a)) return true;
-    for (final ap in _splitArtists(expected)) {
-      for (final bp in _splitArtists(found)) {
-        if (ap == bp || ap.contains(bp) || bp.contains(ap)) return true;
-      }
-    }
-    return false;
-  }
-
-  static bool _durationOk(int expectedMs, num? foundSeconds) {
-    if (expectedMs <= 0) return true;
-    final foundMs = ((foundSeconds ?? 0) * 1000).round();
-    if (foundMs <= 0) return true;
-    return (foundMs - expectedMs).abs() <= 10000;
-  }
-
-  Map<String, dynamic>? _bestMatch(List<dynamic> items, Song song) {
-    Map<String, dynamic>? best;
-    var bestScore = -1;
-    for (final entry in items) {
-      if (entry is! Map) continue;
-      final item = Map<String, dynamic>.from(entry);
-      final title = '${item['title'] ?? ''}';
-      final version = '${item['version'] ?? ''}';
-      final display =
-      version.isEmpty || title.toLowerCase().contains(version.toLowerCase())
-          ? title
-          : '$title ($version)';
-      final artist = '${(item['performer'] as Map?)?['name'] ?? ''}';
-
-      if (!_titlesMatch(song.title, display)) continue;
-      if (!_artistsMatch(song.artist, artist)) continue;
-      if (!_durationOk(song.duration.inMilliseconds,
-          item['duration'] as num?)) {
-        continue;
-      }
-
-      var score = 0;
-      if (_norm(song.title) == _norm(display)) score += 100;
-      if (_norm(song.artist) == _norm(artist)) score += 40;
-      score += (item['maximum_bit_depth'] as num? ?? 0).toInt();
-      score += ((item['maximum_sampling_rate'] as num? ?? 0) * 10).toInt();
-      if (score > bestScore) {
-        bestScore = score;
-        best = item;
-      }
-    }
-    return best;
-  }
-
-  // ── stream resolution (getFileUrl, signed + token) ──
-
-  Future<({String url, bool sample, int? kbps})?> _getFileUrl(
-      String trackId, String formatId, String token) async {
-    final url = _signedUrl('track', 'getFileUrl', {
-      'track_id': trackId,
-      'format_id': formatId,
-      'intent': 'stream',
-    });
-    final data = await _getJson(url, {
-      'X-App-Id': _streamAppId,
-      'X-User-Auth-Token': token,
-      'Accept': 'application/json',
-    });
-    if (data == null) return null;
-    final streamUrl = '${data['url'] ?? ''}';
-    if (streamUrl.isEmpty) return null;
-    final sample = data['sample'] == true;
-
-    int? kbps;
-    final format = data['format'];
-    if (format is Map) {
-      final depth = (format['bit_depth'] as num?)?.toInt() ?? 0;
-      final rate = (format['sampling_rate'] as num?)?.toDouble() ?? 0;
-      if (depth > 0 && rate > 0) {
-        kbps = (depth * rate * 1000 * 2 / 1000).round(); // stereo estimate
-      }
-    }
-    return (url: streamUrl, sample: sample, kbps: kbps);
-  }
-
   /// Lossless attempt for a default-chain song. Returns null when the
-  /// service is off, no confident match exists, or no full-quality
-  /// stream is available — the caller then falls through its chain.
+  /// tier is off, the service can't be reached, no confident match
+  /// exists, or no full-quality stream is available.
   Future<({String url, Map<String, String> headers, int? kbps})?>
   tryLossless(Song song) async {
-    final token = await _token();
-    if (token == null) return null;
+    if (!serviceEnabled) return null;
+    // JioSaavn songs have a non-YouTube id and their own 320kbps tier.
+    if (song.isFromJiosaavn) return null;
 
     final neg = _negativeCache[song.id];
     if (neg != null && DateTime.now().difference(neg) < _negativeTtl) {
@@ -268,27 +72,124 @@ class QobuzService {
     }
 
     try {
-      final artist = song.artist.split(',').first.trim();
-      final items = await _searchTracks('${song.title} $artist'.trim());
-      if (items.isEmpty) {
-        _negativeCache[song.id] = DateTime.now();
-        return null;
+      final uri = Uri.parse('$_serviceBase/')
+          .replace(queryParameters: {'id': song.id});
+      final resp = await _client
+          .get(uri, headers: const {'Accept': 'application/json'})
+          .timeout(_requestTimeout);
+
+      if (resp.statusCode != 200) {
+        return _miss(song.id);
       }
-      final match = _bestMatch(items, song);
-      if (match == null) {
-        _negativeCache[song.id] = DateTime.now();
-        return null;
+      final body = resp.body;
+      // Cold-start 5xx pages and HTML error pages are not JSON.
+      if (body.trimLeft().startsWith('<')) {
+        return _miss(song.id);
       }
-      final trackId = '${match['id']}';
-      for (final formatId in _formatLadder) {
-        final stream = await _getFileUrl(trackId, formatId, token);
-        if (stream == null || stream.sample) continue;
-        return (url: stream.url, headers: const <String, String>{}, kbps: stream.kbps);
+      final dynamic decoded = jsonDecode(body);
+      if (decoded is! Map<String, dynamic>) return _miss(song.id);
+      if (decoded['status'] != 'success') return _miss(song.id);
+
+      final matched = decoded['matched_track'];
+      if (matched is! Map) return _miss(song.id);
+      final mt = Map<String, dynamic>.from(matched);
+
+      // ── Loose re-validation (the service matched against YouTube
+      // metadata; this guards against a bad deploy or drift) ──
+      final matchDur = (mt['duration'] as num?)?.toInt() ?? 0;
+      final songDur = song.duration.inSeconds;
+      if (songDur > 0 && matchDur > 0 &&
+          (matchDur - songDur).abs() > _durationToleranceSec) {
+        return _miss(song.id);
       }
-      _negativeCache[song.id] = DateTime.now();
-      return null;
+      if (!_artistPlausible(song.artist, '${mt['artist'] ?? ''}')) {
+        return _miss(song.id);
+      }
+
+      // ── Best stream pick (generic over key names) ──
+      final streams = decoded['streams'];
+      if (streams is! Map) return _miss(song.id);
+      ({String url, int? kbps, int score})? best;
+      streams.forEach((key, value) {
+        if (value is! Map) return;
+        final m = Map<String, dynamic>.from(value);
+        final url = '${m['url'] ?? ''}';
+        if (url.isEmpty) return;
+        final mime = '${m['mime_type'] ?? ''}'.toLowerCase();
+        final depth = (m['bit_depth'] as num?)?.toInt() ?? 0;
+        final rate = (m['sampling_rate'] as num?)?.toInt() ?? 0;
+        var score = 0;
+        if (mime.contains('flac')) score += 100000;
+        score += depth * 1000 + rate;
+        // Stereo bitrate estimate: depth(bits) × rate(Hz) × 2ch → kbps.
+        // GUARD: only when BOTH fields are present — a missing field
+        // must not produce garbage (a real 24/88.2 stream once printed
+        // "9kbps" because its entry lacked them).
+        final kbps = depth > 0 && rate > 0
+            ? ((depth * rate * 2) / 1000).round()
+            : (mime.contains('flac') ? _flacKbpsEstimate : null);
+        if (best == null || score > best!.score) {
+          best = (url: url, kbps: kbps, score: score);
+        }
+      });
+      final pick = best;
+      if (pick == null) return _miss(song.id);
+
+      // Plausibility floor: the picked stream's computed kbps may
+      // still be absent or nonsense; the matched-track metadata is
+      // the more reliable source, and the tier estimate is the floor.
+      final mtDepth = (mt['maximum_bit_depth'] as num?)?.toInt() ?? 0;
+      final mtRate = (mt['maximum_sampling_rate'] as num?)?.toInt() ?? 0;
+      int? kbpsOut;
+      if (pick.kbps != null && pick.kbps! >= 100) {
+        kbpsOut = pick.kbps;
+      } else if (mtDepth > 0 && mtRate > 0) {
+        kbpsOut = ((mtDepth * mtRate * 2) / 1000).round();
+      } else if (pick.url.toLowerCase().contains('flac')) {
+        kbpsOut = _flacKbpsEstimate;
+      }
+
+      print('🎵 Qobuz lossless: "${song.title}" → '
+          '${mt['title']} '
+          '(${mt['maximum_bit_depth'] ?? '?'}-bit/'
+          '${mt['maximum_sampling_rate'] ?? '?'}kHz)'
+          '${kbpsOut != null ? ' ≈${kbpsOut}kbps' : ''}');
+      return (
+      url: pick.url,
+      headers: const <String, String>{},
+      kbps: kbpsOut,
+      );
     } catch (_) {
-      return null;
+      // Network errors count as a miss too — a down service must not
+      // be hammered on every play.
+      return _miss(song.id);
     }
+  }
+
+  /// Records a negative-cache entry and returns the null result the
+  /// caller propagates. Typed as the record so `return _miss(id);`
+  /// compiles everywhere it's used.
+  ({String url, Map<String, String> headers, int? kbps})? _miss(
+      String songId) {
+    _negativeCache[songId] = DateTime.now();
+    return null;
+  }
+
+  /// Artist sanity: at least one meaningful word in common. Both
+  /// directions checked; empty data never blocks.
+  static bool _artistPlausible(String expected, String found) {
+    final e = expected.toLowerCase();
+    final f = found.toLowerCase();
+    if (e.isEmpty || f.isEmpty) return true;
+    final eWords = e
+        .split(RegExp(r'[,;&\s]+'))
+        .where((w) => w.length > 2)
+        .toSet();
+    final fWords = f
+        .split(RegExp(r'[,;&\s]+'))
+        .where((w) => w.length > 2)
+        .toSet();
+    if (eWords.isEmpty || fWords.isEmpty) return true;
+    return eWords.any(fWords.contains) || fWords.any(eWords.contains);
   }
 }
