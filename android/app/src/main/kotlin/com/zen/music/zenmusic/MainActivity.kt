@@ -27,8 +27,8 @@ import com.zen.music.zenmusic.dsp.core.models.ParametricEQ
 import com.zen.music.zenmusic.dsp.core.models.ParametricEQBand
 import com.zen.music.zenmusic.dsp.core.parser.ParametricEQParser
 import com.zen.music.zenmusic.extensions.ZenExtensionManager
-import com.zen.music.zenmusic.innertubex.InnerTubeXResolver
-import com.zen.music.zenmusic.innertubex.itxDebugLogs
+import com.zen.music.zenmusic.innertube.ZenInnertubeResolver
+import com.zen.music.zenmusic.videoplayer.ZenVideoPlayerViewFactory
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -79,13 +79,21 @@ class MainActivity : AudioServiceActivity() {
         registerDspChannel(flutterEngine)
         // In-app APK installer channel (OTA updates)
         InstallApkPlugin.register(flutterEngine, this)
+        // Native merged-stream video player (video watch page) —
+        // platform-view factory; each instance owns the per-view
+        // channel zen/video_player_<viewId>.
+        flutterEngine.platformViewsController.registry
+            .registerViewFactory(
+                "zen_video_player",
+                ZenVideoPlayerViewFactory(flutterEngine.dartExecutor.binaryMessenger)
+            )
         // Flutter apps have no BuildConfig — use the runtime debuggable
-        // flag instead. Also gates the innertubex package's verbose logs.
+        // flag instead. Also gates the extraction resolver's verbose logs.
         val isDebuggable =
             (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (isDebuggable) Timber.plant(Timber.DebugTree())
-        itxDebugLogs = isDebuggable
-        InnerTubeXResolver.init(applicationContext)
+        ZenInnertubeResolver.debugLogs = isDebuggable
+        ZenInnertubeResolver.init(applicationContext)
     }
 
     // ═══════════════════════════════════════════
@@ -193,11 +201,14 @@ class MainActivity : AudioServiceActivity() {
     }
 
     // ═══════════════════════════════════════════
-    // INNERTUBEX — Tier-0 stream extraction (cipher-resilient,
-    // benchmarked client catalog). "extractVideo" serves the video
-    // watch page: audio + video streams from the SAME bot-check-proof
-    // native pipeline (the Dart-side web clients get bot-checked on
-    // restricted videos; ITX does not).
+    // INNERTUBE — Tier-0 stream extraction through the vendored
+    // :innertube module (raw player API, direct-URL clients). The
+    // channel name stays 'zen/innertubex' — legacy but deliberate:
+    // innertubex_bridge.dart is untouched and every Dart call site
+    // keeps working. "extractVideo" serves the video watch page:
+    // audio + video from ONE player response (same recording,
+    // guaranteed sync). "relatedSongs" is the watch queue's second
+    // source. "channelThumb" serves the watch page's channel avatar.
     // ═══════════════════════════════════════════
 
     private fun registerInnertubexChannel(flutterEngine: FlutterEngine) {
@@ -211,7 +222,7 @@ class MainActivity : AudioServiceActivity() {
                         val skip = (call.argument<List<String>>("skipClients") ?: emptyList()).toSet()
                         Thread {
                             try {
-                                val ex = InnerTubeXResolver.extractBlocking(
+                                val ex = ZenInnertubeResolver.extractBlocking(
                                     videoId, maxKbps, skip, requireM4a
                                 )
                                 mainHandler.post {
@@ -243,7 +254,7 @@ class MainActivity : AudioServiceActivity() {
                         val videoId = call.argument<String>("videoId") ?: ""
                         Thread {
                             val streams = try {
-                                InnerTubeXResolver.extractVideoBlocking(videoId)
+                                ZenInnertubeResolver.extractVideoBlocking(videoId)
                             } catch (t: Throwable) {
                                 null
                             }
@@ -266,20 +277,42 @@ class MainActivity : AudioServiceActivity() {
                     }
                     "headersFor" -> {
                         val url = call.argument<String>("url") ?: ""
-                        result.success(InnerTubeXResolver.headersFor(url))
+                        result.success(ZenInnertubeResolver.headersFor(url))
                     }
                     "onRefused" -> {
                         val url = call.argument<String>("url") ?: ""
-                        result.success(InnerTubeXResolver.onRefused(url))
+                        result.success(ZenInnertubeResolver.onRefused(url))
                     }
                     "onSessionChanged" -> {
-                        InnerTubeXResolver.onSessionChanged()
+                        ZenInnertubeResolver.onSessionChanged()
                         result.success(null)
                     }
                     "getVisitorData" -> {
                         Thread {
-                            val vd = InnerTubeXResolver.visitorDataBlocking()
+                            val vd = ZenInnertubeResolver.visitorDataBlocking()
                             mainHandler.post { result.success(vd) }
+                        }.start()
+                    }
+                    "relatedSongs" -> {
+                        val videoId = call.argument<String>("videoId") ?: ""
+                        Thread {
+                            val songs = try {
+                                ZenInnertubeResolver.relatedSongsBlocking(videoId)
+                            } catch (_: Throwable) {
+                                emptyList<Map<String, Any?>>()
+                            }
+                            mainHandler.post { result.success(songs) }
+                        }.start()
+                    }
+                    "channelThumb" -> {
+                        val videoId = call.argument<String>("videoId") ?: ""
+                        Thread {
+                            val url = try {
+                                ZenInnertubeResolver.channelThumbBlocking(videoId)
+                            } catch (_: Throwable) {
+                                null
+                            }
+                            mainHandler.post { result.success(url) }
                         }.start()
                     }
                     else -> result.notImplemented()

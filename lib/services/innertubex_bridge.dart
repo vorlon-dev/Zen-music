@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 
-/// One stream minted by the native InnerTubeX resolver.
+import '../models/song.dart';
+
+/// One stream minted by the native extraction resolver.
 class ItxStream {
   const ItxStream({
     required this.videoId,
@@ -40,9 +42,9 @@ class ItxStream {
   }
 }
 
-/// Audio + video streams from one ITX extraction (video watch page).
-/// [videoUrl] is ⚠️ UNVERIFIED — null when the native side has no
-/// video stream for the video (callers then fall back).
+/// Audio + video streams from one native extraction (video watch
+/// page). [videoUrl] is null when the native response has no direct
+/// video-only stream (callers fall back).
 class ItxVideoStreams {
   const ItxVideoStreams({
     required this.videoId,
@@ -71,7 +73,9 @@ class ItxVideoStreams {
   }
 }
 
-/// Dart bridge to the native InnerTubeX resolver (zen/innertubex).
+/// Dart bridge to the native extraction resolver (zen/innertubex —
+/// legacy channel name, deliberately kept: every Dart call site
+/// keeps working across the innertubex → :innertube migration).
 class InnertubexBridge {
   InnertubexBridge._();
 
@@ -144,6 +148,53 @@ class InnertubexBridge {
         'videoId': videoId,
       });
       return ItxVideoStreams.fromMap(raw);
+    } on MissingPluginException {
+      _available = false;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Related songs from the native watch-next — the queue fallback
+  /// when the radio service returns nothing. Durations are absent
+  /// in the payload (zeros; the watch UI hides empty durations).
+  static Future<List<Song>> relatedSongs(String videoId) async {
+    try {
+      final raw = await _channel.invokeMethod('relatedSongs', {
+        'videoId': videoId,
+      });
+      if (raw is! List) return const [];
+      return raw
+          .map<Song>((e) {
+        final m = e as Map;
+        return Song(
+          id: m['id']?.toString() ?? '',
+          title: m['title']?.toString() ?? 'Video',
+          artist: m['artist']?.toString() ?? 'YouTube',
+          thumbnail: m['thumbnail']?.toString() ??
+              'https://i.ytimg.com/vi/${m['id']}/mqdefault.jpg',
+          duration: Duration.zero,
+        );
+      })
+          .where((s) => s.id.isNotEmpty)
+          .toList();
+    } on MissingPluginException {
+      _available = false;
+      return const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Channel avatar URL for the video watch page (best-effort;
+  /// null when unknown — the UI keeps its letter-avatar fallback).
+  static Future<String?> channelThumb(String videoId) async {
+    try {
+      final v = await _channel.invokeMethod('channelThumb', {
+        'videoId': videoId,
+      });
+      return v is String && v.isNotEmpty ? v : null;
     } on MissingPluginException {
       _available = false;
       return null;

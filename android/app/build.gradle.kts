@@ -51,18 +51,30 @@ dependencies {
     // audio-pipeline injection in the forked-just_audio round).
     implementation(project(":audio-dsp"))
 
+    // Tier-0 stream extraction — vendored raw player API module
+    // (direct-URL clients: ANDROID_VR 1.65.10 / VISIONOS), served
+    // through ZenInnertubeResolver on the legacy 'zen/innertubex'
+    // channel. Replaced the innertubex JitPack artifact (removed).
+    implementation(project(":innertube"))
+
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
-    implementation("androidx.media3:media3-common:1.4.1")
 
-    // InnerTubeX — Tier-0 stream extraction. Its POM does NOT expose
-    // ktor transitively (JitPack compileOnly), so ktor must be pinned
-    // here — at 3.x (2.x pins produce a mixed classpath → runtime
-    // NoClassDefFoundError: ContentNegotiation).
-    implementation("com.github.MetrolistGroup.innertubex:innertubex-android:v0.7.0")
+    // media3 — one version across the set. exoplayer brings
+    // datasource/extractor transitively (ZenVideoPlayerView uses
+    // DefaultHttpDataSource + ProgressiveMediaSource/MergingMediaSource);
+    // media3-ui is NOT needed — the player renders into a TextureView.
+    implementation("androidx.media3:media3-common:1.4.1")
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+
+    // ktor — one version across the classpath. The :innertube module
+    // declares identical pins of its own; these stay explicit at app
+    // level so no future transitive can pull a different ktor
+    // (2.x mixes produced runtime NoClassDefFoundError:
+    // ContentNegotiation).
     implementation("io.ktor:ktor-client-core:3.1.3")
     implementation("io.ktor:ktor-client-okhttp:3.1.3")
     implementation("io.ktor:ktor-client-content-negotiation:3.1.3")

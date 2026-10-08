@@ -27,6 +27,7 @@ import 'collection_screen.dart';
 import 'new_release_screen.dart';
 import 'player_screen.dart';
 import 'recognize_screen.dart';
+import 'video_watch_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -387,9 +388,15 @@ class _SearchScreenState extends State<SearchScreen>
                   style: TextStyle(color: SpotifyColors.textPrimary)),
               onTap: () {
                 Navigator.pop(sheetContext);
-                VideoPreferenceService.instance
-                    .setPreferred(song.id, true);
-                _playWithRadio(song);
+                pushSharedAxisY(
+                  context,
+                  VideoWatchScreen(
+                    videoId: song.id,
+                    title: song.title,
+                    artist: song.artist,
+                    thumbnail: song.thumbnail,
+                  ),
+                );
               },
             ),
             ListTile(

@@ -39,6 +39,7 @@ import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'user_playlist_screen.dart';
 import 'video_watch_screen.dart';
+import 'youtube_tab_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -64,7 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
     AppearancePrefs.load().then((_) {
       if (!mounted) return;
       final tab = AppearancePrefs.defaultTab.value;
-      setState(() => _currentTab = tab < 0 ? 0 : (tab > 2 ? 2 : tab));
+      setState(() => _currentTab = tab < 0 ? 0 : (tab > 3 ? 3 : tab));
     });
 
     // First-launch welcome + OTA update check, after the first frame
@@ -111,6 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
             HomeTab(),
             SearchScreen(),
             LibraryTab(),
+            YoutubeTab(),
           ],
         ),
       ),
@@ -135,6 +137,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: FluentIcons.library_24_regular,
                 activeIcon: FluentIcons.library_24_filled,
                 label: 'Library',
+              ),
+              ZenNavItem(
+                icon: Icons.play_circle_outline_rounded,
+                activeIcon: Icons.play_circle_outline_rounded,
+                label: 'Videos',
               ),
             ],
             currentIndex: _currentTab,
@@ -1208,6 +1215,20 @@ class MiniPlayer extends StatelessWidget {
   }
 
   void _openNowPlaying(BuildContext context) {
+    // An active video session reopens the WATCH page at its saved
+    // position (YouTube parity) instead of the audio player.
+    if (VideoSession.active) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => VideoWatchScreen(
+          videoId: VideoSession.videoId,
+          title: VideoSession.title,
+          artist: VideoSession.artist,
+          thumbnail: VideoSession.thumbnail,
+          startPosition: VideoSession.position,
+        ),
+      ));
+      return;
+    }
     Navigator.of(context).push(_createSlideTransition());
   }
 
