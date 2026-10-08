@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/song.dart';
+import '../utilities/format_utils.dart';
 
 typedef _JsonMap = Map<String, dynamic>;
 
@@ -229,9 +230,11 @@ class YtMusicService {
 
     return Song(
       id: videoId,
-      title: title,
+      title: formatSongTitle(title),
       artist: artist,
-      thumbnail: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+      // mqdefault: true 16:9 — hqdefault is 4:3 with black bars baked
+      // into the pixels (the chart-shelf bars bug).
+      thumbnail: 'https://i.ytimg.com/vi/$videoId/mqdefault.jpg',
       duration: _parseDuration(fixedColumnText(item)) ?? Duration.zero,
     );
   }

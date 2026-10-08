@@ -220,7 +220,7 @@ class _SearchScreenState extends State<SearchScreen>
       id: videoId,
       title: title,
       artist: artist,
-      thumbnail: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+      thumbnail: 'https://i.ytimg.com/vi/$videoId/mqdefault.jpg',
       duration: Duration.zero,
     );
     // The user linked THIS video. Mark it explicit so the resolver
@@ -508,10 +508,10 @@ class _SearchScreenState extends State<SearchScreen>
             // Echo's bar geometry: 16dp horizontal, 8dp top, 16dp
             // below — identical in BOTH states (the pill never
             // morphs to full-bleed).
-        Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-        child: _echoSearchBar(),
-      ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: _echoSearchBar(),
+            ),
             const SizedBox(height: 16),
             Expanded(
               child: _searchActive && _showSearchContent
@@ -531,6 +531,11 @@ class _SearchScreenState extends State<SearchScreen>
   /// Echo's bar: back/search toggle (left) · source-aware field ·
   /// clear + recognize + source toggle (right). Stays a 28-radius
   /// pill in every state.
+  ///
+  /// SEARCH SPINNER: lives in the LEFT ICON BUTTON's slot (fixed
+  /// 48×48 hit target) — a conditional prefixIcon inside the
+  /// TextField swapped the field's layout width mid-composition and
+  /// clipped the typed text ("Am The D" bug).
   Widget _echoSearchBar() {
     final hasText = _searchBar.text.isNotEmpty;
     return Container(
@@ -543,9 +548,12 @@ class _SearchScreenState extends State<SearchScreen>
       child: Row(
         children: [
           // Echo: search icon when idle, back arrow when active —
-          // back deactivates the search state.
+          // back deactivates the search state. While a search is
+          // RUNNING, the icon slot shows the wavy spinner instead
+          // (fixed-size slot → zero layout shift).
           IconButton(
             onPressed: () {
+              if (_searching) return;
               if (_searchActive) {
                 _deactivateSearch();
                 _searchBar.clear();
@@ -563,7 +571,16 @@ class _SearchScreenState extends State<SearchScreen>
                 _inputNode.requestFocus();
               }
             },
-            icon: Icon(
+            icon: _searching
+                ? const Padding(
+              padding: EdgeInsets.all(14),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: WaveSpinner(size: 20, strokeWidth: 2.2),
+              ),
+            )
+                : Icon(
               _searchActive
                   ? Icons.arrow_back_rounded
                   : Icons.search_rounded,
@@ -577,26 +594,12 @@ class _SearchScreenState extends State<SearchScreen>
               textInputAction: TextInputAction.search,
               style: const TextStyle(
                   color: SpotifyColors.textPrimary, fontSize: 16),
-              decoration: InputDecoration(
-                hintText: _source == 'library'
-                    ? 'Search your library'
-                    : 'Search songs, artists, playlists',
-                hintStyle:
-                const TextStyle(color: SpotifyColors.textTertiary),
+              decoration: const InputDecoration(
+                hintText: 'Search songs, artists, playlists',
+                hintStyle: TextStyle(color: SpotifyColors.textTertiary),
                 border: InputBorder.none,
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                prefixIcon: _searching
-                    ? const Padding(
-                  padding: EdgeInsets.all(13),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child:
-                    WaveSpinner(size: 20, strokeWidth: 2.2),
-                  ),
-                )
-                    : null,
+                contentPadding: EdgeInsets.symmetric(horizontal: 4),
               ),
               onChanged: _onChanged,
               onSubmitted: (_) => _submitSearch(),
@@ -625,7 +628,7 @@ class _SearchScreenState extends State<SearchScreen>
                   ? Icons.library_music_rounded
                   : Icons.public_rounded,
               color: _source == 'library'
-                  ? SpotifyColors.green
+                  ? SpotifyColors.highlight
                   : SpotifyColors.textSecondary,
               size: 22,
             ),

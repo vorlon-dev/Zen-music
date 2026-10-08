@@ -60,6 +60,16 @@ object InnerTubeXResolver {
         val headers: Map<String, String>,
     )
 
+    /// Audio + video streams from one extraction. Used by the video
+    /// watch page: audio via the handler pipeline, video muted+synced.
+    class VideoStreams(
+        val videoId: String,
+        val audioUrl: String?,
+        val videoUrl: String?,
+        val headers: Map<String, String>,
+        val clientName: String,
+    )
+
     private var prefs: android.content.SharedPreferences? = null
     private var poTokens: PoTokenGenerator? = null
     private var playerDir: File? = null
@@ -325,6 +335,49 @@ object InnerTubeXResolver {
         requireM4a: Boolean,
     ): Extracted? =
         runBlocking { extract(videoId, maxKbps, skipClients, requireM4a) }
+
+    /// Audio + video extraction for the video watch page. Uses the
+    /// same cipher/bot-check-proof pipeline as [extract]; returns the
+    /// audio stream (proven field) plus the VIDEO stream (⚠️ UNVERIFIED
+    /// property — see the comment on videoUrl).
+    fun extractVideoBlocking(videoId: String): VideoStreams? =
+        runBlocking {
+            ensureVisitorData()
+            innerTube.locale = YouTubeLocale(gl = "US", hl = "en")
+            try {
+                val stream =
+                    extractor.extract(
+                        videoId = videoId,
+                        hints =
+                            ContentHints()
+                                .withStreamCapabilities(
+                                    allowHls = false, allowSabr = false, allowBoundedRange = true
+                                ),
+                        excludedClients = emptySet(),
+                        audioQuality = AudioQuality.AUTO,
+                        clientPlaybackNonce = generateClientPlaybackNonce(),
+                    ) ?: return@runBlocking null
+                check(stream.sabrBootstrap == null) {
+                    "SABR is not supported by this playback engine"
+                }
+                VideoStreams(
+                    videoId = videoId,
+                    audioUrl = stream.audioUrl,
+                    // ⚠️ UNVERIFIED API: Streamable.videoUrl. If your
+                    // innertubex v0.7.0 doesn't expose this property,
+                    // THIS is the line that fails to compile — paste
+                    // the error and I'll adapt to the real field name.
+                    videoUrl = stream.videoUrl,
+                    headers = stream.headers,
+                    clientName = stream.clientName,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "extractVideo failed: ${e.message}")
+                null
+            }
+        }
 
     fun headersFor(url: String): Map<String, String>? = minted[url]?.headers
 

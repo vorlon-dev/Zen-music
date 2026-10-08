@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'package:yt_extractor/yt_extractor.dart';
 import 'package:http/http.dart' as http;
@@ -7,6 +6,7 @@ import '../models/song.dart';
 import 'jiosaavn_service.dart';
 import 'qobuz_service.dart';
 import '../utilities/format_utils.dart';
+
 class VideoStreamResult {
   final String url;
   final Map<String, String> headers;
@@ -299,7 +299,9 @@ class YoutubeService {
         }
 
         final thumbs = item.getMap('thumbnail')?.getList('thumbnails');
-        String thumb = 'https://i.ytimg.com/vi/$vid/hqdefault.jpg';
+        // mqdefault: true 16:9 — hqdefault is 4:3 with black bars
+        // baked into the pixels.
+        String thumb = 'https://i.ytimg.com/vi/$vid/mqdefault.jpg';
         if (thumbs != null && thumbs.isNotEmpty && thumbs.last is Map) {
           final url = (thumbs.last as Map)['url']?.toString();
           if (url != null && url.isNotEmpty) thumb = url;
@@ -597,6 +599,17 @@ class YoutubeService {
       }
     }
 
+    // HLS fallback: when every progressive/muxed client is blocked
+    // (bot-check / "page needs to be reloaded" / unavailable), the HLS
+    // delivery frequently still works — video_player handles HLS on
+    // Android. This was the missing tier behind the "Could not load
+    // this video" failures.
+    final hls = await _resolveHlsStream(videoId);
+    if (hls != null) {
+      print('✅ Watch: HLS fallback ($videoId)');
+      return hls;
+    }
+
     await _throttle();
     try {
       final manifest = await _yt.videos.streams
@@ -819,6 +832,10 @@ class YoutubeService {
       }
 
       for (final entry in hls) {
+        // Some responses carry EMPTY HLS entries — Uri.parse('') threw
+        // "No host specified in URI" and killed this whole tier (the
+        // "Could not load this video" root cause). Skip them.
+        if (!entry.url.hasScheme || entry.url.host.isEmpty) continue;
         final playlistUrl = entry.url;
         try {
           final resp = await _probe

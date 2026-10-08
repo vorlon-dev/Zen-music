@@ -7,6 +7,12 @@ import 'wave_spinner.dart';
 /// Thumbnail widget used across shelves, grids, queue and the mini
 /// player. Prefers the provided imageUrl; falls back to YouTube's
 /// thumbnail for the videoId; shows the wavy spinner while loading.
+///
+/// BLACK-BARS FIX (do not regress): YouTube's hqdefault.jpg is 4:3
+/// with the 16:9 frame letterboxed INSIDE the image — the black bars
+/// are baked into the pixels. [_barFreeUrl] rewrites any hqdefault
+/// URL to mqdefault (true 16:9, no bars) at LOAD time, which also
+/// cleans rows parsed before the service-level fixes.
 class YoutubeThumbnail extends StatelessWidget {
   const YoutubeThumbnail({
     super.key,
@@ -23,13 +29,18 @@ class YoutubeThumbnail extends StatelessWidget {
   final double? height;
   final double borderRadius;
 
+  /// hqdefault → mqdefault. Only touches hqdefault; maxres/mq URLs
+  /// are already 16:9 and pass through untouched.
+  static String _barFreeUrl(String url) =>
+      url.replaceFirst('hqdefault.jpg', 'mqdefault.jpg');
+
   @override
   Widget build(BuildContext context) {
     final w = width ?? 100;
     final h = height ?? 100;
 
     Widget buildImage(String url) => CachedNetworkImage(
-      imageUrl: url,
+      imageUrl: _barFreeUrl(url),
       width: w,
       height: h,
       fit: BoxFit.cover,
@@ -45,7 +56,7 @@ class YoutubeThumbnail extends StatelessWidget {
         ),
       ),
       errorWidget: (_, __, ___) => buildImage(
-          'https://i.ytimg.com/vi/$videoId/hqdefault.jpg'),
+          'https://i.ytimg.com/vi/$videoId/mqdefault.jpg'),
     );
 
     if (imageUrl.isEmpty) {
@@ -54,7 +65,7 @@ class YoutubeThumbnail extends StatelessWidget {
       return ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
         child: CachedNetworkImage(
-          imageUrl: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+          imageUrl: 'https://i.ytimg.com/vi/$videoId/mqdefault.jpg',
           width: w,
           height: h,
           fit: BoxFit.cover,

@@ -194,7 +194,10 @@ class MainActivity : AudioServiceActivity() {
 
     // ═══════════════════════════════════════════
     // INNERTUBEX — Tier-0 stream extraction (cipher-resilient,
-    // benchmarked client catalog).
+    // benchmarked client catalog). "extractVideo" serves the video
+    // watch page: audio + video streams from the SAME bot-check-proof
+    // native pipeline (the Dart-side web clients get bot-checked on
+    // restricted videos; ITX does not).
     // ═══════════════════════════════════════════
 
     private fun registerInnertubexChannel(flutterEngine: FlutterEngine) {
@@ -232,6 +235,31 @@ class MainActivity : AudioServiceActivity() {
                             } catch (t: Throwable) {
                                 mainHandler.post {
                                     result.error("EXTRACT_FAILED", t.message, null)
+                                }
+                            }
+                        }.start()
+                    }
+                    "extractVideo" -> {
+                        val videoId = call.argument<String>("videoId") ?: ""
+                        Thread {
+                            val streams = try {
+                                InnerTubeXResolver.extractVideoBlocking(videoId)
+                            } catch (t: Throwable) {
+                                null
+                            }
+                            mainHandler.post {
+                                if (streams == null) {
+                                    result.success(null)
+                                } else {
+                                    result.success(
+                                        mapOf(
+                                            "videoId" to streams.videoId,
+                                            "audioUrl" to streams.audioUrl,
+                                            "videoUrl" to streams.videoUrl,
+                                            "headers" to streams.headers,
+                                            "clientName" to streams.clientName,
+                                        )
+                                    )
                                 }
                             }
                         }.start()

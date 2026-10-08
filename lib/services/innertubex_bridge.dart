@@ -40,6 +40,37 @@ class ItxStream {
   }
 }
 
+/// Audio + video streams from one ITX extraction (video watch page).
+/// [videoUrl] is ⚠️ UNVERIFIED — null when the native side has no
+/// video stream for the video (callers then fall back).
+class ItxVideoStreams {
+  const ItxVideoStreams({
+    required this.videoId,
+    required this.headers,
+    required this.clientName,
+    this.audioUrl,
+    this.videoUrl,
+  });
+
+  final String videoId;
+  final String? audioUrl;
+  final String? videoUrl;
+  final Map<String, String> headers;
+  final String clientName;
+
+  static ItxVideoStreams? fromMap(Object? raw) {
+    if (raw is! Map) return null;
+    return ItxVideoStreams(
+      videoId: raw['videoId']?.toString() ?? '',
+      audioUrl: raw['audioUrl']?.toString(),
+      videoUrl: raw['videoUrl']?.toString(),
+      headers: (raw['headers'] as Map? ?? const {})
+          .map((k, v) => MapEntry(k.toString(), v.toString())),
+      clientName: raw['clientName']?.toString() ?? '',
+    );
+  }
+}
+
 /// Dart bridge to the native InnerTubeX resolver (zen/innertubex).
 class InnertubexBridge {
   InnertubexBridge._();
@@ -96,6 +127,23 @@ class InnertubexBridge {
         'skipClients': skipClients.toList(),
       });
       return ItxStream.fromMap(raw);
+    } on MissingPluginException {
+      _available = false;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Audio + video extraction for the video watch page. Returns null
+  /// when extraction fails entirely; [ItxVideoStreams.videoUrl] is
+  /// null when the native side has audio but no video stream.
+  static Future<ItxVideoStreams?> extractVideo(String videoId) async {
+    try {
+      final raw = await _channel.invokeMethod('extractVideo', {
+        'videoId': videoId,
+      });
+      return ItxVideoStreams.fromMap(raw);
     } on MissingPluginException {
       _available = false;
       return null;

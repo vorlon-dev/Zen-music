@@ -79,6 +79,6 @@ flutter:
   uses-material-design: true
 
   fonts:
-    - family: PaytoneOne
+    - family: Retro Blendy
       fonts:
-        - asset: assets/fonts/PaytoneOne-Regular.ttf
+        - asset: assets/fonts/Retro Blendy.otf

@@ -1,32 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// ZenMusic — Black + Oxblood dark theme (final palette).
+/// ZenMusic — Black + Brass gold theme (final palette).
 ///
 /// User palette (nothing omitted):
-///   Background #0C0A0B → SpotifyColors.background
-///   Surface    #171113 → SpotifyColors.surface
-///   Card       #211619 → SpotifyColors.surfaceLight
-///   Primary    #8E3F4B → SpotifyColors.green       (accent everywhere)
-///   Accent     #B9626D → SpotifyColors.highlight   (secondary accent)
-///   Text       #F5EDEE → SpotifyColors.textPrimary
-///   Muted      #968589 → SpotifyColors.textSecondary
-///   Divider    #302124 → SpotifyColors.surfaceLighter / outlineVariant
+///   Background #0B0A08 → SpotifyColors.background
+///   Surface    #15130F → SpotifyColors.surface   (mini player, nav)
+///   Card       #201C15 → SpotifyColors.surfaceLight
+///   Primary    #B58A3C → SpotifyColors.green      (brass — buttons, fill)
+///   Accent     #D6AD5B → SpotifyColors.highlight  (honey — active, progress)
+///   Text       #F5F0E5 → SpotifyColors.textPrimary
+///   Muted      #928A78 → SpotifyColors.textSecondary
+///   Divider    #302A1D → SpotifyColors.surfaceLighter / outlineVariant
 ///
 /// Derived (tunable — not from the user's list):
-///   greenDark    #5C262F  deep oxblood (containers, gradients)
-///   textTertiary #6E5F63  faintest text
+///   greenDark    #6B5122  deep brass (containers, gradients)
+///   textTertiary #6E675A  faintest text
 class SpotifyColors {
-  static const background = Color(0xFF0C0A0B);
-  static const surface = Color(0xFF171113);
-  static const surfaceLight = Color(0xFF211619); // Card
-  static const surfaceLighter = Color(0xFF302124); // Divider tone
-  static const green = Color(0xFF8E3F4B); // Primary (oxblood)
-  static const greenDark = Color(0xFF5C262F); // Deep oxblood (derived)
-  static const highlight = Color(0xFFB9626D); // Accent
-  static const textPrimary = Color(0xFFF5EDEE);
-  static const textSecondary = Color(0xFF968589);
-  static const textTertiary = Color(0xFF6E5F63);
+  static const background = Color(0xFF0B0A08);
+  static const surface = Color(0xFF15130F);
+  static const surfaceLight = Color(0xFF201C15); // Card
+  static const surfaceLighter = Color(0xFF302A1D); // Divider tone
+  static const green = Color(0xFFB58A3C); // Brass gold (primary)
+  static const greenDark = Color(0xFF6B5122); // Deep brass (derived)
+  static const highlight = Color(0xFFD6AD5B); // Honey gold (accent)
+  static const textPrimary = Color(0xFFF5F0E5);
+  static const textSecondary = Color(0xFF928A78);
+  static const textTertiary = Color(0xFF6E675A);
 }
 
 class SpotifyTheme {
@@ -62,21 +62,23 @@ class SpotifyTheme {
       scaffoldBackgroundColor: SpotifyColors.background,
       colorScheme: const ColorScheme.dark(
         primary: SpotifyColors.green,
-        onPrimary: SpotifyColors.textPrimary,
-        primaryContainer: SpotifyColors.greenDark,
+        // Dark-on-brass — matches the reference's Play button (#0B0A08
+        // text on #B58A3C).
+        onPrimary: SpotifyColors.background,
+        primaryContainer: Color(0xFF3A2E14),
         onPrimaryContainer: SpotifyColors.textPrimary,
         secondary: SpotifyColors.highlight,
-        onSecondary: SpotifyColors.greenDark,
+        onSecondary: SpotifyColors.background,
         secondaryContainer: SpotifyColors.surfaceLighter,
         onSecondaryContainer: SpotifyColors.textPrimary,
         tertiary: SpotifyColors.highlight,
-        onTertiary: SpotifyColors.greenDark,
+        onTertiary: SpotifyColors.background,
         tertiaryContainer: SpotifyColors.surfaceLighter,
         onTertiaryContainer: SpotifyColors.textPrimary,
         surface: SpotifyColors.surface,
         onSurface: SpotifyColors.textPrimary,
         onSurfaceVariant: SpotifyColors.textSecondary,
-        surfaceContainerLowest: Color(0xFF080708),
+        surfaceContainerLowest: Color(0xFF080706),
         surfaceContainerLow: SpotifyColors.surface,
         surfaceContainer: SpotifyColors.surfaceLight,
         surfaceContainerHigh: SpotifyColors.surfaceLight,
@@ -86,7 +88,7 @@ class SpotifyTheme {
         outline: SpotifyColors.textTertiary,
         outlineVariant: SpotifyColors.surfaceLighter,
         inverseSurface: SpotifyColors.textPrimary,
-        onInverseSurface: Color(0xFF171113),
+        onInverseSurface: SpotifyColors.background,
         inversePrimary: SpotifyColors.highlight,
         shadow: Colors.black,
         scrim: Colors.black,
@@ -106,7 +108,7 @@ class SpotifyTheme {
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: SpotifyColors.surface,
-        selectedItemColor: SpotifyColors.textPrimary,
+        selectedItemColor: SpotifyColors.highlight,
         unselectedItemColor: SpotifyColors.textSecondary,
         type: BottomNavigationBarType.fixed,
         showUnselectedLabels: true,
@@ -115,10 +117,10 @@ class SpotifyTheme {
       ),
       sliderTheme: const SliderThemeData(
         trackHeight: 3,
-        activeTrackColor: SpotifyColors.green,
+        activeTrackColor: SpotifyColors.highlight,
         inactiveTrackColor: SpotifyColors.surfaceLighter,
         thumbColor: SpotifyColors.highlight,
-        overlayColor: Color(0x338E3F4B),
+        overlayColor: Color(0x33B58A3C),
         thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
         overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
       ),
@@ -185,7 +187,7 @@ class SpotifyTheme {
       ),
       chipTheme: const ChipThemeData(
         backgroundColor: SpotifyColors.surface,
-        selectedColor: SpotifyColors.greenDark,
+        selectedColor: Color(0xFF3A2E14),
         labelStyle: TextStyle(color: SpotifyColors.textPrimary, fontSize: 13),
         side: BorderSide(color: SpotifyColors.surfaceLighter),
         shape: StadiumBorder(),
@@ -206,13 +208,14 @@ class SpotifyTheme {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: SpotifyColors.green,
-          foregroundColor: SpotifyColors.textPrimary,
+          // Dark-on-brass — the reference's Play button treatment.
+          foregroundColor: SpotifyColors.background,
         ),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) =>
         states.contains(WidgetState.selected)
-            ? SpotifyColors.textPrimary
+            ? SpotifyColors.background
             : SpotifyColors.textTertiary),
         trackColor: WidgetStateProperty.resolveWith((states) =>
         states.contains(WidgetState.selected)

@@ -145,6 +145,10 @@ class HomeService {
   /// Related YouTube videos for the songs the user actually plays.
   /// Seeds = recently played (most recent first). Falls back to a
   /// generic trending-video search when there's no history yet.
+  ///
+  /// THUMBNAILS: hqdefault.jpg is 4:3 with the 16:9 frame letterboxed
+  /// INSIDE the image — black bars baked into the pixels. maxresdefault
+  /// is true 16:9 (bar-free), so it's used here.
   Future<List<Song>> getPersonalizedVideos(List<Song> seeds) async {
     if (seeds.isEmpty) return [];
 
@@ -176,7 +180,7 @@ class HomeService {
           id: vid,
           title: item.name,
           artist: item.uploaderName ?? 'Unknown',
-          thumbnail: 'https://i.ytimg.com/vi/$vid/hqdefault.jpg',
+          thumbnail: 'https://i.ytimg.com/vi/$vid/maxresdefault.jpg',
           duration: Duration(seconds: item.duration ?? 0),
         ));
         if (out.length >= 15) break;

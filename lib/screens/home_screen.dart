@@ -190,14 +190,12 @@ class _TabStack extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════
-// HOME TAB — Spotify layout on the Black + Oxblood theme, with
-// ZenMusic's own polish:
-//   · subtle oxblood wash at the top (one DecoratedBox — delete for
-//     a flat home)
-//   · tick-rule section titles
-//   · the breathing Liked-Songs heart
-// Sections: greeting → shortcut tiles → Made for you → New releases
-// → Playlists for you → Videos → trending shelves → charts.
+// HOME TAB — "Brass" layout (from the reference design):
+//   app-name header + gold-ringed action circles →
+//   TRENDING hero card (gold border, real song cover, Play) →
+//   Recently Played (horizontal cards, See all → History) →
+//   Made For You (list rows: thumb · title/artist·duration · heart) →
+//   New releases / Playlists / Videos / trending shelves / charts.
 // ═════════════════════════════════════════════
 
 class HomeTab extends StatefulWidget {
@@ -207,7 +205,7 @@ class HomeTab extends StatefulWidget {
   State<HomeTab> createState() => _HomeTabState();
 }
 
-class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
+class _HomeTabState extends State<HomeTab> {
   final _homeService = HomeService();
   final _scroll = ScrollController();
 
@@ -222,7 +220,6 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
   List<Song> _recommendedToday = [];
   List<Collection> _collections = [];
   List<Collection> _newAlbums = [];
-  List<Song> _downloads = [];
 
   // Infinite append state — dynamic YTM chart shelves.
   final List<({String title, List<Song> songs})> _chartShelves = [];
@@ -234,23 +231,10 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
   bool _loading = true;
   bool _isRefreshing = false;
 
-  // The breathing Liked-Songs heart: 1.0 → 1.06 over 2.8s, reversed,
-  // paused while the tile is pressed.
-  late final AnimationController _breath = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 2800),
-    value: 0,
-  );
-  late final Animation<double> _breathScale = Tween<double>(
-    begin: 1.0,
-    end: 1.06,
-  ).animate(CurvedAnimation(parent: _breath, curve: Curves.easeInOut));
-
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
-    _breath.repeat(reverse: true);
     _loadAll();
   }
 
@@ -258,7 +242,6 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
   void dispose() {
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
-    _breath.dispose();
     _homeService.dispose();
     super.dispose();
   }
@@ -433,23 +416,21 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
         .then((_) => _loadRecent());
   }
 
-  String get _greeting {
-    final h = DateTime.now().hour;
-    if (h < 12) return 'Good morning';
-    if (h < 17) return 'Good afternoon';
-    return 'Good evening';
-  }
-
-  /// The Spotify-style shortcut songs: most recent plays/downloads
-  /// (deduped, max 5) — they pair with the Liked tile.
-  List<Song> _shortcutSongs() {
-    final out = <Song>[];
-    final seen = <String>{};
-    for (final s in [..._recentlyPlayed, ..._downloads]) {
-      if (out.length >= 5) break;
-      if (seen.add(s.id)) out.add(s);
+  /// The hero song: TRENDING first (YTM trending shelves — real songs
+  /// with clean titles/artists), recommendation last. The previous
+  /// order led with recommendedToday, whose first entry can be a long
+  /// mix/radio title instead of a proper trending song.
+  Song? _featuredSong() {
+    if (_biggestHits.isNotEmpty) return _biggestHits.first;
+    if (_trendingNow.isNotEmpty) return _trendingNow.first;
+    if (_ytmHot.isNotEmpty) return _ytmHot.first;
+    if (_recommendedToday.isNotEmpty) {
+      final s = _recommendedToday.first;
+      // Guard: recommended feeds sometimes lead with a long mix —
+      // only accept it as the hero if it looks like a song.
+      if (s.duration <= const Duration(minutes: 12)) return s;
     }
-    return out;
+    return null;
   }
 
   @override
@@ -460,430 +441,275 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
       onRefresh: _loadAll,
       child: _loading
           ? _buildSkeletons()
-          : Stack(
+          : ListView(
+        controller: _scroll,
+        physics: const AlwaysScrollableScrollPhysics(),
+        // Bottom padding clears the floating mini player + nav
+        // bar (extendBody: content scrolls behind them).
+        padding: const EdgeInsets.fromLTRB(0, 6, 0, 170),
         children: [
-          // ── Subtle oxblood wash at the top (unique polish;
-          // delete this Positioned block for a flat dark home).
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 320,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      SpotifyColors.greenDark.withOpacity(0.30),
-                      SpotifyColors.background,
-                    ],
-                    stops: const [0.0, 1.0],
+          if (_isRefreshing)
+            const Padding(
+              padding: EdgeInsets.all(14),
+              child: Center(child: WaveSpinner(size: 26)),
+            ),
+
+          _header(),
+
+          // ── TRENDING hero card ──
+          if (_featuredSong() != null) ...[
+            _HeroCard(
+              song: _featuredSong()!,
+              onPlay: () => _playSong(_featuredSong()!),
+            ),
+            const SizedBox(height: 24),
+          ],
+
+          // ── Recently Played ──
+          if (_recentlyPlayed.isNotEmpty) ...[
+            _SectionHead(
+              title: 'Recently Played',
+              onSeeAll: () => pushSharedAxisY(
+                  context, const HistoryScreen()),
+            ),
+            _recentRow(),
+            const SizedBox(height: 24),
+          ],
+
+          // ── Made For You ──
+          if (_recommendedToday.isNotEmpty) ...[
+            const _SectionHead(title: 'Made For You'),
+            _madeForYouList(),
+            const SizedBox(height: 24),
+          ],
+
+          // ── New releases / playlists ──
+          if (_newAlbums.isNotEmpty)
+            _collectionRow('New Releases', _newAlbums),
+          if (_collections.isNotEmpty)
+            _collectionRow('Playlists For You', _collections),
+
+          // ── Videos ──
+          if (_personalVideos.isNotEmpty)
+            MediaShelfRow(
+              title: _videoShelfTitle,
+              items: [
+                for (final s in _personalVideos) ShelfItem.fromSong(s)
+              ],
+              // Videos open the dedicated watch page.
+              onTapItem: (i) => _openVideo(_personalVideos[i]),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+
+          // ── Trending shelves ──
+          if (_biggestHits.isNotEmpty)
+            MediaShelfRow(
+              title: 'Popular Right Now',
+              items: [
+                for (final s in _biggestHits) ShelfItem.fromSong(s)
+              ],
+              onTapItem: (i) => _playSong(_biggestHits[i]),
+              onShuffle: () => _shufflePlay(_biggestHits),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+          if (_ytTrending.isNotEmpty)
+            MediaShelfRow(
+              title: 'Trending on YouTube Music',
+              items: [
+                for (final s in _ytTrending) ShelfItem.fromSong(s)
+              ],
+              onTapItem: (i) => _playSong(_ytTrending[i]),
+              onShuffle: () => _shufflePlay(_ytTrending),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+          if (_ytmHot.isNotEmpty)
+            MediaShelfRow(
+              title: 'Hot on YouTube Music',
+              items: [for (final s in _ytmHot) ShelfItem.fromSong(s)],
+              onTapItem: (i) => _playSong(_ytmHot[i]),
+              onShuffle: () => _shufflePlay(_ytmHot),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+          if (_topCharts.isNotEmpty)
+            MediaShelfRow(
+              title: 'Top Charts',
+              items: [for (final s in _topCharts) ShelfItem.fromSong(s)],
+              onTapItem: (i) => _playSong(_topCharts[i]),
+              onShuffle: () => _shufflePlay(_topCharts),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+          if (_ytmFresh.isNotEmpty)
+            MediaShelfRow(
+              title: 'Fresh Music',
+              items: [for (final s in _ytmFresh) ShelfItem.fromSong(s)],
+              onTapItem: (i) => _playSong(_ytmFresh[i]),
+              onShuffle: () => _shufflePlay(_ytmFresh),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+
+          // ── Infinite chart shelves (appended on scroll) ──
+          for (final shelf in _chartShelves)
+            MediaShelfRow(
+              title: shelf.title,
+              items: [
+                for (final s in shelf.songs) ShelfItem.fromSong(s)
+              ],
+              onTapItem: (i) => _playSong(shelf.songs[i]),
+              onShuffle: () => _shufflePlay(shelf.songs),
+              playingIdStream: audioHandler.currentSongStream,
+            ),
+
+          if (_loadingMore)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: WaveSpinner(size: 22)),
+            )
+          else if (_endReached)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: Center(
+                child: Text(
+                  'You\'re all caught up — pull to refresh',
+                  style: TextStyle(
+                    color: SpotifyColors.textTertiary,
+                    fontSize: 13,
                   ),
                 ),
               ),
             ),
-          ),
-          ListView(
-            controller: _scroll,
-            physics: const AlwaysScrollableScrollPhysics(),
-            // Bottom padding clears the floating mini player +
-            // nav bar (extendBody: content scrolls behind them).
-            padding: const EdgeInsets.fromLTRB(0, 6, 0, 170),
-            children: [
-              if (_isRefreshing)
-                const Padding(
-                  padding: EdgeInsets.all(14),
-                  child: Center(child: WaveSpinner(size: 26)),
-                ),
-
-              _header(),
-
-              // ── Shortcut grid ──
-              _shortcutGrid(),
-
-              // ── Made for you ──
-              if (_recommendedToday.length >= 3) ...[
-                const _SectionTitle(title: 'Made for you'),
-                _DailyDiscoverPager(
-                  songs: _recommendedToday.take(10).toList(),
-                  seedArtist: _recentlyPlayed.isEmpty
-                      ? ''
-                      : _recentlyPlayed.first.artist
-                      .split(',')
-                      .first
-                      .trim(),
-                  onTap: _playSong,
-                ),
-                const SizedBox(height: 8),
-              ],
-
-              // ── New releases / playlists ──
-              if (_newAlbums.isNotEmpty)
-                _collectionRow('New releases', _newAlbums),
-              if (_collections.isNotEmpty)
-                _collectionRow('Playlists for you', _collections),
-
-              // ── Videos ──
-              if (_personalVideos.isNotEmpty)
-                MediaShelfRow(
-                  title: _videoShelfTitle,
-                  items: [
-                    for (final s in _personalVideos)
-                      ShelfItem.fromSong(s)
-                  ],
-                  // Videos open the dedicated watch page.
-                  onTapItem: (i) => _openVideo(_personalVideos[i]),
-                  playingIdStream: audioHandler.currentSongStream,
-                ),
-
-              // ── Trending shelves ──
-              if (_biggestHits.isNotEmpty)
-                MediaShelfRow(
-                  title: "Popular right now",
-                  items: [
-                    for (final s in _biggestHits)
-                      ShelfItem.fromSong(s)
-                  ],
-                  onTapItem: (i) => _playSong(_biggestHits[i]),
-                  onShuffle: () => _shufflePlay(_biggestHits),
-                  playingIdStream: audioHandler.currentSongStream,
-                ),
-              if (_ytTrending.isNotEmpty)
-                MediaShelfRow(
-                  title: 'Trending on YouTube Music',
-                  items: [
-                    for (final s in _ytTrending)
-                      ShelfItem.fromSong(s)
-                  ],
-                  onTapItem: (i) => _playSong(_ytTrending[i]),
-                  onShuffle: () => _shufflePlay(_ytTrending),
-                  playingIdStream: audioHandler.currentSongStream,
-                ),
-              if (_ytmHot.isNotEmpty)
-                MediaShelfRow(
-                  title: 'Hot on YouTube Music',
-                  items: [
-                    for (final s in _ytmHot) ShelfItem.fromSong(s)
-                  ],
-                  onTapItem: (i) => _playSong(_ytmHot[i]),
-                  onShuffle: () => _shufflePlay(_ytmHot),
-                  playingIdStream: audioHandler.currentSongStream,
-                ),
-              if (_topCharts.isNotEmpty)
-                MediaShelfRow(
-                  title: 'Top charts',
-                  items: [
-                    for (final s in _topCharts) ShelfItem.fromSong(s)
-                  ],
-                  onTapItem: (i) => _playSong(_topCharts[i]),
-                  onShuffle: () => _shufflePlay(_topCharts),
-                  playingIdStream: audioHandler.currentSongStream,
-                ),
-              if (_ytmFresh.isNotEmpty)
-                MediaShelfRow(
-                  title: 'Fresh music',
-                  items: [
-                    for (final s in _ytmFresh) ShelfItem.fromSong(s)
-                  ],
-                  onTapItem: (i) => _playSong(_ytmFresh[i]),
-                  onShuffle: () => _shufflePlay(_ytmFresh),
-                  playingIdStream: audioHandler.currentSongStream,
-                ),
-
-              // ── Infinite chart shelves (appended on scroll) ──
-              for (final shelf in _chartShelves)
-                MediaShelfRow(
-                  title: shelf.title,
-                  items: [
-                    for (final s in shelf.songs)
-                      ShelfItem.fromSong(s)
-                  ],
-                  onTapItem: (i) => _playSong(shelf.songs[i]),
-                  onShuffle: () => _shufflePlay(shelf.songs),
-                  playingIdStream: audioHandler.currentSongStream,
-                ),
-
-              if (_loadingMore)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: WaveSpinner(size: 22)),
-                )
-              else if (_endReached)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 28),
-                  child: Center(
-                    child: Text(
-                      'You\'re all caught up — pull to refresh',
-                      style: TextStyle(
-                        color: SpotifyColors.textTertiary,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ),
-            ],        // ListView children
-          ),          // ListView
-        ],            // Stack children
-      ),              // Stack
-    );                // RefreshIndicator
+        ],        // ListView children
+      ),          // ListView
+    );            // RefreshIndicator
   }
 
-  /// Spotify-style skeleton: greeting line, 6 shortcut-tile
-  /// placeholders, shelf placeholders.
-  Widget _buildSkeletons() {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(bottom: 170),
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-          child: Container(
-            width: 180,
-            height: 28,
-            decoration: BoxDecoration(
-              color: SpotifyColors.surface,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Column(
-            children: [
-              for (var r = 0; r < 3; r++)
-                Row(
-                  children: [
-                    for (var c = 0; c < 2; c++)
-                      Expanded(
-                        child: Container(
-                          height: 60,
-                          margin: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: SpotifyColors.surface,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        SkeletonShelf(itemCount: 5),
-        const SkeletonTile(),
-        const SkeletonTile(),
-      ],
-    );
-  }
-
-  /// Header: Playfair greeting on the left, Listen-Together and
-  /// settings circles on the right.
+  /// Header: app name in Playfair (the unique font) + gold-ringed
+  /// action circles (Listen Together, Settings).
   Widget _header() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
+      padding: const EdgeInsets.fromLTRB(20, 16, 16, 20),
       child: Row(
         children: [
           Expanded(
             child: Text(
-              _greeting,
+              'ZenMusic',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: SpotifyColors.textPrimary,
-                fontSize: 24,
+                fontSize: 23,
                 fontWeight: FontWeight.w700,
-                letterSpacing: -0.4,
-                fontFamily: 'PlayfairDisplay',
+                letterSpacing: 0,
+                fontFamily: 'Retro Blendy',
               ),
             ),
           ),
           GestureDetector(
             onTap: () =>
                 pushSharedAxisY(context, const ListenTogetherScreen()),
-            child: Container(
-              width: 40,
-              height: 40,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: SpotifyColors.surface,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.people_outline,
-                size: 24,
-                color: SpotifyColors.textPrimary,
-              ),
-            ),
+            child: _ringedCircle(icon: Icons.people_outline),
           ),
           const SizedBox(width: 10),
           GestureDetector(
             onTap: () => pushSharedAxisY(context, const SettingsScreen())
                 .then((_) => _loadAll()),
-            child: Container(
-              width: 40,
-              height: 40,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: SpotifyColors.surface,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.settings_outlined,
-                  size: 24, color: SpotifyColors.textPrimary),
-            ),
+            child: _ringedCircle(icon: Icons.settings_outlined),
           ),
         ],
       ),
     );
   }
 
-  /// Spotify's 2-column shortcut grid: 60dp tiles, square art on the
-  /// left, label on the right. First tile is Liked Songs.
-  Widget _shortcutGrid() {
-    final songs = _shortcutSongs();
-    final rows = ((songs.length + 1) / 2).ceil();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Column(
-        children: [
-          // Liked Songs tile always first (paired with the first song).
-          Row(
-            children: [
-              Expanded(child: _likedTile()),
-              if (songs.isNotEmpty)
-                Expanded(child: _songTile(songs[0]))
-              else
-                const Expanded(child: SizedBox()),
-            ],
-          ),
-          for (var r = 1; r < rows; r++)
-            Row(
-              children: [
-                for (var c = 0; c < 2; c++)
-                  Expanded(
-                    child: (r * 2 + c) < songs.length
-                        ? _songTile(songs[r * 2 + c])
-                        : const Expanded(child: SizedBox()),
-                  ),
-              ],
-            ),
-        ],
+  /// The reference's avatar treatment: card fill, 1px brass ring,
+  /// honey icon. PURE VISUAL — deliberately no GestureDetector here:
+  /// an inner detector with an empty onTap wins the gesture arena and
+  /// swallows the outer header's tap (the dead-buttons bug).
+  Widget _ringedCircle({required IconData icon}) {
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: SpotifyColors.surfaceLight,
+        shape: BoxShape.circle,
+        border: Border.all(color: SpotifyColors.green),
       ),
+      child: Icon(icon, size: 20, color: SpotifyColors.highlight),
     );
   }
 
-  Widget _likedTile() {
-    return Padding(
-      padding: const EdgeInsets.all(4),
-      child: Listener(
-        // The heart holds its breath while the tile is pressed.
-        onPointerDown: (_) => _breath.stop(),
-        onPointerUp: (_) => _breath.repeat(reverse: true),
-        onPointerCancel: (_) => _breath.repeat(reverse: true),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => pushSharedAxisY(context, const LikedSongsScreen()),
-          child: Container(
-            height: 60,
-            decoration: BoxDecoration(
-              color: SpotifyColors.surface,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        SpotifyColors.highlight,
-                        SpotifyColors.green,
-                      ],
-                    ),
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(8),
-                      bottomLeft: Radius.circular(8),
-                    ),
+  /// Recently Played — horizontal 118dp cards (reference layout).
+  Widget _recentRow() {
+    return SizedBox(
+      height: 172,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: _recentlyPlayed.length.clamp(0, 12),
+        separatorBuilder: (_, __) => const SizedBox(width: 14),
+        itemBuilder: (context, i) {
+          final song = _recentlyPlayed[i];
+          return GestureDetector(
+            onTap: () => _playSong(song),
+            child: SizedBox(
+              width: 118,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  YoutubeThumbnail(
+                    videoId: song.id,
+                    imageUrl: song.thumbnail,
+                    width: 118,
+                    height: 118,
+                    borderRadius: 12,
                   ),
-                  child: Center(
-                    child: AnimatedBuilder(
-                      animation: _breathScale,
-                      builder: (context, _) => Transform.scale(
-                        scale: _breathScale.value,
-                        child: const Icon(
-                          FluentIcons.heart_24_filled,
-                          color: Colors.white,
-                          size: 22,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Text(
-                    'Liked Songs',
-                    maxLines: 2,
+                  const SizedBox(height: 8),
+                  Text(
+                    song.title,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 13,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       color: SpotifyColors.textPrimary,
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    song.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: SpotifyColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
 
-  Widget _songTile(Song song) {
+  /// Made For You — thumb · title/artist·duration · heart rows.
+  Widget _madeForYouList() {
+    final songs = _recommendedToday.take(6).toList();
     return Padding(
-      padding: const EdgeInsets.all(4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () => _playSong(song),
-        child: Container(
-          height: 60,
-          decoration: BoxDecoration(
-            color: SpotifyColors.surface,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 60,
-                height: 60,
-                child: YoutubeThumbnail(
-                  videoId: song.id,
-                  imageUrl: song.thumbnail,
-                  borderRadius: 0,
-                ),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        children: [
+          for (var i = 0; i < songs.length; i++) ...[
+            _MadeForRow(song: songs[i], onPlay: () => _playSong(songs[i])),
+            if (i < songs.length - 1)
+              Divider(
+                height: 1,
+                thickness: 1,
+                indent: 58,
+                color: SpotifyColors.surfaceLighter,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  song.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: SpotifyColors.textPrimary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+          ],
+        ],
       ),
     );
   }
@@ -892,7 +718,7 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionTitle(title: title),
+        _SectionHead(title: title),
         SizedBox(
           height: 236,
           child: ListView.separated(
@@ -918,46 +744,116 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
     if (artist.isEmpty) return 'Videos for you';
     return 'Because you listened to $artist';
   }
+
+  /// Skeleton matching the layout: masthead, hero block, recent
+  /// squares, list rows.
+  Widget _buildSkeletons() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 170),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+          child: Container(
+            width: 180,
+            height: 30,
+            decoration: BoxDecoration(
+              color: SpotifyColors.surface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Container(
+            height: 170,
+            decoration: BoxDecoration(
+              color: SpotifyColors.surfaceLight,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: SpotifyColors.green.withOpacity(0.35),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        SizedBox(
+          height: 150,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            children: [
+              for (var i = 0; i < 4; i++)
+                Container(
+                  margin: const EdgeInsets.only(right: 14),
+                  width: 118,
+                  height: 118,
+                  decoration: BoxDecoration(
+                    color: SpotifyColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        for (var i = 0; i < 4; i++)
+          Container(
+            height: 66,
+            margin: const EdgeInsets.fromLTRB(20, 6, 20, 6),
+            decoration: BoxDecoration(
+              color: SpotifyColors.surface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 // ═════════════════════════════════════════════
-// SECTION TITLE — ZenMusic's tick-rule: a small burgundy bar before
-// the label. (Local to this screen — media_shelf.dart's internal
-// headers are untouched.)
+// SECTION HEAD — reference style: bold title left, gold "See all"
+// right (optional).
 // ═════════════════════════════════════════════
 
-class _SectionTitle extends StatelessWidget {
+class _SectionHead extends StatelessWidget {
   final String title;
-  const _SectionTitle({required this.title});
+  final VoidCallback? onSeeAll;
+
+  const _SectionHead({required this.title, this.onSeeAll});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Container(
-            width: 3.5,
-            height: 16,
-            decoration: BoxDecoration(
-              color: SpotifyColors.green,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(width: 9),
           Expanded(
             child: Text(
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                fontSize: 15,
+                fontSize: 16,
                 fontWeight: FontWeight.w700,
-                letterSpacing: -0.2,
                 color: SpotifyColors.textPrimary,
               ),
             ),
           ),
+          if (onSeeAll != null)
+            GestureDetector(
+              onTap: onSeeAll,
+              child: const Text(
+                'See all',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: SpotifyColors.highlight,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -965,150 +861,109 @@ class _SectionTitle extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════
-// DAILY DISCOVER PAGER — near-full-width hero cards (Made for you),
-// dark gradient scrim over artwork, seed-based caption,
-// deterministic per song, round play button.
+// TRENDING HERO CARD — gold-bordered card, TRENDING tag, the song's
+// REAL COVER in a brass-ringed 96dp block, dark-on-brass Play
+// button. Vinyl ornament only as the no-image fallback.
 // ═════════════════════════════════════════════
 
-class _DailyDiscoverPager extends StatelessWidget {
-  final List<Song> songs;
-  final String seedArtist;
-  final ValueChanged<Song> onTap;
+class _HeroCard extends StatelessWidget {
+  final Song song;
+  final VoidCallback onPlay;
 
-  const _DailyDiscoverPager({
-    required this.songs,
-    required this.seedArtist,
-    required this.onTap,
-  });
-
-  static const _captions = [
-    'Sounds like {a}',
-    'Because you listened to {a}',
-    'Similar to {a}',
-    'Based on {a}',
-    'For fans of {a}',
-  ];
+  const _HeroCard({required this.song, required this.onPlay});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 340,
-      child: PageView.builder(
-        controller: PageController(viewportFraction: 0.86),
-        itemCount: songs.length,
-        itemBuilder: (context, i) {
-          final song = songs[i];
-          final caption = _captions[
-          math.Random(song.id.hashCode).nextInt(_captions.length)]
-              .replaceAll('{a}', seedArtist.isEmpty ? song.artist : seedArtist);
+    final sub = song.duration.inSeconds > 0
+        ? '${song.artist} · ${_fmt(song.duration)}'
+        : song.artist;
+    final hasArt = song.thumbnail.isNotEmpty;
 
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(24),
-              onTap: () => onTap(song),
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(24),
-                  color: SpotifyColors.surface,
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(24),
-                  child: Stack(
-                    fit: StackFit.expand,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: SpotifyColors.surfaceLight,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: SpotifyColors.green.withOpacity(0.35),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'TRENDING',
+              style: TextStyle(
+                fontSize: 10,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w800,
+                color: SpotifyColors.highlight,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (song.thumbnail.isNotEmpty)
-                        CachedNetworkImage(
-                          imageUrl: song.thumbnail,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) =>
-                          const ColoredBox(
-                              color: SpotifyColors.surfaceLight),
-                        )
-                      else
-                        const ColoredBox(
-                            color: SpotifyColors.surfaceLight),
-                      // Vertical gradient scrim (over artwork — the
-                      // white text below depends on it staying dark).
-                      const DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.black45,
-                              Colors.transparent,
-                              Colors.black54,
-                              Colors.black87,
-                            ],
-                            stops: [0.0, 0.35, 0.7, 1.0],
-                          ),
+                      Text(
+                        song.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                          letterSpacing: -0.3,
+                          color: SpotifyColors.textPrimary,
                         ),
                       ),
-                      Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          mainAxisAlignment:
-                          MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment:
-                          CrossAxisAlignment.start,
-                          children: [
-                            Column(
-                              crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                              children: [
-                                Text(song.title,
-                                    maxLines: 2,
-                                    overflow:
-                                    TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight:
-                                        FontWeight.w700,
-                                        color: Colors.white)),
-                                const SizedBox(height: 3),
-                                Text(song.artist,
-                                    maxLines: 1,
-                                    overflow:
-                                    TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        fontSize: 12.5,
-                                        color: Colors.white
-                                            .withOpacity(0.7))),
-                              ],
-                            ),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(caption,
-                                      maxLines: 1,
-                                      overflow:
-                                      TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                          fontSize: 11.5,
-                                          fontWeight:
-                                          FontWeight.w600,
-                                          color: Colors.white
-                                              .withOpacity(
-                                              0.6))),
-                                ),
-                                const SizedBox(width: 10),
-                                Container(
-                                  width: 44,
-                                  height: 44,
-                                  decoration: BoxDecoration(
-                                    color: SpotifyColors.highlight,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.play_arrow_rounded,
-                                    size: 26,
-                                    color: SpotifyColors.greenDark,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                      const SizedBox(height: 4),
+                      Text(
+                        sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: SpotifyColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 14),
+                _cover(hasArt: hasArt),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Play button — dark-on-brass, like the reference.
+            Material(
+              color: SpotifyColors.green,
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: onPlay,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.play_arrow_rounded,
+                        size: 16,
+                        color: SpotifyColors.background,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Play',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: SpotifyColors.background,
                         ),
                       ),
                     ],
@@ -1116,16 +971,220 @@ class _DailyDiscoverPager extends StatelessWidget {
                 ),
               ),
             ),
-          );
-        },
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The song's real cover: rounded 96dp block with a brass ring.
+  /// Falls back to the vinyl ornament only when no image exists.
+  Widget _cover({required bool hasArt}) {
+    final core = ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: hasArt
+          ? CachedNetworkImage(
+        imageUrl: song.thumbnail,
+        width: 96,
+        height: 96,
+        fit: BoxFit.cover,
+        placeholder: (_, __) => Container(
+          width: 96,
+          height: 96,
+          color: SpotifyColors.surface,
+        ),
+        errorWidget: (_, __, ___) => _vinylFallback(),
+      )
+          : _vinylFallback(),
+    );
+
+    // Brass ring around the cover (keeps the gold signature).
+    return Container(
+      width: 104,
+      height: 104,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(17),
+        border: Border.all(
+          color: SpotifyColors.green.withOpacity(0.5),
+        ),
+      ),
+      child: core,
+    );
+  }
+
+  Widget _vinylFallback() {
+    return Container(
+      width: 96,
+      height: 96,
+      color: SpotifyColors.surface,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: SpotifyColors.surfaceLighter, width: 2),
+            ),
+          ),
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: SpotifyColors.surfaceLighter, width: 2),
+            ),
+          ),
+          Container(
+            width: 26,
+            height: 26,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: SpotifyColors.green,
+            ),
+          ),
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: SpotifyColors.background,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString();
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final h = d.inHours;
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+}
+
+// ═════════════════════════════════════════════
+// MADE FOR YOU ROW — thumb · title / artist·duration · heart.
+// Own like-state (reads storage once, toggles locally + persists).
+// ═════════════════════════════════════════════
+
+class _MadeForRow extends StatefulWidget {
+  final Song song;
+  final VoidCallback onPlay;
+
+  const _MadeForRow({required this.song, required this.onPlay});
+
+  @override
+  State<_MadeForRow> createState() => _MadeForRowState();
+}
+
+class _MadeForRowState extends State<_MadeForRow> {
+  late bool _liked;
+
+  @override
+  void initState() {
+    super.initState();
+    _liked = storage.isLiked(widget.song.id);
+  }
+
+  Future<void> _toggleLike() async {
+    final newValue = !_liked;
+    setState(() => _liked = newValue);
+    try {
+      await storage.setLiked(widget.song, newValue);
+    } catch (_) {
+      if (mounted) setState(() => _liked = !newValue);
+    }
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString();
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final song = widget.song;
+    final hasDuration = song.duration.inSeconds > 0;
+
+    return InkWell(
+      onTap: widget.onPlay,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            YoutubeThumbnail(
+              videoId: song.id,
+              imageUrl: song.thumbnail,
+              width: 46,
+              height: 46,
+              borderRadius: 8,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    song.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: SpotifyColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    hasDuration
+                        ? '${song.artist} · ${_fmt(song.duration)}'
+                        : song.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: SpotifyColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: _toggleLike,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Icon(
+                  _liked
+                      ? FluentIcons.heart_24_filled
+                      : FluentIcons.heart_24_regular,
+                  size: 20,
+                  color: _liked
+                      ? SpotifyColors.highlight
+                      : SpotifyColors.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
 // ═════════════════════════════════════════════
-// MINI PLAYER — UNCHANGED (user instruction: the mini player stays
-// exactly as it is; it is deliberately NOT part of the redesign).
+// MINI PLAYER — UNCHANGED in structure (standing user instruction);
+// it recolors via the theme tokens. The reference's thin progress
+// line on top is available as a follow-up on request.
 // ═════════════════════════════════════════════
 
 class MiniPlayer extends StatelessWidget {
@@ -1342,7 +1401,7 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
                 decoration: BoxDecoration(
                   color: SpotifyColors.surface,
                   gradient: miniBg == 'gradient'
-                      ? const LinearGradient(
+                      ? LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
@@ -1566,7 +1625,7 @@ class _Controls extends StatelessWidget {
 
 // ═════════════════════════════════════════════
 // CIRCULAR PLAY BUTTON — the ring is the WAVY ARC ONLY (no track
-// circle behind it — deliberately removed): green wavy arc = elapsed
+// circle behind it — deliberately removed): wavy arc = elapsed
 // (arc length = progress), wave travels while playing, flattens when
 // paused (wavy-slider parity).
 // ═════════════════════════════════════════════
@@ -1663,7 +1722,7 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
                     phase: _phase.value * 2 * math.pi,
                     startAngle: -math.pi / 2,
                     sweepAngle: 2 * math.pi * progress.clamp(0.0, 1.0),
-                    color: SpotifyColors.green,
+                    color: SpotifyColors.highlight,
                     strokeWidth: 3,
                     amplitude: 1.6 * _amp.value,
                   ),
@@ -1709,7 +1768,7 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
 }
 
 // ═════════════════════════════════════════════
-// LIBRARY TAB
+// LIBRARY TAB (recolors via tokens; structure unchanged)
 // ═════════════════════════════════════════════
 
 class LibraryTab extends StatefulWidget {
@@ -1888,7 +1947,7 @@ class _LibraryTabState extends State<LibraryTab> {
                       child: const Row(
                         children: [
                           Icon(FluentIcons.heart_24_filled,
-                              color: Colors.white, size: 22),
+                              color: SpotifyColors.background, size: 22),
                           SizedBox(width: 10),
                           Expanded(
                             child: Text(
@@ -1896,7 +1955,7 @@ class _LibraryTabState extends State<LibraryTab> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: Colors.white,
+                                color: SpotifyColors.background,
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -2131,7 +2190,7 @@ class _LibraryTabState extends State<LibraryTab> {
                             ],
                           ),
                         ),
-                        Icon(
+                        const Icon(
                           Icons.play_circle_outline_rounded,
                           size: 22,
                           color: SpotifyColors.textTertiary,
