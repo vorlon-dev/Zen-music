@@ -6,6 +6,7 @@ import '../models/song.dart';
 import 'jiosaavn_service.dart';
 import 'qobuz_service.dart';
 import '../utilities/format_utils.dart';
+import 'buffered_stream_source.dart';
 
 class VideoStreamResult {
   final String url;
@@ -29,6 +30,30 @@ class YoutubeService {
   /// player screen ALIASES these (no per-screen copies).
   static final Map<String, VideoStreamResult> videoPrefetchCache = {};
   static final Set<String> videoPrefetchFailed = {};
+
+
+  // ── Qobuz weak-network circuit breaker ──
+  // Fed by buffered-stream download failures (FLAC files are 6-10 MB;
+  // on a weak network they stall and die where the lossy AAC/opus
+  // tiers hold). After a failure, lossless is paused for the cooldown
+  // so playback falls to the stable tiers.
+  static DateTime? _qobuzWeakUntil;
+  static const _qobuzCooldown = Duration(minutes: 5);
+  static final bool _failureHookRegistered = _registerFailureHook();
+
+  static bool _registerFailureHook() {
+    BufferedStreamAudioSource.onDownloadFailure = _noteStreamFailure;
+    return true;
+  }
+
+  static void _noteStreamFailure(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('.flac') || u.contains('qobuz')) {
+      _qobuzWeakUntil = DateTime.now().add(_qobuzCooldown);
+      print('🎧 Qobuz: stream stalled — lossless paused 5 min '
+          '(weak network)');
+    }
+  }
 
   final _extractor = YtExtractor();
   final _yt = yt_explode.YoutubeExplode();
@@ -457,21 +482,37 @@ class YoutubeService {
 
     // Tier 1.5: Qobuz lossless via the self-hosted matcher — a
     // quality upgrade ahead of every lossy YouTube tier. Non-JioSaavn
-    // only (our id IS the YouTube id there). The client negative-
-    // caches misses (30 min) and hard-times-out at 8s, so a cold
-    // server or a catalog miss costs at most one bounded stall.
-    try {
-      final flac = await _qobuz.tryLossless(song);
-      if (flac != null) {
-        print('✅ Audio: Qobuz FLAC ok (${song.id}, '
-            '${flac.kbps ?? '?'}kbps)');
-        return VideoStreamResult(
-            flac.url, flac.headers, 'FLAC', flac.kbps);
+    // only (our id IS the YouTube id there). WEAK-NETWORK GUARDS:
+    //   - cooldown: after a stream stall (fed by the buffered
+    //     source's failure hook) lossless pauses 5 min.
+    //   - reachability probe: a 3s ranged ping of the resolved FLAC —
+    //     a server that can't serve 2 bytes in 3s can't serve 9 MB.
+    //   - kbps sanity: the matcher's estimate can be garbage (~2kbps
+    //     for 24-bit/48kHz) — below 100 the badge drops the number.
+    _failureHookRegistered; // ensures the failure hook is registered.
+    if (_qobuzWeakUntil != null &&
+        DateTime.now().isBefore(_qobuzWeakUntil!)) {
+      print('🎧 Qobuz: weak-network cooldown — lossless skipped');
+    } else {
+      try {
+        final flac = await _qobuz.tryLossless(song);
+        if (flac != null) {
+          final reachable = await _isPlayable(flac.url, null);
+          if (!reachable) {
+            _qobuzWeakUntil = DateTime.now().add(_qobuzCooldown);
+            print('🎧 Qobuz: server unresponsive — lossless paused');
+          } else {
+            final kbps =
+            (flac.kbps != null && flac.kbps! >= 100) ? flac.kbps : null;
+            print('✅ Audio: Qobuz FLAC ok (${song.id})');
+            return VideoStreamResult(
+                flac.url, flac.headers, 'FLAC', kbps);
+          }
+        }
+      } catch (_) {
+        // The lossless tier must never break the chain.
       }
-    } catch (_) {
-      // The lossless tier must never break the chain.
     }
-
     // Tier 2: visionOs audio-only + UA headers, quality-capped.
     final v = await _audioAttempt(
       song.id,

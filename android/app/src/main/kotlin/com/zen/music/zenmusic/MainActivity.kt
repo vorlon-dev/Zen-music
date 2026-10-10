@@ -28,6 +28,7 @@ import com.zen.music.zenmusic.dsp.core.models.ParametricEQBand
 import com.zen.music.zenmusic.dsp.core.parser.ParametricEQParser
 import com.zen.music.zenmusic.extensions.ZenExtensionManager
 import com.zen.music.zenmusic.innertube.ZenInnertubeResolver
+import com.zen.music.zenmusic.potoken.ZenPoTokenBridge
 import com.zen.music.zenmusic.videoplayer.ZenVideoPlayerViewFactory
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -94,6 +95,10 @@ class MainActivity : AudioServiceActivity() {
         if (isDebuggable) Timber.plant(Timber.DebugTree())
         ZenInnertubeResolver.debugLogs = isDebuggable
         ZenInnertubeResolver.init(applicationContext)
+        // Video token bridge: attach its WebView to this window so
+        // the page actually evaluates on this device (an unattached
+        // application-context WebView never ran its scripts).
+        ZenPoTokenBridge.attachActivity(this)
     }
 
     // ═══════════════════════════════════════════
@@ -207,8 +212,10 @@ class MainActivity : AudioServiceActivity() {
     // innertubex_bridge.dart is untouched and every Dart call site
     // keeps working. "extractVideo" serves the video watch page:
     // audio + video from ONE player response (same recording,
-    // guaranteed sync). "relatedSongs" is the watch queue's second
-    // source. "channelThumb" serves the watch page's channel avatar.
+    // guaranteed sync); maxHeight caps the video stream (the quality
+    // picker). "relatedSongs" is the watch queue's second source.
+    // "channelThumb" serves the channel avatar. "videoQualities"
+    // serves the quality picker's height list.
     // ═══════════════════════════════════════════
 
     private fun registerInnertubexChannel(flutterEngine: FlutterEngine) {
@@ -252,9 +259,12 @@ class MainActivity : AudioServiceActivity() {
                     }
                     "extractVideo" -> {
                         val videoId = call.argument<String>("videoId") ?: ""
+                        val maxHeight = call.argument<Int>("maxHeight") ?: 0
                         Thread {
                             val streams = try {
-                                ZenInnertubeResolver.extractVideoBlocking(videoId)
+                                ZenInnertubeResolver.extractVideoBlocking(
+                                    videoId, maxHeight
+                                )
                             } catch (t: Throwable) {
                                 null
                             }
@@ -273,6 +283,17 @@ class MainActivity : AudioServiceActivity() {
                                     )
                                 }
                             }
+                        }.start()
+                    }
+                    "videoQualities" -> {
+                        val videoId = call.argument<String>("videoId") ?: ""
+                        Thread {
+                            val list = try {
+                                ZenInnertubeResolver.videoQualitiesBlocking(videoId)
+                            } catch (_: Throwable) {
+                                emptyList<Map<String, Any?>>()
+                            }
+                            mainHandler.post { result.success(list) }
                         }.start()
                     }
                     "headersFor" -> {

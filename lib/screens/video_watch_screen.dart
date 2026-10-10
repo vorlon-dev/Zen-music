@@ -15,6 +15,7 @@ import '../services/innertubex_bridge.dart';
 import '../services/song_source_resolver.dart';
 import '../services/youtube_service.dart';
 import '../theme/spotify_theme.dart';
+import '../widgets/playlist_sheets.dart';
 import '../widgets/video_backdrop.dart';
 import '../widgets/youtube_thumbnail.dart';
 
@@ -41,37 +42,24 @@ class VideoSession {
   }
 }
 
-/// Dedicated YouTube video watch page — YouTube-style playback,
-/// queue, and layout.
+/// Dedicated YouTube video watch page.
 ///
-/// TIER ORDER (do not reorder — the native innertube merged player
-/// is ALWAYS the first and primary path):
+/// TIER ORDER (do not reorder — native innertube merged is FIRST):
+/// 1. MERGED — video-only + audio-only from ONE native player
+///    response inside a single MergingMediaSource: one player,
+///    video and audio together, 1080p, zero drift. Bot-gated IP →
+///    the Dart visionOs video URL bridges into the same player
+///    with the native audio. Error/never-READY (~10s) → down-chain.
+/// 2. MUXED — single file ≤720p via video_player.
+/// 3. DUAL — video-only stream + handler audio (last fallback).
 ///
-/// 1. MERGED (PRIMARY) — native ExoPlayer (zen_video_player platform
-///    view) playing the VIDEO-ONLY + AUDIO-ONLY streams from ONE
-///    native innertube player response inside a single
-///    MergingMediaSource. One player = video and audio together,
-///    zero drift, full 1080p — exactly how YouTube streams. If the
-///    native source reports an error or never reaches READY within
-///    ~10s, the screen falls down the chain on its own.
-/// 2. MUXED (fallback) — single muxed file (video + audio in one),
-///    <=720p, via video_player.
-/// 3. DUAL (last fallback) — video-only stream + the video's own
-///    audio through the handler pipeline.
+/// QUEUE: rooted at the opened video, related tail (radio → native
+/// watch-next), auto-advance on end, tap-jump re-roots the tail.
 ///
-/// The stall detector is deliberately generous (~10s): a cold
-/// native extraction on a slow network legitimately takes longer,
-/// and a too-strict window dumped working videos to the lower
-/// tiers (the regression this file fixes).
-///
-/// CHANNEL ART loads only ~4s AFTER the player reports READY — it
-/// must never compete with the video stream's first bytes.
-///
-/// QUEUE, CONTROLS, BACKGROUND: YouTube parity — related videos as
-/// the up-next tail with auto-advance and re-rooting; tap-to-show
-/// controls with 3s auto-hide (buffering never pops them);
-/// double-tap ±10s; prev/next; back hands the audio to the mini
-/// player and reopening it returns to this page at the position.
+/// BACKGROUND: back on merged/muxed transfers the audio to the
+/// handler at the CURRENT position (pause → wait READY → seek →
+/// play — the from-start regression is fixed); reopening the mini
+/// player returns here at the LIVE handler position.
 class VideoWatchScreen extends StatefulWidget {
   const VideoWatchScreen({
     super.key,
@@ -101,14 +89,12 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
 
   _WatchMode _mode = _WatchMode.resolving;
 
-  // ── Queue (YouTube parity) ──
+  // ── Queue ──
   List<Song> _queue = [];
   int _queueIndex = 0;
-  bool _advancing = false; // guards double auto-advance fires
+  bool _advancing = false;
 
-  // MERGED mode (primary): native ExoPlayer, video + audio in one
-  // player. Position/duration come from a 500ms poll on the
-  // per-view channel.
+  // MERGED mode (primary).
   MethodChannel? _nativeChannel;
   String? _mergedVideoUrl;
   String? _mergedAudioUrl;
@@ -117,9 +103,7 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
   Duration _mergedDur = Duration.zero;
   bool _mergedPlaying = false;
   Timer? _mergedPoll;
-  // Stall detection — GENEROUS (~10s = 20 polls): a cold native
-  // extraction on a slow network takes longer than it looks. The
-  // old 3s window dumped working merged videos to the muxed tier.
+  // Stall detection — GENEROUS (~10s = 20 polls).
   int _stallPolls = 0;
   bool _mergedWasReady = false;
 
@@ -127,19 +111,29 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
   bool _controlsVisible = true;
   bool _mergedBuffering = false;
   Timer? _hideTimer;
-  int _seekHintSide = 0; // 0 none, -1 rewind, 1 forward
+  int _seekHintSide = 0;
   Timer? _seekHintTimer;
 
-  // Channel avatar — fetched ONLY after playback is running (+4s),
-  // so the artist browse can never starve the video stream.
+  // ── Quality picker (merged tier) ──
+  // The cached heights for the current video, the chosen cap
+  // (0 = Auto), and the switch-in-progress flag.
+  List<ItxVideoQuality> _qualities = [];
+  int _qualityCap = 0; // 0 = Auto
+  bool _switchingQuality = false;
+
+  // Channel avatar — fetched ONLY after playback is running (+4s).
   String? _channelThumb;
   Timer? _artDelayTimer;
 
-  // Dual mode: muted video-only stream; audio lives in the handler.
+  // More-sheet state: loop + playback speed (session-scoped).
+  bool _loopVideo = false;
+  double _playbackSpeed = 1.0;
+
+  // Dual mode.
   String? _dualVideoUrl;
   Map<String, String> _dualHeaders = const {};
 
-  // Muxed mode: one file, video + audio together.
+  // Muxed mode.
   VideoPlayerController? _muxedController;
   bool _muxedReady = false;
 
@@ -152,6 +146,10 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
   Duration? _resumePosition;
   bool _transferred = false;
 
+  // Bot-gate short-circuit: native video extraction returned null
+  // once → skip the native attempt for the rest of the session.
+  bool _nativeVideoGated = false;
+
   Song? get _current =>
       (_queueIndex >= 0 && _queueIndex < _queue.length)
           ? _queue[_queueIndex]
@@ -162,12 +160,12 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     super.initState();
     _resumePosition = widget.startPosition;
     _transferred = false;
+    _nativeVideoGated = false;
     _queue = [
       Song(
         id: widget.videoId,
         title: widget.title ?? 'Video',
         artist: widget.artist ?? 'YouTube',
-        // mqdefault: true 16:9 — hqdefault carries baked-in black bars.
         thumbnail: widget.thumbnail ??
             'https://i.ytimg.com/vi/${widget.videoId}/mqdefault.jpg',
         duration: Duration.zero,
@@ -187,14 +185,13 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     if (ch != null) {
       ch.invokeMethod('release').catchError((_) {});
     }
-    // Pop without a playing video (failed/ended) — drop the session.
     if (!_transferred) VideoSession.clear();
     _exitFullscreen();
     _muxedController?.dispose();
     super.dispose();
   }
 
-  // ── Fullscreen (YouTube-style): landscape + immersive + wakelock ──
+  // ── Fullscreen ──
 
   void _enterFullscreen() {
     setState(() => _fullscreen = true);
@@ -213,8 +210,7 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
-    // REGRESSION #1 (do not regress to edgeToEdge): the app is
-    // immersive-sticky EVERYWHERE.
+    // REGRESSION #1 (do not regress to edgeToEdge).
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     WakelockPlus.disable();
   }
@@ -223,16 +219,11 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     _fullscreen ? _exitFullscreen() : _enterFullscreen();
   }
 
-  // ── System back button exits fullscreen first ──
-
   Future<bool> _onWillPop() async {
     if (_fullscreen) {
       _exitFullscreen();
       return false;
     }
-    // Back with a video playing → hand the audio to the handler so
-    // the mini player keeps it alive (YouTube parity). The session
-    // stays registered so reopening the mini player returns HERE.
     if (_mode == _WatchMode.merged || _mode == _WatchMode.muxed) {
       await _transferToHandler();
     } else {
@@ -241,17 +232,18 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     return true;
   }
 
-  /// Hands the current video's audio to the handler at the current
-  /// position. The exact video is marked explicit so the strict
-  /// resolver streams THIS recording and never a catalog swap.
+  /// Hands the current video's audio to the handler at the CURRENT
+  /// position. The handler's stream needs a moment to load — pause,
+  /// wait for READY, THEN seek: seeking before the source is loaded
+  /// was silently dropped and the audio started from 0 (regression).
   Future<void> _transferToHandler() async {
     if (_transferred) return;
     _transferred = true;
     final song = _current;
     if (song == null) return;
     try {
-      // Already playing this exact audio in the handler (e.g. a
-      // reopen-then-back cycle) — keep it running, no restart.
+      // Already playing this exact video in the handler (a
+      // reopen-then-back cycle) — it keeps playing live; no restart.
       final handlerPlaying = audioHandler.playbackState.value.playing;
       final handlerId = audioHandler.mediaItem.value?.id;
       if (handlerPlaying && handlerId == song.id) return;
@@ -261,8 +253,26 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
           : _muxedController?.value.position;
       SongSourceResolver.instance.markExplicit(song);
       await audioHandler.setQueue([song], startIndex: 0);
+      await audioHandler.pause();
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while (true) {
+        final st = audioHandler.playbackState.value.processingState;
+        if (st == AudioProcessingState.ready ||
+            st == AudioProcessingState.completed) {
+          break;
+        }
+        if (DateTime.now().isAfter(deadline)) break;
+        await Future.delayed(const Duration(milliseconds: 120));
+      }
       if (pos != null && pos > Duration.zero) {
         await audioHandler.seekSafe(pos);
+        // Guard against the seek racing the source swap: verify the
+        // position took, retry once if the player reset to ~0.
+        await Future.delayed(const Duration(milliseconds: 250));
+        final now = audioHandler.playbackState.value.position;
+        if (now < const Duration(seconds: 2) && pos > const Duration(seconds: 3)) {
+          await audioHandler.seekSafe(pos);
+        }
       }
       await audioHandler.play();
     } catch (_) {}
@@ -281,8 +291,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     _extendQueueWithRelated(song.id);
   }
 
-  /// Refills the queue tail from the current video's related
-  /// streams (radio first, native watch-next when radio is empty).
   Future<void> _extendQueueWithRelated(String videoId) async {
     setState(() => _loadingRelated = true);
     var fresh = <Song>[];
@@ -290,7 +298,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       final related = await _yt.getYtmRadio(videoId);
       fresh = related.where((s) => s.id != videoId).take(20).toList();
     } catch (_) {}
-    // Radio empty/failed → native watch-next as the second source.
     if (fresh.isEmpty && mounted) {
       final native = await InnertubexBridge.relatedSongs(videoId);
       fresh = native;
@@ -325,19 +332,20 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       _mergedDur = Duration.zero;
       _mergedPlaying = false;
       _channelThumb = null;
+      // New video → the quality list belongs to the OLD video.
+      _qualities = [];
+      _qualityCap = 0;
+      _switchingQuality = false;
     });
 
-    // ── PRIMARY: native merged player (video + audio, one player) ──
     final merged = await _startMerged(videoId);
     if (!mounted) return;
     if (merged) return;
 
-    // ── FALLBACK 1: muxed stream (single file, <=720p) ──
     final started = await _startMuxed(videoId);
     if (!mounted) return;
     if (started) return;
 
-    // ── FALLBACK 2: dual stream (video-only + handler audio) ──
     final dual = await _startDualMode();
     if (!mounted) return;
     if (dual) return;
@@ -349,74 +357,63 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     });
   }
 
-  /// PRIMARY: native merged player via innertube. Requires BOTH
-  /// layers from one native player response (same recording
-  /// guaranteed). Returns true when the merged surface is up.
+  /// PRIMARY: native merged player via innertube. When YouTube is
+  /// bot-gating this IP (native video clients refuse), the Dart
+  /// visionOs VIDEO url bridges into the SAME ExoPlayer with the
+  /// native AUDIO — one player, video + audio together, as before.
+  /// [_qualityCap] rides along: a picked quality re-extracts at
+  /// that height.
   Future<bool> _startMerged(String videoId) async {
-    // YouTube behavior + focus hygiene: opening a video stops the
-    // app's music, and the freed audio focus can no longer defer
-    // the video player's start.
     await audioHandler.pause();
     if (!mounted) return false;
 
-    var native = await InnertubexBridge.extractVideo(videoId);
+    final native = await InnertubexBridge.extractVideo(
+      videoId,
+      maxHeight: _qualityCap,
+    );
     if (!mounted) return false;
+    if (native == null) _nativeVideoGated = true;
 
-    // SOURCE B — the bot-gate bridge: when YouTube blocks the native
-    // video clients (LOGIN_REQUIRED / UNPLAYABLE for this IP), the
-    // Dart visionOs video path frequently still resolves. Feed THAT
-    // video URL into the SAME native ExoPlayer with the native audio
-    // stream — one player, video + audio together, as before.
-    var dartVideoUrl = '';
-    var dartVideoHeaders = const <String, String>{};
-    var useDartVideo = false;
     var videoUrl = native?.videoUrl ?? '';
     var audioUrl = native?.audioUrl ?? '';
     var headers = native?.headers ?? const <String, String>{};
-    if (videoUrl.isEmpty || audioUrl.isEmpty) {
-      final videoStream = await _yt.getVideoStreamUrl(_current!);
+
+    // SOURCE B — the bot-gate bridge (native video dead but the
+    // Dart visionOs video path still resolves; native audio chain
+    // is a separate client set and often answers when video is
+    // gated). The quality cap does NOT apply to the bridge path —
+    // the Dart path has no per-height selection.
+    if (_nativeVideoGated || videoUrl.isEmpty || audioUrl.isEmpty) {
+      final song = _current;
+      if (song == null) return false;
+      final videoStream = await _yt.getVideoStreamUrl(song);
       if (!mounted) return false;
-      if (videoStream != null && videoStream.url.isNotEmpty) {
-        dartVideoUrl = videoStream.url;
-        dartVideoHeaders = videoStream.headers;
-        useDartVideo = true;
-        // Audio: native audio chain (separate client set — often not
-        // gated when the video clients are).
-        final nativeAudio =
-        await InnertubexBridge.extract(videoId, maxKbps: 320);
-        if (!mounted) return false;
-        if (nativeAudio?.url.isNotEmpty ?? false) {
-          videoUrl = dartVideoUrl;
-          headers = dartVideoHeaders;
-          audioUrl = nativeAudio!.url;
-          native = null;
-        } else {
-          return false; // no audio layer anywhere → muxed/dual handle it
-        }
-      } else {
-        return false;
-      }
+      if (videoStream == null || videoStream.url.isEmpty) return false;
+      final nativeAudio = await InnertubexBridge.extract(
+        videoId,
+        maxKbps: 320,
+      );
+      if (!mounted) return false;
+      if (nativeAudio == null || nativeAudio.url.isEmpty) return false;
+      videoUrl = videoStream.url;
+      headers = videoStream.headers;
+      audioUrl = nativeAudio.url;
     }
-    if (videoUrl.isEmpty || audioUrl.isEmpty) {
-      return false;
-    }
-    // ignore: unused_local_variable
-    final unusedGuard = useDartVideo;
-    // Release any previous native player before replacing it.
+    if (videoUrl.isEmpty || audioUrl.isEmpty) return false;
+
     final old = _nativeChannel;
     _nativeChannel = null;
     if (old != null) {
       old.invokeMethod('release').catchError((_) {});
     }
 
-    // Reset stall detection for the new source.
     _stallPolls = 0;
     _mergedWasReady = false;
 
     setState(() {
       _mergedVideoUrl = videoUrl;
       _mergedAudioUrl = audioUrl;
-      _mergedHeaders = native?.headers ?? const {};
+      _mergedHeaders = headers;
       _mergedPlaying = true;
       _mergedBuffering = true;
       _controlsVisible = true;
@@ -424,10 +421,8 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       _mode = _WatchMode.merged;
     });
 
-    // Register the session so backing out keeps the audio in the
-    // mini player and reopening the mini player returns here.
-    // Plain static assignments — Dart cascades cannot set static
-    // members through the class name.
+    // Session registration — plain static assignments (Dart
+    // cascades cannot set statics through the class name).
     final currentSong = _current;
     if (currentSong != null) {
       VideoSession.active = true;
@@ -443,27 +438,40 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       const Duration(milliseconds: 500),
           (_) => _pollMerged(),
     );
-    // YouTube parity: controls show on load, then auto-hide while
-    // playing (paused keeps them up).
     _pokeControls();
     print('Watch: merged tier (native innertube) $videoId');
     return true;
   }
 
-  /// Per-view channel handshake + prepare, once the platform view
-  /// exists. A resume position (mini player reopen) is consumed on
-  /// the first prepare only.
   void _onNativeViewCreated(int viewId) {
     final channel = MethodChannel('zen/video_player_$viewId');
     _nativeChannel = channel;
-    final resume = _resumePosition;
-    _resumePosition = null;
-    channel.invokeMethod('prepare', {
+    // Resume applies on every prepare of THIS screen instance when a
+    // session position exists (reopen mid-video recreates the view).
+    final resume = _resumePosition ?? VideoSession.position;
+    channel
+        .invokeMethod('prepare', {
       'videoUrl': _mergedVideoUrl,
       'audioUrl': _mergedAudioUrl,
       'headers': _mergedHeaders,
       'startPositionMs': resume?.inMilliseconds ?? 0,
-    }).catchError((_) {});
+    })
+        .catchError((_) {});
+    // Re-apply session loop/speed to the fresh player.
+    if (_loopVideo) {
+      channel.invokeMethod('setLoop', true).catchError((_) {});
+    }
+    if (_playbackSpeed != 1.0) {
+      channel.invokeMethod('setSpeed', _playbackSpeed).catchError((_) {});
+    }
+    // Pull the quality list once the player machinery is up — the
+    // native extraction populated the cache.
+    final id = _loadedId;
+    if (id != null && _qualities.isEmpty) {
+      InnertubexBridge.videoQualities(id).then((q) {
+        if (mounted && q.isNotEmpty) setState(() => _qualities = q);
+      });
+    }
   }
 
   Future<void> _pollMerged() async {
@@ -474,7 +482,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       if (!mounted) return;
       if (raw is! Map) return;
 
-      // Native source error → drop to the proven muxed tier.
       final err = raw['error'];
       if (err is String && err.isNotEmpty) {
         print('Watch merged: native error $err — falling back');
@@ -487,22 +494,22 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
         final wasReady = _mergedWasReady;
         _mergedWasReady = true;
         _stallPolls = 0;
-        // Channel art loads only well AFTER playback is running —
-        // the artist browse must never compete with the video
-        // stream's first bytes (that contention was the muxed
-        // regression).
         if (!wasReady) {
           _artDelayTimer?.cancel();
           _artDelayTimer = Timer(const Duration(seconds: 4), () {
             final id = _loadedId;
             if (id != null) _loadChannelThumb(id);
           });
+          // Late quality pull: the cache fills with the same
+          // extraction that served playback.
+          final id = _loadedId;
+          if (id != null && _qualities.isEmpty) {
+            InnertubexBridge.videoQualities(id).then((q) {
+              if (mounted && q.isNotEmpty) setState(() => _qualities = q);
+            });
+          }
         }
       } else if (!_mergedWasReady) {
-        // Not READY yet — keep waiting (the buffering spinner
-        // shows). 20 polls ≈ 10s before declaring the merged source
-        // dead: cold extractions on slow networks legitimately
-        // take longer than a strict window.
         _stallPolls++;
         if (_stallPolls >= 20) {
           print('Watch merged: never reached READY — falling back');
@@ -519,10 +526,7 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
         _mergedPlaying = raw['isPlaying'] == true;
         _mergedBuffering = raw['ready'] != true;
       });
-      // Keep the mini-player session's resume position current.
       VideoSession.position = _mergedPos;
-      // AUTO-ADVANCE (YouTube parity): the video ended — roll the
-      // next queue entry. Queue exhausted → the session dies.
       if (ended && !_advancing) {
         _advancing = true;
         if (_queueIndex + 1 < _queue.length) {
@@ -534,8 +538,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     } catch (_) {}
   }
 
-  /// Merged tier died (native error or never-READY): release the
-  /// native player and continue down the proven chain.
   Future<void> _fallbackFromMerged() async {
     final videoId = _loadedId;
     _mergedPoll?.cancel();
@@ -555,9 +557,7 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     });
   }
 
-  /// MUXED fallback: single file with video + audio, <=720p.
   Future<bool> _startMuxed(String videoId) async {
-    // Same focus hygiene as merged mode.
     await audioHandler.pause();
     if (!mounted) return false;
 
@@ -590,6 +590,16 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     }
 
     await c.setVolume(1.0);
+    await c.setLooping(_loopVideo);
+    if (_playbackSpeed != 1.0) {
+      await c.setPlaybackSpeed(_playbackSpeed);
+    }
+    // Resume (mini-player reopen) — muxed fallback honors it too.
+    final resume = _resumePosition;
+    _resumePosition = null;
+    if (resume != null && resume > Duration.zero) {
+      await c.seekTo(resume);
+    }
     await c.play();
 
     setState(() {
@@ -598,8 +608,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       _muxedReady = true;
     });
 
-    // Session stays registered in the muxed fallback too. Plain
-    // static assignments (cascades cannot set statics).
     final currentSong = _current;
     if (currentSong != null) {
       VideoSession.active = true;
@@ -607,24 +615,17 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       VideoSession.title = currentSong.title;
       VideoSession.artist = currentSong.artist;
       VideoSession.thumbnail = currentSong.thumbnail;
-      VideoSession.position = Duration.zero;
+      //VideoSession.position = Duration.zero;
     }
 
     print('Watch: muxed tier $videoId');
 
-    // Auto-fullscreen for landscape content (YouTube parity) —
-    // portrait videos stay inline.
     if (c.value.size.width > c.value.size.height && mounted) {
       _enterFullscreen();
     }
     return true;
   }
 
-  /// LAST fallback: dual stream. VIDEO: native resolver first, then
-  /// the proven Dart visionOs path (UA-gated — headers required or
-  /// 403). AUDIO: the video's OWN audio through the handler
-  /// pipeline, marked explicit BEFORE queuing so the strict resolver
-  /// cannot swap it — video and audio must be the same recording.
   Future<bool> _startDualMode() async {
     final song = _current;
     if (song == null) return false;
@@ -645,7 +646,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       headers = videoStream.headers;
     }
 
-    // Mark explicit BEFORE queuing.
     SongSourceResolver.instance.markExplicit(song);
 
     await audioHandler.setQueue([song], startIndex: 0);
@@ -672,7 +672,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
           ch.invokeMethod('pause').catchError((_) {});
           _mergedPlaying = false;
         } else {
-          // Play after STATE_ENDED restarts only from position 0.
           if (_mergedDur > Duration.zero && _mergedPos >= _mergedDur) {
             ch.invokeMethod('seekTo', 0).catchError((_) {});
           }
@@ -698,10 +697,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     }
   }
 
-  /// Fetches the channel avatar for [videoId] via the native
-  /// resolver. Called ONLY after playback is running (see the poll).
-  /// Silently keeps the letter avatar on any failure, and ignores
-  /// the result if the video switched meanwhile.
   Future<void> _loadChannelThumb(String videoId) async {
     final url = await InnertubexBridge.channelThumb(videoId);
     if (!mounted || url == null || url.isEmpty) return;
@@ -709,10 +704,247 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     setState(() => _channelThumb = url);
   }
 
+  // ── QUALITY (YouTube parity) ──
+
+  /// YouTube-style quality sheet: Auto + every cached height. A
+  /// pick re-extracts the video stream at that height from the
+  /// native quality cache and re-prepares the merged player AT THE
+  /// CURRENT POSITION — audio layer untouched.
+  Future<void> _qualitySheet() async {
+    if (_qualities.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: SpotifyColors.surfaceLight,
+          content: Text('Quality options unavailable for this video',
+              style: TextStyle(color: SpotifyColors.textPrimary)),
+        ),
+      );
+      return;
+    }
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: SpotifyColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Quality for current video',
+                    style: TextStyle(
+                        color: SpotifyColors.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700)),
+              ),
+            ),
+            const SizedBox(height: 4),
+            ListTile(
+              leading: Icon(
+                  _qualityCap == 0
+                      ? Icons.check_rounded
+                      : Icons.auto_awesome_rounded,
+                  color: _qualityCap == 0
+                      ? SpotifyColors.highlight
+                      : SpotifyColors.textPrimary),
+              title: const Text('Auto (best)',
+                  style: TextStyle(color: SpotifyColors.textPrimary)),
+              onTap: () => Navigator.pop(sheetContext, 0),
+            ),
+            for (final q in _qualities)
+              ListTile(
+                leading: Icon(
+                    _qualityCap == q.height
+                        ? Icons.check_rounded
+                        : Icons.hd_outlined,
+                    color: _qualityCap == q.height
+                        ? SpotifyColors.highlight
+                        : SpotifyColors.textPrimary),
+                title: Text('${q.height}p',
+                    style: TextStyle(
+                        color: SpotifyColors.textPrimary,
+                        fontWeight: FontWeight.w700)),
+                subtitle: q.kbps > 0
+                    ? Text('${q.kbps} kbps',
+                    style: const TextStyle(
+                        color: SpotifyColors.textSecondary,
+                        fontSize: 12))
+                    : null,
+                onTap: () => Navigator.pop(sheetContext, q.height),
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    ).then((picked) {
+      if (picked is! int) return;
+      if (picked == _qualityCap) return;
+      _applyQuality(picked);
+    });
+  }
+
+  /// Applies a quality cap: re-extracts the video stream at the
+  /// chosen height (native quality-cache fast path — no second
+  /// player call) and re-prepares the merged player at the current
+  /// position. Audio layer unchanged.
+  Future<void> _applyQuality(int cap) async {
+    final videoId = _loadedId;
+    if (videoId == null || _mode != _WatchMode.merged) return;
+    setState(() {
+      _qualityCap = cap;
+      _switchingQuality = true;
+    });
+    final native = await InnertubexBridge.extractVideo(
+      videoId,
+      maxHeight: cap,
+    );
+    if (!mounted) return;
+    final newUrl = native?.videoUrl;
+    if (newUrl == null || newUrl.isEmpty) {
+      // Cache missed the height — keep current quality, report.
+      setState(() => _switchingQuality = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: SpotifyColors.surfaceLight,
+          content: Text('Could not switch quality — kept current',
+              style: TextStyle(color: SpotifyColors.textPrimary)),
+        ),
+      );
+      return;
+    }
+    final pos = _mergedPos;
+    final wasPlaying = _mergedPlaying;
+    setState(() {
+      _mergedVideoUrl = newUrl;
+      _mergedHeaders = native?.headers ?? _mergedHeaders;
+      _mergedBuffering = true;
+      _mergedPlaying = wasPlaying;
+    });
+    final ch = _nativeChannel;
+    if (ch != null) {
+      await ch.invokeMethod('prepare', {
+        'videoUrl': newUrl,
+        'audioUrl': _mergedAudioUrl,
+        'headers': _mergedHeaders,
+        'startPositionMs': pos.inMilliseconds,
+      }).catchError((_) {});
+      if (wasPlaying) {
+        ch.invokeMethod('play').catchError((_) {});
+      }
+    }
+    if (mounted) setState(() => _switchingQuality = false);
+    _pokeControls();
+  }
+
+  // ── More-sheet actions (Loop / Playback speed) ──
+
+  Future<void> _setLoop(bool loop) async {
+    setState(() => _loopVideo = loop);
+    switch (_mode) {
+      case _WatchMode.merged:
+        _nativeChannel?.invokeMethod('setLoop', loop).catchError((_) {});
+        break;
+      case _WatchMode.muxed:
+        await _muxedController?.setLooping(loop);
+        break;
+      default:
+        break;
+    }
+  }
+
+  Future<void> _setSpeed(double speed) async {
+    setState(() => _playbackSpeed = speed);
+    switch (_mode) {
+      case _WatchMode.merged:
+        _nativeChannel?.invokeMethod('setSpeed', speed).catchError((_) {});
+        break;
+      case _WatchMode.muxed:
+        await _muxedController?.setPlaybackSpeed(speed);
+        break;
+      default:
+        break;
+    }
+  }
+
+  void _moreSheet() {
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: SpotifyColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            SwitchListTile(
+              activeColor: SpotifyColors.highlight,
+              secondary: const Icon(Icons.repeat_rounded,
+                  color: SpotifyColors.textPrimary),
+              title: const Text('Loop video',
+                  style: TextStyle(color: SpotifyColors.textPrimary)),
+              value: _loopVideo,
+              onChanged: (v) {
+                _setLoop(v);
+                if (mounted) setState(() {});
+              },
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Playback speed',
+                    style: TextStyle(
+                        color: SpotifyColors.textSecondary, fontSize: 13)),
+              ),
+            ),
+            SizedBox(
+              height: 56,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: speeds.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, i) {
+                  final s = speeds[i];
+                  final selected = _playbackSpeed == s;
+                  return ChoiceChip(
+                    label: Text('${s}x'),
+                    selected: selected,
+                    selectedColor: SpotifyColors.highlight,
+                    backgroundColor: SpotifyColors.surfaceLight,
+                    labelStyle: TextStyle(
+                      color: selected
+                          ? SpotifyColors.background
+                          : SpotifyColors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    onSelected: (_) {
+                      _setSpeed(s);
+                      Navigator.pop(sheetContext);
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── YouTube-feel controls helpers (merged tier) ──
 
-  /// Shows the controls; while playing, schedules the 3s auto-hide.
-  /// Paused playback keeps them on (YouTube parity).
   void _pokeControls() {
     _hideTimer?.cancel();
     if (!mounted) return;
@@ -724,8 +956,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     }
   }
 
-  /// Tap on the video surface: toggle the controls overlay
-  /// (YouTube parity — play/pause lives on the buttons).
   void _onSurfaceTap() {
     if (_controlsVisible) {
       _hideTimer?.cancel();
@@ -737,9 +967,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
 
   void _onDoubleTapZone(int side) => _seekBy(side < 0 ? -10 : 10);
 
-  /// Double-tap seek: ±10s on the merged player or the muxed
-  /// controller. Dual mode is skipped (handler-clock tier, rare
-  /// fallback).
   void _seekBy(int seconds) {
     switch (_mode) {
       case _WatchMode.merged:
@@ -830,8 +1057,7 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     );
   }
 
-  /// Copy link (real, honest action — no fake like/dislike backend
-  /// for YouTube videos; share-out would need an unverified package).
+  /// Share = copy link (real action).
   void _copyLink() {
     final song = _current;
     if (song == null) return;
@@ -884,44 +1110,41 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       );
     }
 
-    // Normal (portrait) watch page — YouTube feel: player on top,
-    // title + channel + actions, then the up-next queue list.
+    // YouTube portrait layout: video pinned at the very top (the
+    // app is immersive — no status bar), content list below. No
+    // AppBar — the YT search bar is deliberately not reproduced.
     return WillPopScope(
       onWillPop: _onWillPop,
       child: Scaffold(
         backgroundColor: SpotifyColors.background,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          elevation: 0,
-          iconTheme: const IconThemeData(color: SpotifyColors.textPrimary),
-          title: const Text('Video',
-              style: TextStyle(
-                  color: SpotifyColors.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700)),
-        ),
-        body: ListView(
-          padding: const EdgeInsets.only(bottom: 24),
+        body: Column(
           children: [
             _videoArea(),
-            if (_mode == _WatchMode.failed)
-              _errorBlock()
-            else ...[
-              _infoBlock(),
-              Container(
-                height: 1,
-                color: SpotifyColors.surfaceLighter,
-                margin: const EdgeInsets.symmetric(vertical: 4),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: 24),
+                children: [
+                  if (_mode == _WatchMode.failed)
+                    _errorBlock()
+                  else ...[
+                    _titleBlock(),
+                    _channelRow(),
+                    _actionRow(),
+                    Container(
+                      height: 1,
+                      color: SpotifyColors.surfaceLighter,
+                      margin: const EdgeInsets.symmetric(vertical: 6),
+                    ),
+                    _upNextSection(),
+                  ],
+                ],
               ),
-              _upNextSection(),
-            ],
+            ),
           ],
         ),
       ),
     );
   }
-
-  // ── Inline video area (portrait): 16:9 wrapper around the surface ──
 
   Widget _videoArea() {
     return Container(
@@ -932,8 +1155,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       ),
     );
   }
-
-  // ── Video surface (shared between inline and fullscreen) ──
 
   Widget _videoSurface() {
     switch (_mode) {
@@ -950,19 +1171,17 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     }
   }
 
-  // ── MERGED surface — native ExoPlayer, one player, both layers ──
-
   Widget _mergedSurface() {
     if (_mergedVideoUrl == null) return _loadingSurface();
-    // Buffering is NOT paused: the overlay must not pop up while
-    // the player is still loading (the spinner alone shows).
     final showControls =
         _controlsVisible || (!_mergedPlaying && !_mergedBuffering);
+    final frac = _mergedDur > Duration.zero
+        ? (_mergedPos.inMilliseconds / _mergedDur.inMilliseconds)
+        .clamp(0.0, 1.0)
+        : 0.0;
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Native rendering surface. Keyed per video: a video switch
-        // recreates the view (native dispose releases the old player).
         AndroidView(
           key: ValueKey('native_player_$_loadedId'),
           viewType: 'zen_video_player',
@@ -970,10 +1189,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
           creationParamsCodec: const StandardMessageCodec(),
         ),
 
-        // Interaction layer: tap toggles the controls overlay;
-        // double-tap on the left/right half seeks ±10s (YouTube
-        // parity). Controls and bar sit ABOVE this layer and win
-        // hit-testing.
         Positioned.fill(
           child: LayoutBuilder(builder: (context, box) {
             final half = box.maxWidth / 2;
@@ -988,8 +1203,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
           }),
         ),
 
-        // Buffering spinner — always visible while the native player
-        // is still loading (independent of the controls overlay).
         if (_mergedBuffering)
           const Center(
             child: SizedBox(
@@ -1002,10 +1215,35 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
             ),
           ),
 
-        // Double-tap seek hint chip.
+        // Quality-switch indicator (distinct state from buffering).
+        if (_switchingQuality)
+          const Center(
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: CircularProgressIndicator(
+                color: SpotifyColors.highlight,
+                strokeWidth: 3,
+              ),
+            ),
+          ),
+
         if (_seekHintSide != 0) _seekHint(),
 
-        // CONTROLS overlay — fades; always shown while paused.
+        // YouTube parity: thin red progress line at the video's
+        // bottom edge while the controls are hidden.
+        if (!showControls)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: frac,
+              child: Container(height: 2, color: Colors.redAccent),
+            ),
+          ),
+
         AnimatedOpacity(
           opacity: showControls ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 220),
@@ -1037,11 +1275,30 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
                   Positioned(
                     right: 8,
                     top: 8,
-                    child: _fullscreenButton(
-                        icon: Icons.fullscreen_rounded),
+                    child: Row(
+                      children: [
+                        // Quality gear (YouTube parity) — hidden while
+                        // switching; opens the quality sheet.
+                        if (!_switchingQuality)
+                          GestureDetector(
+                            onTap: _qualitySheet,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.55),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(Icons.tune_rounded,
+                                  size: 22, color: Colors.white),
+                            ),
+                          ),
+                        if (!_switchingQuality) const SizedBox(width: 8),
+                        _fullscreenButton(
+                            icon: Icons.fullscreen_rounded),
+                      ],
+                    ),
                   ),
 
-                // Transport row: prev · play/pause · next.
                 Positioned(
                   left: 0,
                   right: 0,
@@ -1103,8 +1360,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
                         'seekTo',
                         (f * _mergedDur.inMilliseconds).round(),
                       ).catchError((_) {});
-                      // YouTube parity: releasing the scrubber
-                      // resumes playback.
                       if (!_mergedPlaying) {
                         ch.invokeMethod('play').catchError((_) {});
                         _mergedPlaying = true;
@@ -1121,8 +1376,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       ],
     );
   }
-
-  // ── Dual surface — muted video synced to the handler's audio ──
 
   Widget _dualSurface() {
     final url = _dualVideoUrl;
@@ -1142,8 +1395,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
                 key: ValueKey(url),
                 streamUrl: url,
                 playing: playing,
-                // REQUIRED: the video-only URL is UA-gated. Without
-                // these headers the request 403s and nothing renders.
                 httpHeaders: _dualHeaders,
                 synchronized: true,
                 positionStream: audioHandler.positionStream,
@@ -1195,8 +1446,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       },
     );
   }
-
-  // ── Muxed surface (fallback — single file, <=720p) ──
 
   Widget _muxedSurface() {
     final c = _muxedController;
@@ -1261,8 +1510,6 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       ],
     );
   }
-
-  // ── Loading / failed surfaces ──
 
   Widget _loadingSurface() {
     return Stack(
@@ -1362,12 +1609,12 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
 
   /// Channel avatar: native-fetched artist art when available,
   /// letter-on-brass fallback otherwise (nothing faked).
-  Widget _channelAvatar(String artist) {
+  Widget _channelAvatar(String artist, {double size = 30}) {
     final letter = artist.isNotEmpty ? artist[0].toUpperCase() : '?';
     final url = _channelThumb;
     return Container(
-      width: 30,
-      height: 30,
+      width: size,
+      height: size,
       clipBehavior: Clip.antiAlias,
       alignment: Alignment.center,
       decoration: const BoxDecoration(
@@ -1377,20 +1624,20 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
       child: (url == null || url.isEmpty)
           ? Text(
         letter,
-        style: const TextStyle(
-            fontSize: 14,
+        style: TextStyle(
+            fontSize: size * 0.45,
             fontWeight: FontWeight.w800,
             color: SpotifyColors.background),
       )
           : Image.network(
         url,
-        width: 30,
-        height: 30,
+        width: size,
+        height: size,
         fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => Text(
           letter,
-          style: const TextStyle(
-              fontSize: 14,
+          style: TextStyle(
+              fontSize: size * 0.45,
               fontWeight: FontWeight.w800,
               color: SpotifyColors.background),
         ),
@@ -1398,62 +1645,133 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
     );
   }
 
-  // ── Info block (YouTube feel): title, channel, actions ──
+  // ── YouTube-style content blocks ──
 
-  Widget _infoBlock() {
+  Widget _titleBlock() {
     final v = _current;
     if (v == null) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Text(v.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              height: 1.25,
+              color: SpotifyColors.textPrimary)),
+    );
+  }
+
+  Widget _channelRow() {
+    final v = _current;
+    if (v == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+      child: Row(
         children: [
-          Text(v.title,
-              style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  height: 1.25,
-                  color: SpotifyColors.textPrimary)),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              _channelAvatar(v.artist),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(v.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                        color: SpotifyColors.textSecondary)),
-              ),
-              // Real action only — copy link (no like/dislike
-              // backend for YouTube videos; nothing faked).
-              GestureDetector(
-                onTap: _copyLink,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: SpotifyColors.surfaceLight,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: const Text('Copy link',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: SpotifyColors.textPrimary)),
-                ),
-              ),
-            ],
+          _channelAvatar(v.artist, size: 34),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(v.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: SpotifyColors.textSecondary)),
           ),
         ],
       ),
     );
   }
 
-  // ── Up next (the queue tail, YouTube-style list) ──
+  /// YouTube action row — REAL actions only:
+  /// Like (local liked songs) · Share (copy link) · Save (app
+  /// playlists) · More (loop + speed). Subscribe/dislike are
+  /// deliberately absent — no YouTube account backend; nothing faked.
+  Widget _actionRow() {
+    final v = _current;
+    if (v == null) return const SizedBox.shrink();
+    final liked = v != null && storage.isLiked(v.id);
+
+    Widget action({
+      required IconData icon,
+      required String label,
+      required VoidCallback onTap,
+      bool active = false,
+    }) {
+      return Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon,
+                    size: 24,
+                    color: active
+                        ? SpotifyColors.highlight
+                        : SpotifyColors.textPrimary),
+                const SizedBox(height: 4),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: active
+                            ? SpotifyColors.highlight
+                            : SpotifyColors.textSecondary)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          action(
+            icon: liked ? Icons.thumb_up : Icons.thumb_up_outlined,
+            label: liked ? 'Liked' : 'Like',
+            active: liked,
+            onTap: () async {
+              final song = v;
+              if (song == null) return;
+              final newValue = !liked;
+              setState(() {});
+              try {
+                await storage.setLiked(song, newValue);
+              } catch (_) {}
+              if (mounted) setState(() {});
+            },
+          ),
+          action(
+            icon: Icons.share_outlined,
+            label: 'Share',
+            onTap: _copyLink,
+          ),
+          action(
+            icon: Icons.playlist_add_rounded,
+            label: 'Save',
+            onTap: () {
+              final song = v;
+              if (song == null) return;
+              showAddToPlaylistSheet(context, song);
+            },
+          ),
+          action(
+            icon: Icons.more_horiz,
+            label: 'More',
+            onTap: _moreSheet,
+          ),
+        ],
+      ),
+    );
+  }
 
   List<Song> get _upNext => (_queueIndex + 1 <= _queue.length - 1)
       ? _queue.sublist(_queueIndex + 1)
@@ -1576,9 +1894,8 @@ class _VideoWatchScreenState extends State<VideoWatchScreen> {
 }
 
 // ═════════════════════════════════════════════
-// MERGED PROGRESS BAR — used in native-merged mode. Scrubbable
-// (YouTube-style). Position/duration arrive from the screen's
-// 500ms poll of the native player; drags seek via the channel.
+// MERGED PROGRESS BAR — scrubbable; position/duration arrive from
+// the screen's 500ms poll of the native player.
 // ═════════════════════════════════════════════
 
 class _MergedProgressBar extends StatefulWidget {
@@ -1701,11 +2018,7 @@ class _MergedProgressBarState extends State<_MergedProgressBar> {
 }
 
 // ═════════════════════════════════════════════
-// DUAL PROGRESS BAR — used only in dual fallback mode. Scrubbable
-// (YouTube-style). Position from the handler's audio clock (the
-// master clock in dual mode); taps and drags seek the AUDIO via
-// seekSafe — VideoBackdrop's drift correction then pulls the muted
-// video back into sync.
+// DUAL PROGRESS BAR — dual fallback mode only.
 // ═════════════════════════════════════════════
 
 class _DualProgressBar extends StatefulWidget {

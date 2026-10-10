@@ -46,6 +46,7 @@ class _SearchScreenState extends State<SearchScreen>
   final _homeService = HomeService();
 
   List<Song> _songResults = [];
+  List<Song> _ytmResults = [];
   List<Song> _videoResults = [];
   List<Collection> _playlistResults = [];
   List<Collection> _albumResults = [];
@@ -239,6 +240,7 @@ class _SearchScreenState extends State<SearchScreen>
     if (query.isEmpty) {
       setState(() {
         _songResults = [];
+        _ytmResults = [];
         _videoResults = [];
         _playlistResults = [];
         _albumResults = [];
@@ -266,6 +268,7 @@ class _SearchScreenState extends State<SearchScreen>
       if (!mounted) return;
       setState(() {
         _songResults = matches;
+        _ytmResults = [];
         _videoResults = [];
         _playlistResults = [];
         _albumResults = [];
@@ -299,12 +302,7 @@ class _SearchScreenState extends State<SearchScreen>
 
     unawaited(ytmF.then((ytmSongs) {
       if (!mounted || requestId != _latestSearchRequest) return;
-      setState(() {
-        final existing = _songResults.map((s) => s.id).toSet();
-        final fresh =
-        ytmSongs.where((s) => !existing.contains(s.id)).toList();
-        _songResults = [..._songResults, ...fresh];
-      });
+      setState(() => _ytmResults = ytmSongs);
     }));
 
     unawaited(videosF.then((videos) {
@@ -476,6 +474,7 @@ class _SearchScreenState extends State<SearchScreen>
     _latestSearchRequest++;
     setState(() {
       _songResults = [];
+      _ytmResults = [];
       _videoResults = [];
       _playlistResults = [];
       _albumResults = [];
@@ -495,6 +494,7 @@ class _SearchScreenState extends State<SearchScreen>
   @override
   Widget build(BuildContext context) {
     final hasResults = _songResults.isNotEmpty ||
+        _ytmResults.isNotEmpty ||
         _videoResults.isNotEmpty ||
         _playlistResults.isNotEmpty ||
         _albumResults.isNotEmpty;
@@ -567,6 +567,7 @@ class _SearchScreenState extends State<SearchScreen>
                 _latestSearchRequest++;
                 setState(() {
                   _songResults = [];
+                  _ytmResults = [];
                   _videoResults = [];
                   _playlistResults = [];
                   _albumResults = [];
@@ -889,12 +890,68 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
+  /// True when [y] is the same track as one of the JioSaavn results
+  /// (normalized title + artist first-segment match) — keeps the
+  /// YouTube Music section from duplicating the Songs section.
+  bool _isYtmDuplicate(Song y) {
+    String norm(String s) => s
+        .toLowerCase()
+        .replaceAll(RegExp(r'\(.*?\)'), '')
+        .replaceAll(RegExp(r'\[.*?\]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final ytTitle = norm(y.title);
+    final ytArtist = norm(y.artist.split(',').first.trim());
+    return _songResults.any((j) {
+      final jTitle = norm(j.title);
+      final jArtist = norm(j.artist.split(',').first.trim());
+      final titleMatch = jTitle == ytTitle ||
+          (jTitle.isNotEmpty &&
+              ytTitle.isNotEmpty &&
+              (jTitle.contains(ytTitle) || ytTitle.contains(jTitle)));
+      final artistMatch = ytArtist.isEmpty ||
+          jArtist.contains(ytArtist) ||
+          ytArtist.contains(jArtist);
+      return titleMatch && artistMatch;
+    });
+  }
+
   Widget _resultsView() {
     return ListView(
       // Bottom padding clears the floating mini player + nav bar
       // (extendBody).
       padding: const EdgeInsets.only(bottom: 170),
       children: [
+        // YouTube Music — its own always-visible section: the merge
+        // into the songs row made it vanish whenever the YTM worker
+        // timed out (the "only JioSaavn" complaint).
+        if (_ytmResults.isNotEmpty) ...[
+          const ShelfHeaderBar(title: 'YouTube Music'),
+          for (final s in _ytmResults
+              .where((y) => !_isYtmDuplicate(y))
+              .take(10))
+            ListTile(
+              leading: YoutubeThumbnail(
+                videoId: s.id,
+                imageUrl: s.thumbnail,
+                width: 44,
+                height: 44,
+                borderRadius: 8,
+              ),
+              title: Text(s.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: SpotifyColors.textPrimary, fontSize: 14)),
+              subtitle: Text(s.artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: SpotifyColors.textSecondary, fontSize: 12)),
+              onTap: () => _playWithRadio(s),
+              onLongPress: () => _songActions(s),
+            ),
+        ],
         if (_songResults.isNotEmpty)
           ThreeTracksRow(
             title: _source == 'library' ? 'In your library' : 'Songs',

@@ -23,8 +23,9 @@
 
 > [!TIP]
 > **Future Updates** - Coming in the next update:
-> - Lossless quality
-> - UI improvements
+> - Youtube And Ytm Login
+> - Spotify login and Playlist import
+> - Liquid Glass And More Themes
 > - And many more things, very soon. Stay tuned!
 
 > [!NOTE]

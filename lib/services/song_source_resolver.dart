@@ -4,7 +4,7 @@ import 'artwork_service.dart';
 import 'jiosaavn_service.dart';
 import 'yt_music_service.dart';
 import '../models/song.dart';
-
+import 'package:flutter/foundation.dart' show visibleForTesting;
 /// Strict source policy resolver (Echo/Musify parity).
 ///
 /// Given a song identified only by a YouTube video id (from radio,
@@ -42,6 +42,26 @@ class SongSourceResolver {
     _cache[song.id] = null;
   }
 
+
+  /// @visibleForTesting — surface for the pure scoring helpers.
+  @visibleForTesting
+  static int? scoreForTest(Song candidate, Song original) =>
+      _score(candidate, original);
+
+  /// @visibleForTesting
+  @visibleForTesting
+  static Song? pickBestForTest(List<Song> candidates, Song original) =>
+      _pickBest(candidates, original);
+
+  /// @visibleForTesting
+  @visibleForTesting
+  static String normalizeTitleForTest(String s) => _norm(s);
+
+  /// @visibleForTesting
+  @visibleForTesting
+  static double wordOverlapForTest(String a, String b) =>
+      _wordOverlap(a, b);
+
   Future<Song?> resolve(Song song) {
     final key = song.id;
     // Explicit user picks (pasted links) are never substituted.
@@ -57,6 +77,29 @@ class SongSourceResolver {
       _cache[key] = r;
       return r;
     });
+  }
+
+  /// Batch hard-skip resolution for the video hand-off: resolves
+  /// [songs] in parallel (capped) and returns ONLY the entries with
+  /// confident catalog upgrades (AAC 320 / FLAC mechanism). Failed
+  /// matches are DROPPED — never downgraded to raw video-audio
+  /// streams. The cache makes the handler's later per-play
+  /// re-resolves free.
+  Future<List<Song>> resolveAllStrict(List<Song> songs,
+      {int limit = 10}) async {
+    final capped = songs.take(limit).toList();
+    final results = await Future.wait(capped.map(resolve));
+    final out = <Song>[];
+    for (var i = 0; i < results.length; i++) {
+      final r = results[i];
+      if (r != null) {
+        out.add(r);
+      } else {
+        print('🎼 Source: hard skip (no confident match) '
+            '"${capped[i].title}"');
+      }
+    }
+    return out;
   }
 
   Future<Song?> _resolve(Song song) async {

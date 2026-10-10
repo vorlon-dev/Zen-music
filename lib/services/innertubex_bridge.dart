@@ -73,6 +73,25 @@ class ItxVideoStreams {
   }
 }
 
+/// One selectable video quality for the watch page's picker
+/// (YouTube-style): a height and its best bitrate.
+class ItxVideoQuality {
+  const ItxVideoQuality({required this.height, required this.kbps});
+
+  final int height;
+  final int kbps;
+
+  static ItxVideoQuality? fromMap(Object? raw) {
+    if (raw is! Map) return null;
+    final h = (raw['height'] as num?)?.toInt() ?? 0;
+    if (h <= 0) return null;
+    return ItxVideoQuality(
+      height: h,
+      kbps: (raw['kbps'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 /// Dart bridge to the native extraction resolver (zen/innertubex —
 /// legacy channel name, deliberately kept: every Dart call site
 /// keeps working across the innertubex → :innertube migration).
@@ -139,13 +158,19 @@ class InnertubexBridge {
     }
   }
 
-  /// Audio + video extraction for the video watch page. Returns null
-  /// when extraction fails entirely; [ItxVideoStreams.videoUrl] is
-  /// null when the native side has audio but no video stream.
-  static Future<ItxVideoStreams?> extractVideo(String videoId) async {
+  /// Audio + video extraction for the video watch page. [maxHeight]
+  /// caps the video stream (quality picker; 0/null = default best
+  /// ≤1080p pick). Returns null when extraction fails entirely;
+  /// [ItxVideoStreams.videoUrl] is null when the native side has
+  /// audio but no video stream.
+  static Future<ItxVideoStreams?> extractVideo(
+      String videoId, {
+        int maxHeight = 0,
+      }) async {
     try {
       final raw = await _channel.invokeMethod('extractVideo', {
         'videoId': videoId,
+        'maxHeight': maxHeight,
       });
       return ItxVideoStreams.fromMap(raw);
     } on MissingPluginException {
@@ -153,6 +178,27 @@ class InnertubexBridge {
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Available video qualities for the picker (distinct heights,
+  /// descending; empty when the quality cache is cold — the UI hides
+  /// the picker in that case).
+  static Future<List<ItxVideoQuality>> videoQualities(String videoId) async {
+    try {
+      final raw = await _channel.invokeMethod('videoQualities', {
+        'videoId': videoId,
+      });
+      if (raw is! List) return const [];
+      return raw
+          .map<ItxVideoQuality?>((e) => ItxVideoQuality.fromMap(e))
+          .whereType<ItxVideoQuality>()
+          .toList();
+    } on MissingPluginException {
+      _available = false;
+      return const [];
+    } catch (_) {
+      return const [];
     }
   }
 

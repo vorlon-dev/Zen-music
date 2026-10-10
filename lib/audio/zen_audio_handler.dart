@@ -134,9 +134,7 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// True when [e] indicates the resolved URL ITSELF is dead —
   /// 410 Gone (expired signed URL) or 403 Forbidden. Retrying the same
   /// URL can never succeed; every cache layer must be busted so the
-  /// next attempt resolves fresh. Matches both the buffered source's
-  /// "Buffered download failed: HTTP 410" and ExoPlayer's
-  /// "Response code: 410" shapes.
+  /// next attempt resolves fresh.
   static final _deadUrlRe = RegExp(r'(?:HTTP|Response code:) ?(410|403)');
   static bool _isDefinitiveStreamDeath(Object e) =>
       _deadUrlRe.hasMatch(e.toString());
@@ -162,31 +160,20 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // ═════════════════════════════════════════════
   // STRICT SOURCE POLICY — resolve non-JioSaavn songs to proper
   // zen-catalog songs (JioSaavn 320kbps / YTMusic song) before
-  // playing. The whole queue is resolved ahead in the background, so
-  // no raw YouTube entries (16:9 thumbnails, video-only sources) stay
-  // in the queue.
+  // playing.
   // ═════════════════════════════════════════════
 
   bool _strictSources = true;
   bool _queueResolving = false;
 
-  // Origin video ids: when a raw YouTube song is swapped for a
-  // resolved catalog song, its original video id is kept here so the
-  // artist page can still resolve the REAL uploader channel via
-  // oEmbed (the resolved song's own id points at the catalog version,
-  // not at the video the user actually picked).
   final Map<String, String> _originVideoIds = {};
 
-  /// The original YouTube video id a queue song was resolved from
-  /// (strict source policy), or null when it was never swapped.
   String? originalVideoIdFor(String songId) => _originVideoIds[songId];
 
   void setStrictSources(bool enabled) {
     _strictSources = enabled;
   }
 
-  /// Resolves [song] to a proper zen-catalog song when needed, swaps
-  /// it into the queue at [index], and returns the song to play.
   Future<Song> _resolveSongSource(Song song, int index) async {
     if (followRemote || song.isFromJiosaavn || storage.getOfflineMode()) {
       return song;
@@ -196,8 +183,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     final resolved = await SongSourceResolver.instance.resolve(song);
     if (resolved == null) return song;
 
-    // Preserve the origin video id so the artist page can still show
-    // the REAL uploader channel of the video the user picked.
     if (resolved.id != song.id) {
       _originVideoIds[resolved.id] = song.id;
     }
@@ -209,13 +194,12 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     return resolved;
   }
 
-  /// Resolves the songs ahead of the current one in the background.
   Future<void> _resolveQueueAhead() async {
     if (_queueResolving || followRemote || !_strictSources) return;
     _queueResolving = true;
     try {
       for (var i = 0; i < _queue.length; i++) {
-        if (i == _currentIndex) continue; // resolved by _playIndex
+        if (i == _currentIndex) continue;
         final s = _queue[i];
         if (s.isFromJiosaavn) continue;
         final resolved = await SongSourceResolver.instance.resolve(s);
@@ -233,6 +217,61 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   // ═════════════════════════════════════════════
+  // STRICT QUEUE GATE — rejects YouTube-video-shaped entries BEFORE
+  // they can ever sit in the queue.
+  // ═════════════════════════════════════════════
+
+  bool _isStrictPlayable(Song s) {
+    final text = '${s.title} ${s.artist}'.toLowerCase();
+    const videoMarkers = [
+      'official video', 'full video', 'video song', 'jukebox',
+      'trailer', 'teaser', 'promo', 'promo video', 'promotion',
+      'motion poster', 'making of', 'behind the scenes', 'interview',
+      'live stream', 'reaction', 'shorts', 'episode', 'streaming now',
+      'super show', 'first move', 'entry scene', 'interval scene',
+      'iconic scene', 'best scene', 'slice ', 'clip',
+    ];
+    for (final marker in videoMarkers) {
+      if (text.contains(marker)) return false;
+    }
+
+    const channelHints = [
+      'tv', 'pictures', 'movies', 'films', 'video',
+      'studios', 'records official', 'prime video', 'netflix',
+    ];
+    final artist = s.artist.toLowerCase();
+    for (final hint in channelHints) {
+      if (artist == hint ||
+          (artist.contains(hint) &&
+              !artist.contains(RegExp(r'[a-z]'))) ==
+              false &&
+              artist.contains(hint)) {
+        if (artist.split(' ').length <= 3 &&
+            !RegExp(r'^[a-z][a-z .]+$').hasMatch(artist) == false) {
+          continue;
+        }
+        if (_looksLikeChannel(artist)) return false;
+      }
+    }
+
+    if (s.title.length > 70) return false;
+    return true;
+  }
+
+  bool _looksLikeChannel(String artist) {
+    const strong = [
+      'tv', 'pictures', 'movies', 'films', 'studios',
+      'prime video', 'netflix', 'makers', 'official',
+    ];
+    final words = artist.split(RegExp(r'\s+'));
+    var hits = 0;
+    for (final w in words) {
+      if (strong.any((s) => w.contains(s))) hits++;
+    }
+    return hits >= 1 && words.length <= 4;
+  }
+
+  // ═════════════════════════════════════════════
   // CROSSFADE — second hidden player, real audio overlap.
   // ═════════════════════════════════════════════
 
@@ -246,12 +285,8 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Timer? _xfadeTick;
   Song? _xfadeSong;
 
-  // Crossfade state broadcast for the UI (status chip). Every change
-  // to _xfadeInProgress goes through _setCrossfadeInProgress so the
-  // stream always mirrors the field.
   final _crossfadeStateController = StreamController<bool>.broadcast();
 
-  /// True while two tracks are actually overlapping in a crossfade.
   Stream<bool> get crossfadeStream => _crossfadeStateController.stream;
 
   void _setCrossfadeInProgress(bool v) {
@@ -311,7 +346,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _setCrossfadeInProgress(true);
     _xfadeTargetIndex = targetIndex;
     try {
-      // Resolve first, so the fade plays the proper song version.
       final nextSong =
       await _resolveSongSource(_queue[targetIndex], targetIndex);
       if (generation != _loadGeneration) {
@@ -362,8 +396,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     }
   }
 
-  /// The old track completed while a crossfade was running — adopt the
-  /// incoming track on the primary player.
   Future<void> _adoptCrossfadedTrack() async {
     final xf = _xfade;
     if (xf != null) {
@@ -471,7 +503,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   void setAudioQualitySetting(String quality) {
     _yt.setAudioQualitySetting(quality);
   }
-  // Sleep timer state.
   Timer? _sleepTick;
   DateTime? _sleepEndAt;
   bool _sleepAtEndOfSong = false;
@@ -479,7 +510,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   Stream<Duration?> get sleepTimerStream => _sleepTimerController.stream;
 
-  // Radio (live stream) mode.
   bool _isRadioMode = false;
   final _radioStationController = StreamController<String?>.broadcast();
 
@@ -487,11 +517,32 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
   Stream<String?> get radioStationStream => _radioStationController.stream;
 
+  // ── Audio-quality broadcast ──
+  // Broadcast controller with NO replay would leave the badge blank
+  // every time a StreamBuilder (re)subscribes — i.e. whenever the
+  // player screen is reopened, or when a fresh song row mounts. The
+  // `_lastAudioQuality` cache + `async*` getter below replay the last
+  // emitted value to every new subscriber, so the badge shows for
+  // EVERY song and NEVER hides until the user disables it in settings.
   final _audioQualityController =
   StreamController<Map<String, String?>>.broadcast();
 
-  Stream<Map<String, String?>> get audioQualityStream =>
-      _audioQualityController.stream;
+  Map<String, String?> _lastAudioQuality = const {
+    'type': null,
+    'bitrate': null,
+  };
+
+  /// Replays the last known quality to each new subscriber, then pipes
+  /// live updates. This makes the badge survive screen switches and
+  /// song transitions — it only disappears when the user turns the
+  /// badge off in settings (or when `_lastAudioQuality` is truly blank
+  /// on a cold boot).
+  Stream<Map<String, String?>> get audioQualityStream async* {
+    if (_lastAudioQuality['type'] != null) {
+      yield _lastAudioQuality;
+    }
+    yield* _audioQualityController.stream;
+  }
 
   ZenAudioHandler({required this.storage}) {
     _player.playbackEventStream.listen(
@@ -775,10 +826,6 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   // PUBLIC API
   // ═════════════════════════════════════════════
 
-  /// Inserts [song] at [index] — position-faithful undo for queue
-  /// removal (swipe/clear). Index is clamped; the current index shifts
-  /// when the insertion lands at or before it (mirror of
-  /// removeFromQueue's decrement).
   Future<void> insertQueueAt(int index, Song song) async {
     if (_lockoutActive) return;
     final i = index.clamp(0, _queue.length);
@@ -875,7 +922,9 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _currentIndex = 0;
     await _player.stop();
     await storage.clearLastSession();
-    _audioQualityController.add({'type': null, 'bitrate': null});
+    // NOTE: do NOT broadcast a null quality here. The badge must
+    // survive queue clears / screen switches — the user's only way
+    // to hide it is via AppearancePrefs.showQualityBadge in settings.
     queue.add(const []);
   }
 
@@ -922,27 +971,24 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     return result;
   }
 
-
   Future<void> _playIndex(int index) async {
     if (index < 0 || index >= _queue.length) return;
 
     final generation = ++_loadGeneration;
     await _abortCrossfade();
     _currentIndex = index;
-    // STRICT SOURCE POLICY: resolve to a proper zen-catalog song
-    // (JioSaavn / YTMusic) BEFORE the player shows it, so the artwork
-    // is the 1:1 album art and the stream is the high-quality version.
-    final song = await _resolveSongSource(_queue[index], index);
-    final mediaItem = _toMediaItem(song);
-    this.mediaItem.add(mediaItem);
-
+    final rawSong = _queue[index];
     try {
       await _player.stop();
     } catch (_) {}
     await _player.setVolume(1.0);
+    this.mediaItem.add(_toMediaItem(rawSong));
 
-    // Resolve the rest of the queue in the background — no raw YouTube
-    // entries (16:9 thumbnails) remain behind the playing song.
+    final song = await _resolveSongSource(_queue[index], index);
+    if (generation != _loadGeneration) return;
+    final mediaItem = _toMediaItem(song);
+    this.mediaItem.add(mediaItem);
+
     unawaited(_resolveQueueAhead());
 
     const maxAttempts = 5;
@@ -991,20 +1037,11 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       } catch (e) {
         if (generation != _loadGeneration) return;
         if (_isDefinitiveStreamDeath(e)) {
-          // 410 Gone / 403 Forbidden: this exact URL can never work
-          // again. Bust the memory cache AND stop trusting the
-          // persisted cache immediately — the old loop re-served the
-          // same dead URL from Hive on attempts 2 and 3 before
-          // distrusting it at attempt 4. The fresh resolve below
-          // also overwrites the stale persisted entry.
           _urlCache.remove(song.id);
           _staleStreamIds.add(song.id);
           print('🪦 Dead URL for ${song.title} — caches busted, '
               'next attempt resolves fresh');
         } else {
-          // Non-definitive failure (timeout, flake): drop the memory
-          // copy so the retry re-resolves; the persisted cache stops
-          // being trusted after three failed attempts.
           _urlCache.remove(song.id);
           if (attempt >= 4) _staleStreamIds.add(song.id);
         }
@@ -1023,13 +1060,10 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
             return;
           }
           final canAdvance = _currentIndex + 1 < _queue.length;
-          // Surface the failure to the UI: halted=true means playback
-          // actually stopped (error card); halted=false = skip snackbar.
           _publishPlaybackFailure(song, index, e, halted: !canAdvance);
           if (canAdvance) {
             await _playIndex(_currentIndex + 1);
           }
-          // else: playback halted — the error UI is responsible now.
         }
       }
     }
@@ -1038,6 +1072,9 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   Future<void> _prefetchNext() async {
     if (_currentIndex + 1 < _queue.length) {
       await _prefetchUrl(_queue[_currentIndex + 1]);
+    }
+    if (_currentIndex + 2 < _queue.length) {
+      unawaited(_prefetchUrl(_queue[_currentIndex + 2]));
     }
     if (!followRemote && _currentIndex >= _queue.length - 2) {
       _appendRelatedSongs();
@@ -1070,20 +1107,44 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     if (_isAppending) return;
     _isAppending = true;
     try {
-      final related = await _yt.getRelatedSongs(seedSong);
+      var related = await _yt.getRelatedSongs(seedSong);
+
+      if (related.isEmpty) {
+        try {
+          related = await _yt.getYtmRadio(seedSong.id);
+        } catch (_) {}
+      }
+
       final existingIds = _queue.map((s) => s.id).toSet();
       final newSongs = related
           .where((s) => !existingIds.contains(s.id))
           .take(20)
           .toList();
+
       if (newSongs.isEmpty) {
         print('📻 Radio fill: no related songs for "${seedSong.title}"');
         return;
       }
-      _queue.addAll(newSongs);
-      queue.add(_queue.map(_toMediaItem).toList());
-      if (_queue.length > 1) await _prefetchUrl(_queue[1]);
-      print('📻 Radio queued ${newSongs.length}');
+
+      // STRICT QUEUE — ABSOLUTE RULE (user contract).
+      final clean = newSongs.where(_isStrictPlayable).toList();
+      final upgraded = <Song>[];
+
+      for (final s in clean.take(10)) {
+        final r = await SongSourceResolver.instance.resolve(s);
+        if (r != null) upgraded.add(r);
+      }
+
+      if (upgraded.isNotEmpty) {
+        _queue.addAll(upgraded);
+        queue.add(_queue.map(_toMediaItem).toList());
+        if (_queue.length > 1) await _prefetchUrl(_queue[1]);
+      }
+
+      print(
+        '📻 Radio queued ${upgraded.length}/${clean.length}/${newSongs.length} '
+            'strict songs',
+      );
     } catch (e) {
       print('Radio fill failed: $e');
     } finally {
@@ -1098,13 +1159,27 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
       final seed = _queue.last;
       final related = await _yt.getRelatedSongs(seed);
       final existingIds = _queue.map((s) => s.id).toSet();
-      final newSongs = related
-          .where((s) => !existingIds.contains(s.id))
-          .take(15)
+
+      final clean = related
+          .where((s) =>
+      !existingIds.contains(s.id) && _isStrictPlayable(s))
+          .take(10)
           .toList();
-      if (newSongs.isEmpty) return;
-      _queue.addAll(newSongs);
+
+      if (clean.isEmpty) return;
+
+      final upgraded = <Song>[];
+      for (final s in clean) {
+        final r = await SongSourceResolver.instance.resolve(s);
+        if (r != null) upgraded.add(r);
+      }
+
+      if (upgraded.isEmpty) return;
+
+      _queue.addAll(upgraded);
       queue.add(_queue.map(_toMediaItem).toList());
+
+      unawaited(_resolveQueueAhead());
     } catch (e) {
       print('Auto-append failed: $e');
     } finally {
@@ -1256,7 +1331,15 @@ class ZenAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     final bitrate = song.isFromJiosaavn
         ? '320'
         : (stream.bitrateKbps?.toString() ?? '');
-    _audioQualityController.add({'type': type, 'bitrate': bitrate});
+    if (type.isEmpty) return; // never blank out a valid badge
+    final value = <String, String?>{'type': type, 'bitrate': bitrate};
+    // Cache BEFORE publishing so a re-subscribing StreamBuilder gets
+    // the value via the async* replay, even if it attaches microseconds
+    // after this call.
+    _lastAudioQuality = value;
+    if (!_audioQualityController.isClosed) {
+      _audioQualityController.add(value);
+    }
   }
 
   void _broadcastState(PlaybackEvent event) {

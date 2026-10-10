@@ -25,39 +25,22 @@ import kotlinx.coroutines.withContext
  * Tier-0 stream extraction through the vendored :innertube module
  * (com.music.innertube — raw InnerTube player API).
  *
- * Replaces the InnerTubeX resolver (removed together with its
- * JitPack artifact). Contract-compatible with the old
- * zen/innertubex MethodChannel: identical method names, identical
- * payload keys — innertubex_bridge.dart is untouched and every Dart
- * call site keeps working.
+ * Client chain: ANDROID_VR 1.65.10 → VISIONOS → WEB_REMIX (the
+ * poToken-armed escape hatch, attempted ONLY when a BotGuard token
+ * is instantly available — skipped otherwise; a cold mint never
+ * blocks extraction past the watch screen's stall window).
  *
- * Client chain: ANDROID_VR 1.65.10 (documented OK with 100%
- * direct-url formats; requires a visitorData, which the module
- * sends to every client as X-Goog-Visitor-Id) → VISIONOS (the
- * proven video client) → WEB_REMIX (the poToken-armed escape
- * hatch, attempted ONLY when a BotGuard token was minted —
- * skipped without one). Both direct-URL clients answer without
- * cipher work; WEB_REMIX may return ciphered formats, which the
- * Tier-0 contract skips (url-null formats are passed over).
- *
- * PoToken: ZenPoTokenBridge mints a BotGuard token per video
- * (WebView session, fire-and-forget). No token = exact previous
- * behavior — extraction proceeds without one and nothing fails.
- *
- * visitorData is PERSISTED in the SAME prefs file/key the old
- * resolver used ("innertubex_player_config" /
- * "innertubex_visitor_data"). The legacy names are deliberate so
- * existing installs keep their persisted session identity across
- * this migration. Never invalidated in onSessionChanged; every
- * resolved value is published to the po-token bridge for token
- * binding.
+ * QUALITY (video watch): the first successful video extraction
+ * caches ALL video-only formats for the videoId (heights + urls +
+ * UA). videoQualitiesBlocking serves the YouTube-style picker;
+ * extractVideoBlocking(maxHeight) re-picks from the cache (or
+ * re-extracts) at the chosen height — no full re-extraction when
+ * the cache holds.
  */
 object ZenInnertubeResolver {
 
     private const val TAG = "ZenTube"
 
-    /// One minted audio stream (Tier-0 contract, same shape as the
-    /// old resolver's Extracted).
     class Extracted(
         val videoId: String,
         val url: String,
@@ -69,11 +52,6 @@ object ZenInnertubeResolver {
         val headers: Map<String, String>,
     )
 
-    /// Audio + video from ONE player response — same client, same
-    /// recording, sync guaranteed by construction. Used by the video
-    /// watch page: audio via the handler pipeline, video muted +
-    /// synced. [videoUrl] is null when the response has no direct
-    /// video-only stream (callers fall back to their muxed tier).
     class VideoStreams(
         val videoId: String,
         val audioUrl: String?,
@@ -82,7 +60,6 @@ object ZenInnertubeResolver {
         val clientName: String,
     )
 
-    /// Verbose logging gate, set from MainActivity's debuggable flag.
     @Volatile
     var debugLogs: Boolean = false
 
@@ -91,37 +68,33 @@ object ZenInnertubeResolver {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Minted streams, for onRefused / headersFor lookups.
     private val minted = ConcurrentHashMap<String, Extracted>()
 
-    // videoId -> channelId, stashed from player responses (verified
-    // VideoDetails.channelId) during extraction — the watch screen
-    // always extracts natively before asking for channel art.
     private val channelIds = ConcurrentHashMap<String, String>()
-
-    // channelId -> artist avatar (positive cache) + negative cache
-    // so a failing artist page isn't re-requested on every reopen.
     private val channelThumbs = ConcurrentHashMap<String, String>()
     private val failedThumbs: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
-    // videoId -> (profileId -> exclusion expiry, elapsedRealtime ms)
     private val excluded = ConcurrentHashMap<String, ConcurrentHashMap<String, Long>>()
 
-    /// Extraction candidate. [id] doubles as profileId — the
-    /// skipClients values from the Dart side and the exclusion map
-    /// key on both sides are this id.
+    // QUALITY CACHE: videoId -> the video-only formats of its last
+    // successful player response + the response's UA. The first
+    // extraction populates it; the picker reads it; a quality switch
+    // re-picks from it without a second player call.
+    private class CachedQualities(
+        val ua: String,
+        val formats: List<PlayerResponse.StreamingData.Format>,
+    )
+    private val qualityCache = ConcurrentHashMap<String, CachedQualities>()
+
     private class Candidate(val id: String, val client: YouTubeClient)
 
     private val audioChain =
         listOf(
             Candidate("VR_1_65_10", YouTubeClient.ANDROID_VR_1_65_10),
             Candidate("VISIONOS", YouTubeClient.VISIONOS),
-            // PoToken-armed escape hatch (skipped without a token).
             Candidate("WEB_REMIX", YouTubeClient.WEB_REMIX),
         )
 
-    // Video watch: VISIONOS first — the proven video client. Both
-    // layers of a VideoStreams come from ONE of its responses.
     private val videoChain =
         listOf(
             Candidate("VISIONOS", YouTubeClient.VISIONOS),
@@ -131,12 +104,8 @@ object ZenInnertubeResolver {
 
     fun init(context: Context) {
         val app = context.applicationContext
-        // Legacy prefs name — preserves the visitorData persisted by
-        // the old resolver (see class doc).
         prefs =
             app.getSharedPreferences("innertubex_player_config", Context.MODE_PRIVATE)
-        // PoToken minter — starts the BotGuard WebView session once
-        // per process. Fire-and-forget; playback never waits on it.
         ZenPoTokenBridge.debugLogs = debugLogs
         ZenPoTokenBridge.init(app)
         warmup?.cancel()
@@ -152,11 +121,6 @@ object ZenInnertubeResolver {
 
     // ── visitorData ──────────────────────────────────────────
 
-    /// Restore → module scrape (music.youtube.com/sw.js_data) →
-    /// legacy youtube.com homepage grep. First success persists.
-    /// Kotlin MatchResult exposes groups via groupValues[index].
-    /// Every resolved value is published to the po-token bridge so
-    /// minted tokens bind to (videoId + visitorData).
     private suspend fun ensureVisitorData() {
         if (YouTube.visitorData != null) return
 
@@ -177,7 +141,6 @@ object ZenInnertubeResolver {
             return
         }
 
-        // Legacy fallback (kept from the ITX era).
         try {
             val body =
                 withContext(Dispatchers.IO) {
@@ -203,9 +166,6 @@ object ZenInnertubeResolver {
         } catch (_: Exception) {}
     }
 
-    /// Blocking visitorData access for the MethodChannel (ensures the
-    /// bootstrap has run first). Used by the home-chips service so
-    /// its param-filtered browse carries the session identity.
     fun visitorDataBlocking(): String? =
         runBlocking {
             ensureVisitorData()
@@ -221,14 +181,14 @@ object ZenInnertubeResolver {
         requireM4a: Boolean = false,
     ): Extracted? {
         ensureVisitorData()
-        // Pinned US/en — parity with the proven ITX-era behavior.
         YouTube.locale = YouTubeLocale(gl = "US", hl = "en")
-        val poToken = ZenPoTokenBridge.playerTokenBlocking(videoId, YouTube.visitorData)
+        // Mint OFF the critical path: only when the session is warm.
+        val poToken = if (ZenPoTokenBridge.isSessionReady()) {
+            ZenPoTokenBridge.playerTokenBlocking(videoId, YouTube.visitorData)
+        } else null
         val skip = excludedFor(videoId) + skipClients
         for (candidate in audioChain) {
             if (candidate.id in skip) continue
-            // WEB_REMIX is the poToken-armed escape hatch, not a
-            // default client — only attempted when a token exists.
             if (candidate.client == YouTubeClient.WEB_REMIX && poToken == null) continue
             try {
                 val response =
@@ -253,7 +213,7 @@ object ZenInnertubeResolver {
                 response.videoDetails?.channelId?.let { channelIds[videoId] = it }
                 val formats = response.streamingData?.adaptiveFormats.orEmpty()
                 val best = pickAudio(formats, maxKbps, requireM4a) ?: continue
-                val url = best.url ?: continue // ciphered: Tier-0 is direct-URL only
+                val url = best.url ?: continue
                 val extracted =
                     Extracted(
                         videoId = videoId,
@@ -278,7 +238,6 @@ object ZenInnertubeResolver {
         return null
     }
 
-    /// Blocking wrapper for the MethodChannel worker thread.
     fun extractBlocking(
         videoId: String,
         maxKbps: Int,
@@ -286,14 +245,36 @@ object ZenInnertubeResolver {
         requireM4a: Boolean,
     ): Extracted? = runBlocking { extract(videoId, maxKbps, skipClients, requireM4a) }
 
-    /// Audio + video extraction for the video watch page. One player
-    /// response per candidate — both layers from the same client.
-    fun extractVideoBlocking(videoId: String): VideoStreams? =
+    /// Audio + video for the watch page. [maxHeight] caps the video
+    /// stream (the quality picker's contract: null/0 = the default
+    /// best ≤1080p pick). The response's video formats land in the
+    /// quality cache either way.
+    fun extractVideoBlocking(videoId: String, maxHeight: Int = 0): VideoStreams? =
         runBlocking {
             ensureVisitorData()
             YouTube.locale = YouTubeLocale(gl = "US", hl = "en")
-            val poToken = ZenPoTokenBridge.playerTokenBlocking(videoId, YouTube.visitorData)
+            val poToken = if (ZenPoTokenBridge.isSessionReady()) {
+                ZenPoTokenBridge.playerTokenBlocking(videoId, YouTube.visitorData)
+            } else null
             try {
+                // Quality-cache fast path: a picked quality re-serve
+                // from the cached formats — no second player call.
+                val cached = qualityCache[videoId]
+                if (cached != null && maxHeight > 0) {
+                    val pick = pickVideoAt(cached.formats, maxHeight)
+                    if (pick?.url != null) {
+                        debug {
+                            "quality cache serve $videoId ${pick.height}p"
+                        }
+                        return@runBlocking VideoStreams(
+                            videoId = videoId,
+                            audioUrl = null, // audio layer unchanged — caller keeps it
+                            videoUrl = pick.url,
+                            headers = mapOf("User-Agent" to cached.ua),
+                            clientName = "quality-cache",
+                        )
+                    }
+                }
                 for (candidate in videoChain) {
                     if (candidate.client == YouTubeClient.WEB_REMIX && poToken == null) {
                         continue
@@ -319,12 +300,20 @@ object ZenInnertubeResolver {
                     }
                     response.videoDetails?.channelId?.let { channelIds[videoId] = it }
                     val formats = response.streamingData?.adaptiveFormats.orEmpty()
+                    // Cache ALL video-only formats for the picker.
+                    val videoFormats = formats.filter { !it.isAudio && it.url != null }
+                    if (videoFormats.isNotEmpty()) {
+                        qualityCache[videoId] =
+                            CachedQualities(candidate.client.userAgent, videoFormats)
+                    }
                     val audio = pickAudio(formats, Int.MAX_VALUE, requireM4a = false)
-                    val video = pickVideo(formats)
+                    val video = if (maxHeight > 0) {
+                        pickVideoAt(videoFormats, maxHeight)
+                            ?: pickVideo(formats)
+                    } else {
+                        pickVideo(formats)
+                    }
                     if (audio?.url == null && video?.url == null) continue
-                    // Build the value FIRST, then return it — a newline
-                    // between `return@runBlocking` and its expression
-                    // terminates the return (Unit) in Kotlin.
                     val streams =
                         VideoStreams(
                             videoId = videoId,
@@ -348,13 +337,36 @@ object ZenInnertubeResolver {
             }
         }
 
-    /// Related songs for the video watch queue — module-native
-    /// watch-next (WEB_REMIX at the module's own pinned client
-    /// version). Second source alongside the Dart radio service:
-    /// when the radio returns nothing (its known seed-only
-    /// flakiness), the up-next queue still fills from here.
-    /// SongItem fields id/title/artists/thumbnail are verified
-    /// module surface; no duration in the payload (UI hides zeros).
+    /// The YouTube-style picker's data: distinct heights (descending)
+    /// available for [videoId] from the quality cache. Empty when the
+    /// cache is cold (muxed-only tier) — the UI hides the picker.
+    fun videoQualitiesBlocking(videoId: String): List<Map<String, Any?>> =
+        runBlocking {
+            try {
+                val cached = qualityCache[videoId] ?: return@runBlocking emptyList()
+                cached.formats
+                    .mapNotNull { f ->
+                        val h = f.height ?: return@mapNotNull null
+                        Triple(h, f.bitrate, f.url ?: return@mapNotNull null)
+                    }
+                    .groupBy { it.first }
+                    .map { (height, entries) ->
+                        mapOf<String, Any?>(
+                            "height" to height,
+                            "kbps" to entries.maxOf { it.second } / 1000,
+                        )
+                    }
+                    .sortedByDescending { it["height"] as Int }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "videoQualities failed: ${e.message}")
+                emptyList()
+            }
+        }
+
+    // ── related / channel art ────────────────────────────────
+
     fun relatedSongsBlocking(videoId: String): List<Map<String, Any?>> =
         runBlocking {
             try {
@@ -380,13 +392,6 @@ object ZenInnertubeResolver {
             }
         }
 
-    /// Channel avatar URL for the video watch page — REAL channel
-    /// art: the channelId comes from the stashed player-response
-    /// VideoDetails (verified field), the avatar from the module's
-    /// artist browse (verified YouTube.artist surface). Best-effort:
-    /// null when the channelId was never stashed (muxed-only
-    /// fallback tier) or the artist page has no thumbnail — the
-    /// Dart UI keeps its letter-avatar fallback.
     fun channelThumbBlocking(videoId: String): String? =
         runBlocking {
             try {
@@ -410,19 +415,13 @@ object ZenInnertubeResolver {
             }
         }
 
-    /// WEB_REMIX player signature timestamp (NewPipe's JS engine —
-    /// module surface; first call downloads the player JS once).
-    /// Null on failure — best-effort.
+    /// WEB_REMIX player signature timestamp (NewPipe's JS engine).
     private fun signatureTimestamp(videoId: String): Int? =
         runCatching { NewPipeExtractor.getSignatureTimestamp(videoId).getOrNull() }
             .getOrNull()
 
     // ── format picking ───────────────────────────────────────
 
-    /// maxKbps semantics carried over from the old resolver: a
-    /// LOW-quality trigger (≤64 → lowest bitrate), otherwise the
-    /// best stream. requireM4a filters to AAC (audio/mp4).
-    /// Auto-dubbed audio tracks are deprioritized.
     private fun pickAudio(
         formats: List<PlayerResponse.StreamingData.Format>,
         maxKbps: Int,
@@ -443,9 +442,7 @@ object ZenInnertubeResolver {
         else candidates.maxByOrNull { it.bitrate }
     }
 
-    /// Video-only stream for the watch backdrop: highest bitrate at
-    /// ≤1080p (4K decode is wasted on a backdrop); falls back to the
-    /// highest overall when every stream is taller.
+    /// Default pick: highest bitrate at ≤1080p.
     private fun pickVideo(
         formats: List<PlayerResponse.StreamingData.Format>,
     ): PlayerResponse.StreamingData.Format? {
@@ -453,6 +450,21 @@ object ZenInnertubeResolver {
         if (videos.isEmpty()) return null
         val capped = videos.filter { (it.height ?: 0) in 1..1080 }
         return (if (capped.isNotEmpty()) capped else videos).maxByOrNull { it.bitrate }
+    }
+
+    /// Quality pick: the closest height ≤ [maxHeight] (highest
+    /// bitrate within it); falls back to the smallest available when
+    /// everything is taller than the request.
+    private fun pickVideoAt(
+        videos: List<PlayerResponse.StreamingData.Format>,
+        maxHeight: Int,
+    ): PlayerResponse.StreamingData.Format? {
+        val eligible = videos.filter { (it.height ?: 0) in 1..maxHeight }
+        return if (eligible.isNotEmpty()) {
+            eligible.maxByOrNull { it.height ?: 0 }
+        } else {
+            videos.minByOrNull { it.height ?: Int.MAX_VALUE }
+        }
     }
 
     // ── refusals / exclusions / session ──────────────────────
@@ -474,6 +486,7 @@ object ZenInnertubeResolver {
     fun onSessionChanged() {
         excluded.clear()
         minted.clear()
+        qualityCache.clear()
         warmup?.cancel()
         warmup = scope.launch { runCatching { ensureVisitorData() } }
     }
@@ -489,13 +502,11 @@ object ZenInnertubeResolver {
         if (debugLogs) Log.d(TAG, message())
     }
 
-    // Legacy prefs key name — deliberate (see class doc).
     private const val VISITOR_DATA_KEY = "innertubex_visitor_data"
     private const val LOW_KBPS = 64
     private const val EXCLUDE_MS = 10 * 60 * 1000L
     private const val MAX_REMEMBERED = 64
     private const val WARM_DELAY_MS = 2_000L
 
-    // Plain OkHttp for the legacy visitorData page-grep fallback.
     private val pageClient = okhttp3.OkHttpClient()
 }

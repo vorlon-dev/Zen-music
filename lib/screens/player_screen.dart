@@ -97,11 +97,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final _yt = YoutubeService();
 
   // ── Track-change slide state ──
-  // Direction of the artwork/title slide when the song changes.
-  // Explicit gestures (artwork swipe, prev/next buttons) record an
-  // intent just before skipping; the intent is consumed when the NEW
-  // song's data actually arrives. Auto-advance / radio default to
-  // forward.
   bool _slideForward = true;
   bool? _pendingSlideForward;
   DateTime _slideIntentAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -113,8 +108,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     AppearancePrefs.load();
     _loadRelated();
 
-    // Bluetooth device indicator: start the native event stream
-    // (idempotent) so the row is live whenever the player is open.
     AudioDeviceService.instance.start();
 
     _songSub = audioHandler.currentSongStream.listen((song) {
@@ -124,8 +117,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (_showVideo) _resolveVideoFor(song);
       _resolveCanvas(song);
       _prefetchVideoFor(song);
-      // Auto-video: songs marked "play with video" open video mode
-      // without the user touching the camera icon.
       VideoPreferenceService.instance
           .isVideoPreferred(song.id)
           .then((preferred) {
@@ -134,24 +125,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (_showVideo) return;
         _toggleVideo(song);
       });
-      // Explicit "Play with video" from the action sheet.
       if (_pendingVideoSongId == song.id) {
         _pendingVideoSongId = null;
         if (!_showVideo) _toggleVideo(song);
       }
     });
 
-    // WAKELOCK — keep screen on while the player is open (if enabled).
     AppearancePrefs.keepScreenOn.addListener(_applyKeepScreenOn);
     _applyKeepScreenOn();
 
-    // Keep the app-wide immersive mode (bars stay hidden everywhere).
     AppearancePrefs.hideStatusBarOnLyrics.addListener(_applySystemUi);
     AppearancePrefs.canvasEnabled.addListener(_onCanvasPrefChanged);
   }
 
   void _applyKeepScreenOn() {
-    // WAKELOCK
     if (AppearancePrefs.keepScreenOn.value) {
       WakelockPlus.enable();
     } else {
@@ -159,29 +146,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  /// Keeps the app-wide immersive mode (status bar + nav bar hidden).
   void _applySystemUi() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
-  /// Opens/closes the lyrics pane.
   void _setLyricsOpen(bool open) {
     setState(() => _showLyrics = open);
   }
 
-  /// Records the swipe/button direction so the NEXT song change slides
-  /// the artwork and titles the way the user moved. Skips resolve
-  /// asynchronously, so the intent is stored until the song changes.
   void _noteSlideIntent(bool forward) {
     _pendingSlideForward = forward;
     _slideIntentAt = DateTime.now();
   }
 
-  /// Consumes a pending slide intent — but ONLY when the song id
-  /// actually changed and the intent is still fresh. An unrelated
-  /// rebuild between the gesture and the track resolution must not
-  /// eat the direction; a stale intent (skip that never happened)
-  /// must not hijack a later, unrelated track change.
   void _consumeSlideIntentIfNeeded(Song song) {
     if (song.id == _lastSlideSongId) return;
     final pending = _pendingSlideForward;
@@ -200,8 +177,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     AppearancePrefs.hideStatusBarOnLyrics.removeListener(_applySystemUi);
     AppearancePrefs.canvasEnabled.removeListener(_onCanvasPrefChanged);
     if (_videoFullscreen) {
-      // Restore portrait if the user pops the screen mid-fullscreen.
-      // System bars stay hidden — the app is full-screen everywhere.
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
@@ -247,8 +222,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     if (_canvasForSongId == song.id) return;
     _canvasForSongId = song.id;
-    // Provider chain: echomusic curated manifest (instant) →
-    // Apple Music AMP (deeper catalog).
     String? canvasUrl;
     final echo = await EchomusicCanvasService.instance
         .getBySongArtist(song.title, song.artist);
@@ -307,13 +280,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
-    // Already resolved for this song — instant re-show.
     if (_videoForSongId == song.id && _videoUrl != null) {
       setState(() => _showVideo = true);
       return;
     }
 
-    // Prefetched — instant switch.
     final prefetched = _videoPrefetch[song.id];
     if (prefetched != null) {
       setState(() {
@@ -325,7 +296,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
-    // Cold path — resolve now with a spinner.
     setState(() {
       _videoLoading = true;
       _showVideo = true;
@@ -417,8 +387,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  // ── Fullscreen video ──
-
   void _enterVideoFullscreen() {
     if (!_showVideo || _videoUrl == null) return;
     setState(() => _videoFullscreen = true);
@@ -440,7 +408,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     AppearancePrefs.keepScreenOn.value
         ? WakelockPlus.enable()
         : WakelockPlus.disable(); // WAKELOCK
-    // System bars stay hidden — app is full-screen everywhere.
   }
 
   @override
@@ -465,11 +432,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _lyricsSynced = false;
     }
 
-    // Track-change slide: consume a pending swipe/button direction
-    // when (and only when) the song actually changed.
     _consumeSlideIntentIfNeeded(song);
 
-    // ── Fullscreen video mode: edge-to-edge, landscape, immersive ──
     if (_videoFullscreen && _showVideo && _videoUrl != null) {
       return WillPopScope(
         onWillPop: () async {
@@ -481,8 +445,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           body: Stack(
             fit: StackFit.expand,
             children: [
-              // Synchronized song-video: full length, position locked
-              // to the audio. Poster = song artwork (no black gap).
               VideoBackdrop(
                 streamUrl: _videoUrl!,
                 playing: controller.isPlaying,
@@ -495,8 +457,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   _onVideoUnavailable(reason);
                 },
               ),
-              // Play/pause — backdrop follows audioHandler, so this
-              // pauses both the music and the video.
               Center(
                 child: GestureDetector(
                   onTap: () {
@@ -522,7 +482,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
               ),
-              // Exit-fullscreen button.
               Positioned(
                 top: 12,
                 right: 12,
@@ -553,9 +512,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         children: [
           if (_showVideo && _videoUrl != null) ...[
             Positioned.fill(
-              // SYNCHRONIZED song-video: full-length, position locked to
-              // the audio — not a 15s muted loop. Poster = song artwork
-              // (no black gap while the decoder warms up).
               child: VideoBackdrop(
                 streamUrl: _videoUrl!,
                 playing: controller.isPlaying,
@@ -566,11 +522,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 onUnavailable: _onVideoUnavailable,
               ),
             ),
-            // VideoBackdrop swallows ALL taps internally (IgnorePointer),
-            // so double-tap-on-backdrop can't work directly. This
-            // transparent layer sits ABOVE the backdrop and BELOW the UI
-            // content — it receives double-taps for fullscreen while
-            // single taps fall through to the content above.
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
@@ -596,8 +547,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
             )
           else
             Positioned.fill(
-              // Player background style: gradient | solid | blur |
-              // glow | mesh | apple.
               child: ValueListenableBuilder<String>(
                 valueListenable: AppearancePrefs.playerBackground,
                 builder: (context, bg, _) {
@@ -698,11 +647,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  /// Wraps a song-bound subtree so that when [slideKey] (the song id)
-  /// changes, the old content slides out and the new content slides in —
-  /// right-to-left for "next", left-to-right for "previous". The
-  /// outgoing child is pointer-disabled and clipped to this subtree's
-  /// bounds, so slides never bleed over neighboring widgets.
   Widget _slideOnChange({
     required String slideKey,
     required Widget child,
@@ -721,8 +665,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ],
       ),
       transitionBuilder: (child, animation) {
-        // ValueKey<String> on BOTH sides — a ValueKey<Object> would
-        // never compare equal (runtimeType check in Key equality).
         final incoming = child.key == ValueKey<String>(slideKey);
         final Offset slideFrom = incoming
             ? Offset(_slideForward ? 0.26 : -0.26, 0)
@@ -784,8 +726,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ? const SizedBox(height: 24)
                   : Padding(
                 padding: const EdgeInsets.fromLTRB(28, 16, 28, 20),
-                // Artwork slides on track change — old art exits,
-                // new art enters, in the swipe/button direction.
                 child: _slideOnChange(
                   slideKey: song.id,
                   child: GestureDetector(
@@ -818,9 +758,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               ),
                             ],
                           ),
-                          // Crop any thumbnail aspect (16:9 video
-                          // stills included) into the 1:1 art frame —
-                          // no black bars, ever.
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(
                                 AppearancePrefs.thumbRadius.value),
@@ -873,9 +810,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: Row(
               children: [
                 Expanded(
-                  // Title/artist/badges slide on track change, in sync
-                  // with the artwork (same duration + curve, same
-                  // direction — consumed once per song change).
                   child: _slideOnChange(
                     slideKey: 'meta-${song.id}',
                     stackAlignment: Alignment.centerLeft,
@@ -928,7 +862,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ],
                           ),
                         ),
-                        // ── Quality badge (hideable) + VIDEO chip ──
                         const SizedBox(height: 6),
                         ValueListenableBuilder<bool>(
                           valueListenable: AppearancePrefs.showQualityBadge,
@@ -1014,7 +947,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
 
           const SizedBox(height: 14),
-          // ── Progress slider (Slim | Wavy | Bar) + LT lockout pill ──
           ValueListenableBuilder<LtRoomSnapshot?>(
             valueListenable: ListenTogetherService.instance.roomNotifier,
             builder: (context, ltRoom, _) {
@@ -1066,9 +998,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
             song: song,
             onSkipIntent: _noteSlideIntent,
           ),
-          // ── Audio output row: current device + name, tap opens the
-          // device sheet (always visible — shows Phone speaker when
-          // nothing else is connected).
           const _DeviceRow(),
           const SizedBox(height: 18),
           _smallIconsRow(song),
@@ -1141,7 +1070,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ],
             ),
           ),
-          // Fullscreen video button — visible only in video mode.
           if (_showVideo && _videoUrl != null)
             IconButton(
               tooltip: 'Fullscreen video',
@@ -1336,6 +1264,12 @@ class _SliderTimeRow extends StatelessWidget {
     required this.right,
   });
 
+  static const _timeStyle = TextStyle(
+    fontSize: 11.5,
+    fontWeight: FontWeight.w600,
+    color: SpotifyColors.textSecondary,
+  );
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -1343,24 +1277,37 @@ class _SliderTimeRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(left,
-              style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: SpotifyColors.textSecondary)),
-          ValueListenableBuilder<bool>(
-            valueListenable: AppearancePrefs.showQualityBadge,
-            builder: (context, showBadge, _) => StatusChip(
-              playbackState: handler.playbackState,
-              qualityStream: handler.audioQualityStream,
-              showCodec: !showBadge,
+          Flexible(
+            child: Text(
+              left,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              style: _timeStyle,
             ),
           ),
-          Text(right,
-              style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: SpotifyColors.textSecondary)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: ValueListenableBuilder<bool>(
+              valueListenable: AppearancePrefs.showQualityBadge,
+              builder: (context, showBadge, _) => StatusChip(
+                playbackState: handler.playbackState,
+                qualityStream: handler.audioQualityStream,
+                showCodec: !showBadge,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              right,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: _timeStyle,
+            ),
+          ),
         ],
       ),
     );
@@ -1459,8 +1406,6 @@ class _SlimSliderState extends State<_SlimSlider> {
     await widget.handler.seekSafe(Duration(milliseconds: targetMs));
     if (!mounted) return;
     if (!ok) {
-      // Seek swallowed (LT guest lockout / player not ready) — snap the
-      // bar back to the real position instead of freezing.
       _seekPending = false;
       setState(() {});
       return;
@@ -2063,8 +2008,6 @@ class _TransportButton extends StatefulWidget {
 
 class _TransportButtonState extends State<_TransportButton>
     with SingleTickerProviderStateMixin {
-  // IMPORTANT: value MUST start at 1.0 — AnimationController defaults
-  // to 0.0, which renders Transform.scale(0) (invisible-but-tappable).
   late final AnimationController _scale =
   AnimationController(vsync: this, value: 1.0);
 
@@ -2283,8 +2226,6 @@ class _PlayerControls extends StatefulWidget {
   final dynamic handler;
   final dynamic controller;
   final Song song;
-  // Records the slide direction for the track-change animation just
-  // before a skip fires (true = next, false = previous).
   final ValueChanged<bool>? onSkipIntent;
 
   const _PlayerControls({
@@ -2333,35 +2274,53 @@ class _PlayerControlsState extends State<_PlayerControls> {
     final locked = _locked;
     final repeatOn = _repeatMode != AudioServiceRepeatMode.none;
 
+    // ── OVERFLOW FIX ──
+    // Natural row width was 316 px (48 + 68 + 84 + 68 + 48) which
+    // overflows the 312 px available inside the 24 px horizontal
+    // padding on a 360 dp screen. The four non-play controls are now
+    // each wrapped in Flexible+FittedBox(scaleDown), so they shrink
+    // proportionally on any narrow screen — down to ~240 dp — without
+    // ever throwing a RenderFlex overflow. The play button stays at
+    // its natural size (it's the visual anchor).
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          IconButton(
-            iconSize: 22,
-            splashRadius: 20,
-            icon: Icon(
-              _shuffleOn
-                  ? FluentIcons.arrow_shuffle_24_filled
-                  : FluentIcons.arrow_shuffle_off_24_regular,
-              color: _shuffleOn
-                  ? SpotifyColors.green
-                  : (locked
-                  ? SpotifyColors.textTertiary
-                  : SpotifyColors.textSecondary),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: IconButton(
+                iconSize: 22,
+                splashRadius: 20,
+                icon: Icon(
+                  _shuffleOn
+                      ? FluentIcons.arrow_shuffle_24_filled
+                      : FluentIcons.arrow_shuffle_off_24_regular,
+                  color: _shuffleOn
+                      ? SpotifyColors.green
+                      : (locked
+                      ? SpotifyColors.textTertiary
+                      : SpotifyColors.textSecondary),
+                ),
+                onPressed: locked ? null : _toggleShuffle,
+              ),
             ),
-            onPressed: locked ? null : _toggleShuffle,
           ),
-          _TransportButton(
-            icon: FluentIcons.previous_24_regular,
-            onPressed: locked
-                ? null
-                : () {
-              _maybeHaptic();
-              widget.onSkipIntent?.call(false);
-              handler.skipToPrevious();
-            },
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _TransportButton(
+                icon: FluentIcons.previous_24_regular,
+                onPressed: locked
+                    ? null
+                    : () {
+                  _maybeHaptic();
+                  widget.onSkipIntent?.call(false);
+                  handler.skipToPrevious();
+                },
+              ),
+            ),
           ),
           _PlayButton(
             handler: handler,
@@ -2369,32 +2328,42 @@ class _PlayerControlsState extends State<_PlayerControls> {
             playing: widget.controller.isPlaying,
             locked: locked,
           ),
-          _TransportButton(
-            icon: FluentIcons.next_24_regular,
-            onPressed: locked
-                ? null
-                : () {
-              _maybeHaptic();
-              widget.onSkipIntent?.call(true);
-              handler.skipToNext();
-            },
-          ),
-          IconButton(
-            iconSize: 22,
-            splashRadius: 20,
-            icon: Icon(
-              _repeatMode == AudioServiceRepeatMode.one
-                  ? FluentIcons.arrow_repeat_1_24_filled
-                  : repeatOn
-                  ? FluentIcons.arrow_repeat_all_24_filled
-                  : FluentIcons.arrow_repeat_all_off_24_regular,
-              color: repeatOn
-                  ? SpotifyColors.green
-                  : (locked
-                  ? SpotifyColors.textTertiary
-                  : SpotifyColors.textSecondary),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _TransportButton(
+                icon: FluentIcons.next_24_regular,
+                onPressed: locked
+                    ? null
+                    : () {
+                  _maybeHaptic();
+                  widget.onSkipIntent?.call(true);
+                  handler.skipToNext();
+                },
+              ),
             ),
-            onPressed: locked ? null : _cycleRepeat,
+          ),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: IconButton(
+                iconSize: 22,
+                splashRadius: 20,
+                icon: Icon(
+                  _repeatMode == AudioServiceRepeatMode.one
+                      ? FluentIcons.arrow_repeat_1_24_filled
+                      : repeatOn
+                      ? FluentIcons.arrow_repeat_all_24_filled
+                      : FluentIcons.arrow_repeat_all_off_24_regular,
+                  color: repeatOn
+                      ? SpotifyColors.green
+                      : (locked
+                      ? SpotifyColors.textTertiary
+                      : SpotifyColors.textSecondary),
+                ),
+                onPressed: locked ? null : _cycleRepeat,
+              ),
+            ),
           ),
         ],
       ),
@@ -2451,8 +2420,6 @@ class _DeviceRowState extends State<_DeviceRow> {
     setState(() => _nonBtActive = active);
   }
 
-  // Non-BT fallback resolution (enumeration has no lag problem for
-  // these — they appear/disappear instantly).
   AudioOutputDevice? _nonBtActive;
 
   @override
@@ -2463,7 +2430,6 @@ class _DeviceRowState extends State<_DeviceRow> {
     final String name;
 
     if (btName != null && btName.isNotEmpty) {
-      // BT connected per the broadcast stream — show it immediately.
       icon = AudioDeviceService.isSpeaker(btName)
           ? Icons.speaker_rounded
           : (AudioDeviceService.isBuds(btName)

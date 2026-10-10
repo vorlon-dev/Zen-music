@@ -1215,16 +1215,31 @@ class MiniPlayer extends StatelessWidget {
   }
 
   void _openNowPlaying(BuildContext context) {
-    // An active video session reopens the WATCH page at its saved
-    // position (YouTube parity) instead of the audio player.
+    // An active video session reopens the WATCH page (YouTube
+    // parity) instead of the audio player. Resume at the LIVE
+    // handler position when the handler is still playing this video:
+    // VideoSession.position freezes at transfer time while the mini
+    // player keeps advancing. PlaybackState carries the position as
+    // of updateTime — add the elapsed play time for the live value.
     if (VideoSession.active) {
+      final sameAudio =
+          audioHandler.mediaItem.value?.id == VideoSession.videoId;
+      var resume = VideoSession.position;
+      if (sameAudio) {
+        final ps = audioHandler.playbackState.value;
+        final live = ps.position +
+            (ps.playing
+                ? DateTime.now().difference(ps.updateTime)
+                : Duration.zero);
+        if (live > Duration.zero) resume = live;
+      }
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => VideoWatchScreen(
           videoId: VideoSession.videoId,
           title: VideoSession.title,
           artist: VideoSession.artist,
           thumbnail: VideoSession.thumbnail,
-          startPosition: VideoSession.position,
+          startPosition: resume,
         ),
       ));
       return;
@@ -1722,65 +1737,79 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
     return SizedBox(
       width: 48,
       height: 48,
-      child: StreamBuilder<Duration>(
-        stream: audioHandler.positionStream,
-        builder: (context, posSnap) {
-          final position = posSnap.data ?? Duration.zero;
-          final progress = widget.totalDuration.inMilliseconds == 0
-              ? 0.0
-              : (position.inMilliseconds /
-              widget.totalDuration.inMilliseconds)
-              .clamp(0.0, 1.0);
+      // Duration fallback: YTM-resolved songs can carry a zero
+      // MediaItem duration — the player's real duration stream fills
+      // in, so the wave ring tracks progress for every source.
+      child: StreamBuilder<Duration?>(
+        stream: audioHandler.durationStream,
+        builder: (context, durSnap) {
+          final total = widget.totalDuration.inMilliseconds > 0
+              ? widget.totalDuration
+              : (durSnap.data ?? Duration.zero);
+          return StreamBuilder<Duration>(
+            stream: audioHandler.positionStream,
+            builder: (context, posSnap) {
+              final position = posSnap.data ?? Duration.zero;
+              final progress = total.inMilliseconds == 0
+                  ? 0.0
+                  : (position.inMilliseconds / total.inMilliseconds)
+                  .clamp(0.0, 1.0);
 
-          return Stack(
-            alignment: Alignment.center,
-            children: [
-              AnimatedBuilder(
-                animation: Listenable.merge([_phase, _amp]),
-                builder: (context, _) => CustomPaint(
-                  size: const Size(48, 48),
-                  painter: WaveRingPainter(
-                    phase: _phase.value * 2 * math.pi,
-                    startAngle: -math.pi / 2,
-                    sweepAngle: 2 * math.pi * progress.clamp(0.0, 1.0),
-                    color: SpotifyColors.highlight,
-                    strokeWidth: 3,
-                    amplitude: 1.6 * _amp.value,
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  AnimatedBuilder(
+                    animation: Listenable.merge([_phase, _amp]),
+                    builder: (context, _) => CustomPaint(
+                      size: const Size(48, 48),
+                      painter: WaveRingPainter(
+                        phase: _phase.value * 2 * math.pi,
+                        startAngle: -math.pi / 2,
+                        sweepAngle:
+                        2 * math.pi * progress.clamp(0.0, 1.0),
+                        color: SpotifyColors.highlight,
+                        strokeWidth: 3,
+                        amplitude: 1.6 * _amp.value,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              if (isLoading)
-                const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    valueColor:
-                    AlwaysStoppedAnimation<Color>(SpotifyColors.highlight),
-                  ),
-                )
-              else
-                IconButton(
-                  onPressed: isCompleted
-                      ? () async {
-                    await audioHandler.seek(Duration.zero);
-                    await audioHandler.play();
-                  }
-                      : (isPlaying ? audioHandler.pause : audioHandler.play),
-                  splashColor: Colors.transparent,
-                  highlightColor: Colors.transparent,
-                  icon: Icon(
-                    isCompleted
-                        ? FluentIcons.arrow_counterclockwise_24_filled
-                        : (isPlaying
-                        ? FluentIcons.pause_16_filled
-                        : FluentIcons.play_16_filled),
-                    color: SpotifyColors.textPrimary,
-                    size: 22,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                ),
-            ],
+                  if (isLoading)
+                    const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                            SpotifyColors.highlight),
+                      ),
+                    )
+                  else
+                    IconButton(
+                      onPressed: isCompleted
+                          ? () async {
+                        await audioHandler.seek(Duration.zero);
+                        await audioHandler.play();
+                      }
+                          : (isPlaying
+                          ? audioHandler.pause
+                          : audioHandler.play),
+                      splashColor: Colors.transparent,
+                      highlightColor: Colors.transparent,
+                      icon: Icon(
+                        isCompleted
+                            ? FluentIcons
+                            .arrow_counterclockwise_24_filled
+                            : (isPlaying
+                            ? FluentIcons.pause_16_filled
+                            : FluentIcons.play_16_filled),
+                        color: SpotifyColors.textPrimary,
+                        size: 22,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                ],
+              );
+            },
           );
         },
       ),
@@ -1883,15 +1912,18 @@ class _LibraryTabState extends State<LibraryTab> {
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
             child: Row(
               children: [
-                const Text(
-                  'Your playlists',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: SpotifyColors.textPrimary,
+                const Expanded(
+                  child: Text(
+                    'Your playlists',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: SpotifyColors.textPrimary,
+                    ),
                   ),
                 ),
-                const Spacer(),
                 TextButton.icon(
                   onPressed: () async {
                     final ok = await showDialog<bool>(

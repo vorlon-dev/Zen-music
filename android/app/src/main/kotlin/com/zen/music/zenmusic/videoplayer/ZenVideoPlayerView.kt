@@ -45,8 +45,10 @@ import io.flutter.plugin.platform.PlatformView
  * position poll so Dart can fall back to the muxed tier.
  *
  * Channel contract ("zen/video_player_<viewId>", one per instance):
- *   prepare   {videoUrl, audioUrl?, headers, startPositionMs?}
- *   play / pause / seekTo {ms} / setVolume {0..1} / release
+ *   prepare   {videoUrl, audioUrl?, headers, videoHeaders?,
+ *              audioHeaders?, startPositionMs?}
+ *   play / pause / seekTo {ms} / setVolume {0..1} / setSpeed {x} /
+ *   setLoop {bool} / release
  *   position  → {positionMs, durationMs, isPlaying, ready, ended,
  *                error}
  */
@@ -259,6 +261,18 @@ class ZenVideoPlayerView(
                 val v = ((call.arguments as? Number)?.toDouble() ?: 1.0)
                     .coerceIn(0.0, 1.0)
                 player?.volume = v.toFloat()
+                result.success(null)
+            }
+            "setSpeed" -> {
+                val s = ((call.arguments as? Number)?.toDouble() ?: 1.0)
+                    .coerceIn(0.25, 4.0).toFloat()
+                player?.setPlaybackSpeed(s)
+                result.success(null)
+            }
+            "setLoop" -> {
+                val loop = call.arguments as? Boolean == true
+                player?.repeatMode =
+                    if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
                 result.success(null)
             }
             "position" -> {

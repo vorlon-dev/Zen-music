@@ -1,10 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head><title></title><script>
     /**
-     * BotGuard client — LibreTube's proven po_token.html machinery
-     * (verbatim functions), driven by ZenMusic's session orchestrator
-     * at the bottom (challenge fetch → VM run → integrity token →
-     * per-video minting through the injected ZenPo interface).
+     * BotGuard client — LibreTube's proven po_token.html machinery.
      */
     function loadBotGuard(challengeData) {
       this.vm = this[challengeData.globalName];
@@ -37,8 +34,7 @@
       // an asynchronous function runs in the background and it will eventually call
       // `vmFunctionsCallback`, however we need to manually tell JavaScript to pass
       // control to the things running in the background by interrupting this async
-      // function in any way, e.g. with a delay of 1ms. The loop is most probably not
-      // needed but is there just because.
+      // function in any way, e.g. with a delay of 1ms.
       return new Promise(function (resolve, reject) {
         i = 0
         refreshIntervalId = setInterval(function () {
@@ -114,121 +110,21 @@
     }
 </script>
     <script>
-        // ═══════════════════════════════════════════
-        // SESSION ORCHESTRATOR (ZenMusic). Session state = the BotGuard
-        // webPoSignalOutput + the WAA integrity token; every mint calls
-        // obtainPoToken fresh (LibreTube's per-call pattern — no
-        // persistent minter, nothing to go stale).
-        // ═══════════════════════════════════════════
-
-        // bgutils / YouTube.js fixed request key for the WAA endpoint.
-        // WARNING-UNVERIFIED-SHAPE: on mismatch the raw WAA response head
-        // is reported through onSession(false, ...) — first-run diagnostic.
-        var ZEN_REQUEST_KEY = '917828233';
-
-        // Session state — set by initSession, consumed by mintPoToken.
-        var sessionWebPoSignalOutput = null;
-        var sessionIntegrityToken = null;
-
-        function bytesToBase64(bytes) {
-          var binary = '';
-          var chunk = 0x8000;
-          for (var i = 0; i < bytes.length; i += chunk) {
-            binary += String.fromCharCode.apply(
-              null, bytes.subarray(i, i + chunk));
-          }
-          return btoa(binary);
-        }
-
-        function base64ToBytes(b64) {
-          var bin = atob(b64);
-          var out = new Uint8Array(bin.length);
-          for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-          return out;
-        }
-
-        // sw.js_data nests the challenge deep inside versioned arrays —
-        // index paths drift, so search for the descriptor by keys
-        // (globalName + program + interpreterJavascript).
-        function findChallenge(obj, depth) {
-          if (depth > 12 || obj == null) return null;
-          if (typeof obj === 'object') {
-            if (obj.globalName && obj.program && obj.interpreterJavascript) {
-              return obj;
+        // PROBES + SELF-BOOTSTRAP — answers, in one page load, the three
+        // questions the logs could not: does JS run, is the ZenPo
+        // interface visible, does the call-through work. The console
+        // bridge forwards every line to logcat.
+        console.log('[ZenPo] script ran');
+        try {
+            console.log('[ZenPo] interface type: ' + typeof ZenPo);
+            if (typeof ZenPo !== 'undefined' &&
+                typeof ZenPo.downloadAndRunBotguard === 'function') {
+                console.log('[ZenPo] calling downloadAndRunBotguard');
+                ZenPo.downloadAndRunBotguard();
+            } else {
+                console.log('[ZenPo] interface UNAVAILABLE — JS->Kotlin broken');
             }
-            for (var k in obj) {
-              var found = findChallenge(obj[k], depth + 1);
-              if (found) return found;
-            }
-          }
-          return null;
-        }
-
-        function sessionReadyOk() {
-          return sessionWebPoSignalOutput != null && sessionIntegrityToken != null;
-        }
-
-        function failSession(msg) {
-          try { ZenPo.onSession(false, String(msg).substring(0, 900)); } catch (e) {}
-        }
-
-        async function initSession(visitorData) {
-          try {
-            // 1. Challenge.
-            var res = await fetch('https://www.youtube.com/sw.js_data',
-              { credentials: 'omit' });
-            var text = await res.text();
-            var data = JSON.parse(text.replace(/^\)\]\}'\s*/, ''));
-            var challenge = findChallenge(data, 0);
-            if (!challenge) throw new Error('challenge not found in sw.js_data');
-
-            // 2. BotGuard attestation (LibreTube's runBotGuard).
-            var bg = await runBotGuard({
-              globalName: challenge.globalName,
-              program: challenge.program,
-              interpreterJavascript: challenge.interpreterJavascript
-            });
-            var attestation = (typeof bg.botguardResponse === 'string')
-              ? bg.botguardResponse
-              : bytesToBase64(new Uint8Array(bg.botguardResponse));
-
-            // 3. Integrity token (WAA). Expected shape: [ [tokenB64, ...], ... ]
-            var waaRes = await fetch(
-              'https://jnn-pa.googleapis.com/$rpc/google.internal.waa.v1.Waa/GenerateIntegrityToken',
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json+protobuf' },
-                body: JSON.stringify([ZEN_REQUEST_KEY, attestation])
-              });
-            var waaText = await waaRes.text();
-            var waa;
-            try { waa = JSON.parse(waaText); } catch (e2) {
-              throw new Error('WAA non-JSON: ' + waaText.substring(0, 400));
-            }
-            var tokenB64 = waa && waa[0] && waa[0][0];
-            if (!tokenB64) {
-              throw new Error('WAA shape mismatch: ' + waaText.substring(0, 400));
-            }
-            sessionIntegrityToken = base64ToBytes(tokenB64);
-            sessionWebPoSignalOutput = bg.webPoSignalOutput;
-
-            try { ZenPo.onSession(true, 'ok'); } catch (e3) {}
-          } catch (err) {
-            sessionWebPoSignalOutput = null;
-            sessionIntegrityToken = null;
-            failSession(err && err.message ? err.message : err);
-          }
-        }
-
-        async function mintPoToken(requestId, identifierB64) {
-          try {
-            if (!sessionReadyOk()) { ZenPo.mintResult(requestId, null); return; }
-            var identifier = base64ToBytes(identifierB64);
-            var out = obtainPoToken(
-              sessionWebPoSignalOutput, sessionIntegrityToken, identifier);
-            ZenPo.mintResult(requestId, bytesToBase64(out));
-          } catch (e) {
-            try { ZenPo.mintResult(requestId, null); } catch (e2) {}
-          }
+        } catch (e) {
+            console.log('[ZenPo] bootstrap error: ' + e);
         }
     </script></head><body></body></html>
