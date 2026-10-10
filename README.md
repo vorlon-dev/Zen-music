@@ -43,8 +43,9 @@
 <img src="screenshots/listen_together.png" alt="Listen together screen" width="30%" />
 <img src="screenshots/search.png" alt="Search screen" width="30%" />
 <img src="screenshots/library.png" alt="Library screen" width="30%" />
-<img src="screenshots/ytvideo.png" alt="Library screen" width="30%" />
-<img src="screenshots/fullscreen.png" alt="Library screen" width="30%" />
+<img src="screenshots/ytvideo.png" alt="YouTube video screen" width="30%" />
+<br/>
+<img src="screenshots/fullscreen.png" alt="Fullscreen player screen" width="91%" />
 
 </div>
 
