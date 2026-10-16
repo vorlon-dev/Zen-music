@@ -1,7 +1,9 @@
 // ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
 // PORT: /browse and /chip are TOP-LEVEL (marked deviation). R8e complete:
-// backup_storage/about/downloads/privacy/player/ytmusic routes live.
-// Remaining stubs: history_page (awaiting Echo paste), chart_details.
+// backup_storage/about/downloads/privacy/player/ytmusic/appearance routes live.
+// /listen = Listen Together. /video = mobile video watch (native bridge).
+// /settings/player/equalizer = device EQ. /chart_details = REAL page.
+// ZERO stubs remain — stubs.dart deleted.
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -11,21 +13,27 @@ import 'package:zenmusic/desktop/screens/search/search_page.dart';
 import 'package:zenmusic/desktop/screens/player/player_page.dart';
 import 'package:zenmusic/desktop/screens/browse/browse_page.dart';
 import 'package:zenmusic/desktop/screens/chip/chip_page.dart';
+import 'package:zenmusic/desktop/screens/video/video_watch_page.dart';
 import 'package:zenmusic/desktop/screens/settings/settings_page.dart';
 import 'package:zenmusic/desktop/screens/settings/backup_storage/backup_storage_page.dart';
 import 'package:zenmusic/desktop/screens/settings/about/about_page.dart';
 import 'package:zenmusic/desktop/screens/settings/privacy/privacy_page.dart';
 import 'package:zenmusic/desktop/screens/settings/player/player_settings_page.dart';
+import 'package:zenmusic/desktop/screens/settings/player/equalizer_page.dart';
 import 'package:zenmusic/desktop/screens/settings/services/ytmusic/yt_music_page.dart';
+import 'package:zenmusic/desktop/screens/settings/appearance/appearance_page.dart';
 import 'package:zenmusic/desktop/screens/library/library_page.dart';
 import 'package:zenmusic/desktop/screens/library/favourites/favourites_page.dart';
 import 'package:zenmusic/desktop/screens/library/playlist/playlist_details_page.dart';
+import 'package:zenmusic/desktop/screens/library/history/history_page.dart';
 import 'package:zenmusic/desktop/screens/library/downloads/downloads_page.dart';
 import 'package:zenmusic/desktop/screens/library/downloads/downloading/downloading_page.dart';
 import 'package:zenmusic/desktop/screens/library/downloads/playlist/download_playlist_page.dart';
-import 'package:zenmusic/desktop/screens/stubs.dart';
+import 'package:zenmusic/desktop/screens/listen_together/listen_together_page.dart';
+import 'package:zenmusic/desktop/screens/chart/chart_details_page.dart';
+import 'package:zenmusic/desktop/services/chart_model.dart';
 import 'package:zenmusic/desktop/screens/shell/app_shell.dart';
-import 'package:zenmusic/desktop/screens/library/history/history_page.dart';
+import 'package:zenmusic/desktop/spotify/spotify_login_page.dart';
 
 
 final router = GoRouter(
@@ -88,8 +96,30 @@ final router = GoRouter(
           },
         ),
         GoRoute(
+          path: '/listen',
+          builder: (context, state) => const ListenTogetherPage(),
+        ),
+        GoRoute(
+          path: '/spotify-login',
+          builder: (context, state) => const SpotifyLoginPage(),
+        ),
+        GoRoute(
+          path: '/video',
+          builder: (context, state) {
+            final videoId = state.extra as String? ?? '';
+            return VideoWatchPage(videoId: videoId);
+          },
+        ),
+        GoRoute(
           path: '/chart_details',
-          builder: (context, state) => const ChartDetailsStub(),
+          builder: (context, state) {
+            final chart = state.extra as ChartURL?;
+            if (chart == null) {
+              return const Scaffold(
+                  body: Center(child: Text('Chart not available')));
+            }
+            return ChartDetailsPage(chart: chart);
+          },
         ),
       ],
     ),
@@ -168,6 +198,14 @@ List<StatefulShellBranch> branches = [
           GoRoute(
             path: 'player',
             builder: (context, state) => const PlayerSettingsPage(),
+          ),
+          GoRoute(
+            path: 'player/equalizer',
+            builder: (context, state) => const EqualizerPage(),
+          ),
+          GoRoute(
+            path: 'appearance',
+            builder: (context, state) => const AppearancePage(),
           ),
           GoRoute(
             path: 'services/ytmusic',

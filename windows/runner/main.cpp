@@ -17,6 +17,17 @@ CreateAndAttachConsole();
 // plugins.
 ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+// ZENMUSIC: WebView2 EME engine (SP-5). Chromium's Windows occlusion
+// calculation SUSPENDS the media lifecycle of hidden/occluded WebView2
+// pages (proven in the SP-4 spike: sourceopen never fired, then the env
+// var fixed it). This disables that tracker for every WebView2
+// environment this process creates — the hidden desktop-Spotify engine
+// then streams without suspension. Must run before any WebView2
+// environment is created (plugins create lazily, so wWinMain is early
+// enough). Inherited by the title-bar subprocess (harmless).
+::SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+L"--disable-features=CalculateNativeWinOcclusion");
+
 flutter::DartProject project(L"data");
 
 std::vector<std::string> command_line_arguments =

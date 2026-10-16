@@ -1,3 +1,17 @@
+// ZenMusic Desktop — ported from Echo Music (GPL-3.0), screens/search/search_page.dart.
+// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
+// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
+// PORT DEVIATIONS: sl() -> GetIt.I<YTMusic>(); l10n -> 'Search'; TypeAheadField
+// REPLACED with in-tree SearchSuggestField (flutter_typeahead pulls the
+// android-31 keyboard plugin). SUGGESTION TAP CONTRACT: the outside-tap
+// catcher is the PARENT of the panel — deepest recognizer wins, so item taps
+// fire and outside taps close. Teardown defers to after the frame.
+//
+// FIX: the suggestion panel is wrapped in TextFieldTapRegion so a mouse-down
+// on a suggestion no longer unfocuses the text field (which was removing the
+// overlay before the tap could complete). The focus-lost hide is also delayed
+// slightly as a safety net.
+
 import 'dart:async';
 import 'dart:io';
 
@@ -6,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:zenmusic/desktop/screens/search/cubit/search_cubit.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
@@ -97,11 +112,9 @@ class _SearchPageState extends State<_SearchPage> {
                           const BoxConstraints(maxWidth: 350),
                           child: SearchSuggestField(
                             onSubmit: onSubmit,
-                            onPick: (query) {
-                              setState(() {
-                                _textEditingController?.text = query;
-                              });
-                              onSubmit(query);
+                            onPick: onSubmit,
+                            onControllerReady: (ctrl) {
+                              _textEditingController = ctrl;
                             },
                           ),
                         ),
@@ -273,17 +286,21 @@ class _SearchListTile extends StatelessWidget {
 }
 
 /// In-tree replacement for flutter_typeahead (deviation, see header).
-/// Overlay suggestions under a rounded AdaptiveTextField; fetches via the
-/// SearchCubit that owns this page (passed through a builder scope).
+/// TAP CONTRACT: the outside-tap catcher is the PARENT of the suggestion
+/// panel — the deepest recognizer (the tapped item) always beats the parent
+/// catcher in the gesture arena, so item taps fire and outside taps close.
+/// Picked actions run FIRST; overlay teardown defers to after the frame.
 class SearchSuggestField extends StatefulWidget {
   const SearchSuggestField({
     super.key,
     required this.onSubmit,
     required this.onPick,
+    this.onControllerReady,
   });
 
   final ValueChanged<String> onSubmit;
   final ValueChanged<String> onPick;
+  final ValueChanged<TextEditingController>? onControllerReady;
 
   @override
   State<SearchSuggestField> createState() => _SearchSuggestFieldState();
@@ -302,11 +319,16 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
   @override
   void initState() {
     super.initState();
+    widget.onControllerReady?.call(_controller);
     _focusNode.addListener(() {
-      if (!_focusNode.hasFocus) {
-        _hideOverlay();
-      } else {
+      if (_focusNode.hasFocus) {
         _showOverlay();
+      } else {
+        // Give a pending tap on a suggestion time to complete before
+        // tearing the overlay down.
+        Future.delayed(const Duration(milliseconds: 150), () {
+          if (mounted && !_focusNode.hasFocus) _hideOverlay();
+        });
       }
     });
   }
@@ -314,10 +336,11 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
   @override
   void dispose() {
     _debounce?.cancel();
+    // Remove the overlay BEFORE disposing the things it references.
+    _hideOverlay();
     _controller.dispose();
     _focusNode.dispose();
     _scrollController.dispose();
-    _hideOverlay();
     super.dispose();
   }
 
@@ -330,32 +353,36 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
     if (_overlay != null) return;
     final overlay = Overlay.of(context, rootOverlay: true);
     _overlay = OverlayEntry(builder: (context) {
-      return Stack(
-        children: [
-          // Tap-catcher to dismiss
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _hideOverlay,
-            ),
-          ),
-          CompositedTransformFollower(
-            link: _layerLink,
-            showWhenUnlinked: false,
-            targetAnchor: Alignment.bottomCenter,
-            followerAnchor: Alignment.topCenter,
-            offset: const Offset(0, 8),
-            child: Material(
-              elevation: 8,
-              borderRadius: BorderRadius.circular(12),
-              child: ConstrainedBox(
-                constraints:
-                const BoxConstraints(maxWidth: 350, maxHeight: 320),
-                child: _buildSuggestionsList(),
+      // Panel nested INSIDE the catcher: taps on items are claimed by the
+      // item's own recognizer (deepest wins the arena), taps anywhere else
+      // bubble up to the catcher and close. No sibling arena fight.
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _hideOverlay,
+        child: Stack(
+          children: [
+            CompositedTransformFollower(
+              link: _layerLink,
+              targetAnchor: Alignment.bottomLeft,
+              followerAnchor: Alignment.topLeft,
+              showWhenUnlinked: false,
+              offset: const Offset(0, 8),
+              // TextFieldTapRegion: taps inside the panel count as "inside"
+              // the text field, so the field does NOT unfocus on mouse-down.
+              child: TextFieldTapRegion(
+                child: Material(
+                  elevation: 8,
+                  borderRadius: BorderRadius.circular(12),
+                  child: ConstrainedBox(
+                    constraints:
+                    const BoxConstraints(maxWidth: 350, maxHeight: 320),
+                    child: _buildSuggestionsList(),
+                  ),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       );
     });
     overlay.insert(_overlay!);
@@ -386,6 +413,18 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
     });
   }
 
+  /// Runs the picked action FIRST, then tears the overlay down after the
+  /// frame — teardown inside the tap callback was killing follow-through.
+  void _runPicked(void Function() action) {
+    action();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _hideOverlay();
+        _focusNode.unfocus();
+      }
+    });
+  }
+
   Widget _buildSuggestionsList() {
     if (_loading && _suggestions.isEmpty) {
       return const Padding(
@@ -404,26 +443,29 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
       itemBuilder: (context, index) {
         final item = _suggestions[index];
         if (item['type'] == 'TEXT') {
+          final query = item['query']?.toString() ?? '';
           return AdaptiveListTile(
             dense: true,
             leading: item['isHistory'] != null
                 ? const Icon(Icons.history, size: 20)
                 : null,
-            title: Text(item['query'] ?? ''),
+            title: Text(query),
             onTap: () {
-              _hideOverlay();
-              _focusNode.unfocus();
-              widget.onPick(item['query'] ?? '');
+              _runPicked(() {
+                _controller.text = query;
+                widget.onPick(query);
+              });
             },
           );
         }
+        final videoId = item['videoId']?.toString();
         return AdaptiveListTile(
           dense: true,
           leading: (item['thumbnails'] as List?)?.isNotEmpty == true
               ? ClipRRect(
             borderRadius: BorderRadius.circular(3),
             child: Image.network(
-              item['thumbnails'].first['url'],
+              item['thumbnails'].first['url'] ?? '',
               width: 40,
               errorBuilder: (_, __, ___) =>
               const SizedBox(width: 40, height: 40),
@@ -437,12 +479,15 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
               maxLines: 1, overflow: TextOverflow.ellipsis)
               : null,
           onTap: () {
-            _hideOverlay();
-            _focusNode.unfocus();
-            if (item['videoId'] != null) {
-              GetIt.I<MediaPlayer>().playSong(Map.from(item));
+            if (videoId != null && videoId.isNotEmpty) {
+              _runPicked(() {
+                GetIt.I<MediaPlayer>().playSong(Map.from(item));
+              });
             } else if (item['endpoint'] != null) {
-              context.push('/browse', extra: {'endpoint': item['endpoint']});
+              final endpoint = item['endpoint'];
+              _runPicked(() {
+                context.push('/browse', extra: {'endpoint': endpoint});
+              });
             }
           },
         );
@@ -459,9 +504,7 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
         controller: _controller,
         onChanged: _onChanged,
         onSubmitted: (q) {
-          _hideOverlay();
-          _focusNode.unfocus();
-          widget.onSubmit(q);
+          _runPicked(() => widget.onSubmit(q));
         },
         keyboardType: TextInputType.text,
         maxLines: 1,

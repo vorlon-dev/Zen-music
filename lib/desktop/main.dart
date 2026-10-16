@@ -1,14 +1,21 @@
 // ZenMusic Desktop — entry point. ALWAYS run/build with an explicit target:
-//   flutter run -d windows -t lib/desktop/main.dart
+//   flutter run -d windows --no-enable-impeller -t lib/desktop/main.dart
 //   flutter build windows -t lib/desktop/main.dart
 // NEVER use the default entry on Windows: lib/main.dart is the MOBILE entry
-// and crashes by design (audio_service has no Windows implementation).
+// (Option B redesign) and lib/main.dart on Windows defaults to a crash
+// (audio_service has no Windows implementation).
 //
 // Ported from Echo Music (GPL-3.0). Echo Music is Copyright (C) its authors;
 // this port and ZenMusic remain GPL-3.0.
+//
+// SP-4 PROBE (TEMPORARY wiring — remove with the spike block after the
+// verdict): runWebViewTitleBarWidget(args) first (desktop_webview_window
+// requirement), then the hidden secure-context EME probe on Windows.
 
+import 'dart:async';
 import 'dart:io';
 
+import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
@@ -29,9 +36,18 @@ import 'package:zenmusic/desktop/services/yt_audio_stream.dart';
 import 'package:zenmusic/desktop/utils/router.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/ytmusic/modals/yt_config.dart';
+import 'package:zenmusic/desktop/services/appearance_prefs.dart';
+import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
+import 'package:zenmusic/desktop/spotify/sp4_probe.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // desktop_webview_window: title-bar entry hook (documented requirement;
+  // returns true only for its own subprocess, which must not run the app).
+  if (runWebViewTitleBarWidget(args)) {
+    return;
+  }
 
   await initialiseHive();
 
@@ -48,7 +64,7 @@ Future<void> main() async {
   // PORT: Echo calls FileStorage.initialise() here — creates the
   // Downloads/ZenMusic tree (Music + Back Up dirs) before any consumer.
   await FileStorage.initialise();
-
+  await AppearancePrefs.load();
   // PORT: Echo's YTMusic construction, verbatim — Hive-backed visitorData.
   // First sendRequest with empty visitorData triggers resetVisitorId(), which
   // fetches a real VISITOR_DATA from music.youtube.com and persists it here
@@ -85,9 +101,16 @@ Future<void> main() async {
 
   GetIt.I.registerSingleton<YTMusic>(ytMusic);
 
-  // PORT: Echo's panelKey GlobalKey is deferred with the screens that
-  // consume it. ImportService is constructed on-demand in the import modal
-  // (Echo pattern, unchanged).
+  // Spotify session: restore login state (Hive-backed). Cheap for token-only
+  // sessions; mints a token for sp_dc sessions. No resolve, no dealer
+  // connection at boot.
+  unawaited(SpotifyAuth.instance.load());
+
+  // SP-4 PROBE (temporary) — remove with the marked block after the verdict.
+  // Windows-only; a no-op elsewhere.
+  if (Platform.isWindows) {
+    unawaited(runSp4Spike());
+  }
 
   runApp(
     MultiProvider(
@@ -117,6 +140,14 @@ class ZenDesktopApp extends StatelessWidget {
         themeMode: context.watch<SettingsManager>().themeMode,
         theme: AppTheme.light(primary: Colors.black),
         darkTheme: AppTheme.dark(primary: Colors.white),
+        // Light-mode fix: an OPAQUE root surface. Echo paints scaffold
+        // backgrounds transparent (acrylic-desktop look); over Flutter's
+        // default that renders black, which light mode exposes. surfaceTint
+        // resolves to a theme-correct opaque color in BOTH modes.
+        builder: (context, child) => ColoredBox(
+          color: Theme.of(context).colorScheme.surfaceContainerLowest,
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
   }

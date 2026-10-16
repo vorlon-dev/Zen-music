@@ -1,7 +1,7 @@
 // ZenMusic Desktop — ported from Echo Music (GPL-3.0), services/spotify.dart.
 // Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
 // remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// NOTE: clientID/clientSecret are Echo's Spotify app credentials (client-
+// NOTE: clientID/clientSecret are Echo's spotify app credentials (client-
 // credentials public-data flow). Verbatim per port policy — revisit at release.
 
 import 'dart:convert';

@@ -1,6 +1,13 @@
 // ZenMusic Desktop — ported from Echo Music (GPL-3.0), ytmusic/mixins/browsing.dart.
 // Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
 // remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
+//
+// FIX (Spotify songs crash): addYoutubeHistory guarded. Non-YouTube ids
+// (Spotify/JioSaavn song maps routed in by add_history) get a player
+// response WITHOUT playbackTracking, so the unguarded
+// playbackTracking.videostatsPlaybackUrl.baseUrl read threw
+// NoSuchMethodError on every Spotify song change. Now null-safe and
+// wrapped: history is best-effort telemetry and must never crash playback.
 
 import 'dart:core';
 import 'dart:math';
@@ -218,31 +225,44 @@ mixin BrowsingMixin on YTClient {
   }
 
   Future addYoutubeHistory(String videoId) async {
-    signatureTimestamp = signatureTimestamp ?? getDatestamp() - 1;
-    Map<String, dynamic> body = {};
-    body['playbackContext'] = {
-      'contentPlaybackContext': {'signatureTimestamp': signatureTimestamp},
-    };
-    body['video_id'] = videoId;
+    try {
+      signatureTimestamp = signatureTimestamp ?? getDatestamp() - 1;
+      Map<String, dynamic> body = {};
+      body['playbackContext'] = {
+        'contentPlaybackContext': {'signatureTimestamp': signatureTimestamp},
+      };
+      body['video_id'] = videoId;
 
-    final Map response = await sendRequest('player', body);
-    if (response.isEmpty) return;
-    String url =
-    response['playbackTracking']['videostatsPlaybackUrl']['baseUrl'];
-    const String cpna =
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
-    Random rand = Random();
+      final Map response = await sendRequest('player', body);
+      if (response.isEmpty) return;
+      // Non-YouTube ids (Spotify/JioSaavn songs routed here) return a
+      // player response without playbackTracking — bail instead of
+      // crashing on a null [] (NoSuchMethodError "videostatsPlaybackUrl").
+      final tracking = response['playbackTracking'];
+      dynamic baseUrl;
+      if (tracking is Map) {
+        baseUrl = tracking['videostatsPlaybackUrl']?['baseUrl'];
+      }
+      if (baseUrl is! String || baseUrl.isEmpty) return;
+      String url = baseUrl;
+      const String cpna =
+          "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
+      Random rand = Random();
 
-    String generateCpn() {
-      return List.generate(16, (index) => cpna[rand.nextInt(64)]).join();
+      String generateCpn() {
+        return List.generate(16, (index) => cpna[rand.nextInt(64)]).join();
+      }
+
+      String cpn = generateCpn();
+      Map<String, dynamic> params = {"ver": 2, "c": "WEB_REMIX", "cpn": cpn};
+      params.forEach((k, v) {
+        url += '&$k=$v';
+      });
+      await sendGetRequest(url, headers);
+    } catch (e) {
+      // History is best-effort telemetry: never let it crash playback.
+      print('[addYoutubeHistory] skipped: $e');
     }
-
-    String cpn = generateCpn();
-    Map<String, dynamic> params = {"ver": 2, "c": "WEB_REMIX", "cpn": cpn};
-    params.forEach((k, v) {
-      url += '&$k=$v';
-    });
-    await sendGetRequest(url, headers);
   }
 
   Future<Map<String, dynamic>?> getSongDetails(String videoId) async {

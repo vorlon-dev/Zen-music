@@ -97,6 +97,13 @@ class _HomePageState extends State<_HomePage> {
               style: appBarTitleStyle(),
             ),
             centerTitle: true,
+            actions: [
+              IconButton(
+                tooltip: 'Listen Together',
+                onPressed: () => context.push('/listen'),
+                icon: const Icon(Icons.groups_rounded),
+              ),
+            ],
           ),
         ),
         body: ExpressiveRefreshIndicator(

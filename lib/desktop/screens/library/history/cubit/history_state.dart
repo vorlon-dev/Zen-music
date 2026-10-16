@@ -11,7 +11,8 @@ class HistoryLoading extends HistoryState {
 
 class HistoryLoaded extends HistoryState {
   final List songs;
-  const HistoryLoaded(this.songs);
+  final List spotify;
+  const HistoryLoaded(this.songs, {this.spotify = const []});
 }
 
 class HistoryError extends HistoryState {

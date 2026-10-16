@@ -20,7 +20,7 @@
 
 import 'dart:async';
 import 'dart:io';
-
+import '../utils/enhanced_image.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 

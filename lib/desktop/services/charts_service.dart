@@ -27,12 +27,12 @@ class ChartsService {
   static const String DANCE_ELECTRONIC = 'https://www.billboard.com/charts/dance-electronic-songs/';
   static const String CHRISTIAN_SONGS = 'https://www.billboard.com/charts/christian-songs/';
 
-  // Spotify Links
+  // spotify Links
   static const String SPOTIFY_TOP_50_GLOBAL = 'https://charts-spotify-com-service.spotify.com/public/v0/charts';
 
   List<ChartURL> getAllBillboardCharts() {
     return [
-      ChartURL(title: "Spotify Top 50 Global", url: SPOTIFY_TOP_50_GLOBAL),
+      ChartURL(title: "spotify Top 50 Global", url: SPOTIFY_TOP_50_GLOBAL),
       ChartURL(title: "Hot 100", url: HOT_100),
       ChartURL(title: "Billboard 200", url: BILLBOARD_200),
       ChartURL(title: "Global 200", url: GLOBAL_200),
@@ -83,7 +83,7 @@ class ChartsService {
   }
 
   Future<ChartModel> getSpotifyTop50Global() async {
-    return getSpotifyTop50Chart(ChartURL(title: "Spotify Top 50 Global", url: SPOTIFY_TOP_50_GLOBAL));
+    return getSpotifyTop50Chart(ChartURL(title: "spotify Top 50 Global", url: SPOTIFY_TOP_50_GLOBAL));
   }
 
   Future<ChartModel> getBillboardChart(ChartURL url) async {
@@ -157,8 +157,8 @@ class ChartsService {
           url: url.url,
           lastUpdated: DateTime.now(),
         );
-        log('Spotify Charts: ${chart.chartItems!.length} tracks',
-            name: "Spotify");
+        log('spotify Charts: ${chart.chartItems!.length} tracks',
+            name: "spotify");
         return chart;
       } else {
         throw Exception('Failed to load chart');

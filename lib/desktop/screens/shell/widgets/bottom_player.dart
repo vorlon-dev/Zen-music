@@ -1,13 +1,20 @@
 // ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
 // PORT DEVIATIONS: unused imports dropped (dart:ui, bottom_modals, listtile);
-// the two sequenceStateStream StreamBuilders are vestigial upstream — kept
-// verbatim by port policy.
+// MINI PLAYER REDESIGN: layout/behaviour ported from the old mobile
+// MiniPlayer (72px card, 20px radius, 52px rounded artwork, marquee title,
+// wavy progress ring around play/pause, next button, slide-on-track-change
+// animation, swipe left/right = next/previous, swipe up / tap = open
+// player, press-scale). audioHandler streams -> MediaPlayer (GetIt);
+// spotify theme colours -> artwork palette colour.
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 import 'package:palette_generator/palette_generator.dart';
-import 'package:provider/provider.dart';
+import 'package:text_scroll/text_scroll.dart';
 
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/buttons.dart';
@@ -43,184 +50,490 @@ class _BottomPlayerState extends State<BottomPlayer> {
   Widget build(BuildContext context) {
     final mediaPlayer = GetIt.I<MediaPlayer>();
     return StreamBuilder(
-        stream: mediaPlayer.currentTrackStream,
-        builder: (
-            context,
-            snapshot,
-            ) {
-          final data = snapshot.data;
-          final currentSong = data?.currentItem;
-          if (currentSong == null) {
-            return const SizedBox();
-          }
-          return ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 500),
-            child: GestureDetector(
-              onTap: () {
-                context.push('/player');
-              },
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                decoration: BoxDecoration(
-                  color: (backgroundColor ?? const Color(0xFF202020)).withAlpha(255),
-                  borderRadius: BorderRadius.circular(50),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 20,
-                      spreadRadius: 2,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
+      stream: mediaPlayer.currentTrackStream,
+      builder: (context, snapshot) {
+        final currentSong = snapshot.data?.currentItem;
+        if (currentSong == null) {
+          return const SizedBox();
+        }
+        return ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 500),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _MiniBody(
+              song: currentSong,
+              color: backgroundColor,
+              onImageReady: updateBackgroundColor,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ═════════════════════════════════════════════
+// MINI PLAYER BODY
+// ═════════════════════════════════════════════
+
+class _MiniBody extends StatefulWidget {
+  const _MiniBody({
+    required this.song,
+    required this.color,
+    required this.onImageReady,
+  });
+
+  final MediaItem song;
+  final Color? color;
+  final void Function(ImageProvider image) onImageReady;
+
+  @override
+  State<_MiniBody> createState() => _MiniBodyState();
+}
+
+class _MiniBodyState extends State<_MiniBody>
+    with SingleTickerProviderStateMixin {
+  static const double _height = 72;
+  static const double _radius = 20;
+  static const double _artSize = 52;
+  static const double _artRadius = 14;
+  static const double _dragThreshold = 10;
+
+  late final AnimationController _press;
+  late final Animation<double> _scale;
+
+  // Track-change slide state: direction follows the user's intent
+  // (swipe / next button), so the new track slides in from the right place.
+  bool _slideForward = true;
+  bool? _pendingSlideForward;
+  DateTime _slideIntentAt = DateTime.fromMillisecondsSinceEpoch(0);
+  String? _lastSlideSongId;
+
+  MediaPlayer get _mp => GetIt.I<MediaPlayer>();
+
+  @override
+  void initState() {
+    super.initState();
+    _press = AnimationController(
+      duration: const Duration(milliseconds: 100),
+      vsync: this,
+    );
+    _scale = Tween<double>(begin: 1, end: 0.98).animate(
+      CurvedAnimation(parent: _press, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _press.dispose();
+    super.dispose();
+  }
+
+  void _noteSlideIntent(bool forward) {
+    _pendingSlideForward = forward;
+    _slideIntentAt = DateTime.now();
+  }
+
+  void _consumeSlideIntentIfNeeded() {
+    final id = widget.song.id;
+    if (id == _lastSlideSongId) return;
+    final pending = _pendingSlideForward;
+    if (pending != null &&
+        DateTime.now().difference(_slideIntentAt) <
+            const Duration(milliseconds: 3000)) {
+      _slideForward = pending;
+    }
+    _pendingSlideForward = null;
+    _lastSlideSongId = id;
+  }
+
+  void _open() => context.push('/player');
+
+  void _next() {
+    _noteSlideIntent(true);
+    _mp.player.seekToNext();
+  }
+
+  void _previous() {
+    _noteSlideIntent(false);
+    _mp.player.seekToPrevious();
+  }
+
+  Widget _slideOnChange({required String slideKey, required Widget child}) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 320),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeOutCubic,
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        alignment: Alignment.centerLeft,
+        clipBehavior: Clip.hardEdge,
+        children: [
+          ...previousChildren,
+          if (currentChild != null) currentChild,
+        ],
+      ),
+      transitionBuilder: (child, animation) {
+        final incoming = child.key == ValueKey<String>(slideKey);
+        final Offset slideFrom = incoming
+            ? Offset(_slideForward ? 0.35 : -0.35, 0)
+            : Offset(_slideForward ? -0.35 : 0.35, 0);
+        return IgnorePointer(
+          ignoring: !incoming,
+          child: FadeTransition(
+            opacity: incoming
+                ? Tween<double>(begin: 0.35, end: 1.0).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOut))
+                : Tween<double>(begin: 0.0, end: 1.0).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeIn)),
+            child: SlideTransition(
+              position: Tween<Offset>(begin: slideFrom, end: Offset.zero)
+                  .animate(CurvedAnimation(
+                  parent: animation, curve: Curves.easeOutCubic)),
+              child: child,
+            ),
+          ),
+        );
+      },
+      child: KeyedSubtree(key: ValueKey<String>(slideKey), child: child),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _consumeSlideIntentIfNeeded();
+    final song = widget.song;
+    final base = widget.color ?? const Color(0xFF202020);
+    final dark = Color.lerp(base, Colors.black, 0.45)!;
+    final subtitle = '${song.artist ?? song.extras?['subtitle'] ?? ''}';
+
+    return ListenableBuilder(
+      listenable: _scale,
+      builder: (context, _) => Transform.scale(
+        scale: _scale.value,
+        child: GestureDetector(
+          onTapDown: (_) => _press.forward(),
+          onTapUp: (_) => _press.reverse(),
+          onTapCancel: () => _press.reverse(),
+          onTap: _open,
+          onVerticalDragUpdate: (d) {
+            if ((d.primaryDelta ?? 0) < -_dragThreshold) _open();
+          },
+          onHorizontalDragEnd: (d) {
+            final v = d.primaryVelocity ?? 0;
+            if (v < -300) {
+              _next();
+            } else if (v > 300) {
+              _previous();
+            }
+          },
+          child: Container(
+            height: _height,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [base, dark],
+              ),
+              borderRadius: BorderRadius.circular(_radius),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 5),
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(50),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Row(
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(_radius),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Row(
+                  children: [
+                    _slideOnChange(
+                      slideKey: song.id,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(_artRadius),
+                          child: SongThumbnail(
+                            song: song.extras!,
+                            dp: MediaQuery.of(context).devicePixelRatio,
+                            height: _artSize,
+                            width: _artSize,
+                            fit: BoxFit.cover,
+                            onImageReady: widget.onImageReady,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: _slideOnChange(
+                        slideKey: 'meta-${song.id}',
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(50),
-                                child: SongThumbnail(
-                                  song: currentSong.extras!,
-                                  dp: MediaQuery.of(context)
-                                      .devicePixelRatio,
-                                  height: 40,
-                                  width: 40,
-                                  fit: BoxFit.fill,
-                                  onImageReady: updateBackgroundColor,
+                              TextScroll(
+                                song.title,
+                                mode: TextScrollMode.bouncing,
+                                velocity: const Velocity(
+                                    pixelsPerSecond: Offset(30, 0)),
+                                delayBefore: const Duration(seconds: 2),
+                                pauseBetween: const Duration(seconds: 2),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.1,
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Flexible(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      currentSong.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    if (currentSong.artist != null ||
-                                        currentSong.extras!['subtitle'] !=
-                                            null)
-                                      Text(
-                                        currentSong.artist ??
-                                            currentSong
-                                                .extras!['subtitle'],
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.white
-                                              .withValues(alpha: 0.8),
-                                        ),
-                                      ),
-                                  ],
+                              if (subtitle.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.75),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w400,
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
                           ),
                         ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            StreamBuilder(
-                              stream: context
-                                  .watch<MediaPlayer>()
-                                  .player
-                                  .sequenceStateStream,
-                              builder: (context, snapshot) {
-                                return AdaptiveIconButton(
-                                  onPressed: () {
-                                    GetIt.I<MediaPlayer>()
-                                        .player
-                                        .seekToPrevious();
-                                  },
-                                  icon: const Icon(
-                                    Icons.skip_previous,
-                                    size: 24,
-                                    color: Colors.white,
-                                  ),
-                                );
-                              },
-                            ),
-                            const SizedBox(width: 4),
-                            ValueListenableBuilder(
-                              valueListenable:
-                              GetIt.I<MediaPlayer>().buttonState,
-                              builder: (context, buttonState, child) {
-                                return (buttonState == ButtonState.loading)
-                                    ? const SizedBox(
-                                  height: 24,
-                                  width: 24,
-                                  child: AdaptiveProgressRing(),
-                                )
-                                    : AdaptiveIconButton(
-                                  onPressed: () {
-                                    GetIt.I<MediaPlayer>()
-                                        .player
-                                        .playing
-                                        ? GetIt.I<MediaPlayer>()
-                                        .player
-                                        .pause()
-                                        : GetIt.I<MediaPlayer>()
-                                        .player
-                                        .play();
-                                  },
-                                  icon: Icon(
-                                    buttonState ==
-                                        ButtonState.playing
-                                        ? Icons.pause
-                                        : Icons.play_arrow,
-                                    size: 30,
-                                    color: Colors.white,
-                                  ),
-                                );
-                              },
-                            ),
-                            const SizedBox(width: 4),
-                            StreamBuilder(
-                              stream: context
-                                  .watch<MediaPlayer>()
-                                  .player
-                                  .sequenceStateStream,
-                              builder: (context, snapshot) {
-                                return AdaptiveIconButton(
-                                  onPressed: () {
-                                    GetIt.I<MediaPlayer>()
-                                        .player
-                                        .seekToNext();
-                                  },
-                                  icon: const Icon(
-                                    Icons.skip_next,
-                                    size: 24,
-                                    color: Colors.white,
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                    _buildControls(),
+                  ],
                 ),
               ),
             ),
-          );
-        });
+          ),
+        ),
+      ),
+    );
   }
+
+  Widget _buildControls() {
+    final mp = _mp;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ValueListenableBuilder<ButtonState>(
+          valueListenable: mp.buttonState,
+          builder: (context, state, _) => _CircularPlayButton(state: state),
+        ),
+        StreamBuilder(
+          stream: mp.player.sequenceStateStream,
+          builder: (context, _) => mp.player.hasNext
+              ? Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: AdaptiveIconButton(
+              onPressed: _next,
+              icon: Icon(
+                Icons.skip_next_rounded,
+                size: 26,
+                color: Colors.white.withValues(alpha: 0.85),
+              ),
+            ),
+          )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+}
+
+// ═════════════════════════════════════════════
+// CIRCULAR PLAY BUTTON — wavy arc ring only: arc = progress, wave
+// travels while playing, flattens when paused.
+// ═════════════════════════════════════════════
+
+class _CircularPlayButton extends StatefulWidget {
+  const _CircularPlayButton({required this.state});
+
+  final ButtonState state;
+
+  @override
+  State<_CircularPlayButton> createState() => _CircularPlayButtonState();
+}
+
+class _CircularPlayButtonState extends State<_CircularPlayButton>
+    with TickerProviderStateMixin {
+  late final AnimationController _phase = AnimationController(
+    duration: const Duration(milliseconds: 2000),
+    vsync: this,
+  );
+  late final AnimationController _amp = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 350),
+    value: 0,
+  );
+
+  bool _playing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _playing = widget.state == ButtonState.playing;
+    if (_playing) {
+      _phase.repeat();
+      _amp.value = 1;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _CircularPlayButton old) {
+    super.didUpdateWidget(old);
+    final playing = widget.state == ButtonState.playing;
+    if (playing != _playing) {
+      _playing = playing;
+      if (playing) {
+        _phase.repeat();
+        _amp.forward();
+      } else {
+        _amp.reverse();
+        _phase.stop();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _phase.dispose();
+    _amp.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mp = GetIt.I<MediaPlayer>();
+    final isLoading = widget.state == ButtonState.loading;
+    final isPlaying = widget.state == ButtonState.playing;
+
+    return SizedBox(
+      width: 48,
+      height: 48,
+      child: ValueListenableBuilder<ProgressBarState>(
+        valueListenable: mp.progressBarState,
+        builder: (context, value, _) {
+          final total = value.total.inMilliseconds;
+          final progress = total <= 0
+              ? 0.0
+              : (value.current.inMilliseconds / total).clamp(0.0, 1.0);
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              ListenableBuilder(
+                listenable: Listenable.merge([_phase, _amp]),
+                builder: (context, _) => CustomPaint(
+                  size: const Size(48, 48),
+                  painter: _WaveRingPainter(
+                    phase: _phase.value * 2 * math.pi,
+                    sweepAngle: 2 * math.pi * progress,
+                    color: Colors.white,
+                    trackColor: Colors.white.withValues(alpha: 0.18),
+                    strokeWidth: 3,
+                    amplitude: 1.6 * _amp.value,
+                  ),
+                ),
+              ),
+              if (isLoading)
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: AdaptiveProgressRing(),
+                )
+              else
+                IconButton(
+                  onPressed: () =>
+                  mp.player.playing ? mp.player.pause() : mp.player.play(),
+                  splashColor: Colors.transparent,
+                  highlightColor: Colors.transparent,
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    isPlaying
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _WaveRingPainter extends CustomPainter {
+  _WaveRingPainter({
+    required this.phase,
+    required this.sweepAngle,
+    required this.color,
+    required this.trackColor,
+    required this.strokeWidth,
+    required this.amplitude,
+  });
+
+  final double phase;
+  final double sweepAngle;
+  final Color color;
+  final Color trackColor;
+  final double strokeWidth;
+  final double amplitude;
+
+  static const _waves = 8; // humps around the full circle
+  static const _start = -math.pi / 2; // 12 o'clock
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.width / 2 - 5;
+
+    // faint full track
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth - 1
+        ..color = trackColor,
+    );
+
+    if (sweepAngle < 0.02) return;
+
+    final steps = math.max(12, (sweepAngle * radius / 1.5).ceil());
+    final path = Path();
+    for (var i = 0; i <= steps; i++) {
+      final a = _start + sweepAngle * (i / steps);
+      final r = radius + amplitude * math.sin(a * _waves + phase);
+      final p = Offset(center.dx + r * math.cos(a), center.dy + r * math.sin(a));
+      i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..isAntiAlias = true
+        ..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_WaveRingPainter old) =>
+      old.phase != phase ||
+          old.sweepAngle != sweepAngle ||
+          old.amplitude != amplitude ||
+          old.color != color ||
+          old.trackColor != trackColor;
 }

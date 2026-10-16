@@ -1,4 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
+﻿// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
 
 part of 'appearance_cubit.dart';
 

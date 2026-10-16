@@ -3,6 +3,8 @@ import 'package:hive/hive.dart';
 import 'package:meta/meta.dart';
 
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
+import 'package:zenmusic/desktop/services/jiosaavn_service.dart';
+import 'package:zenmusic/desktop/spotify/spotify_search.dart';
 
 part 'search_state.dart';
 
@@ -23,6 +25,39 @@ class SearchCubit extends Cubit<SearchState> {
         await Hive.box('SEARCH_HISTORY').put(query.toLowerCase(), query);
       }
       final feed = await _ytmusic.search(query, endpoint: endpoint);
+
+      // JioSaavn cross-source section (pure Dart — every platform).
+      if (endpoint == null) {
+        try {
+          final saavnSongs =
+          await JioSaavnService.instance.search(query, limit: 10);
+          if (saavnSongs.isNotEmpty) {
+            (feed['sections'] as List).add({
+              'title': 'JioSaavn',
+              'contents': saavnSongs,
+            });
+          }
+        } catch (_) {}
+      }
+
+      // Spotify cross-source section (Stopify protocol). Silently skips
+      // when there is no Spotify session — non-Spotify users see no change.
+      // Playback routing for these rows lands in the next round.
+      if (endpoint == null) {
+        try {
+          final spotifySongs =
+          await SpotifySearch.instance.search(query, limit: 10);
+          if (spotifySongs.isNotEmpty) {
+            (feed['sections'] as List).add({
+              'title': 'Spotify',
+              'contents': spotifySongs,
+            });
+          }
+        } catch (e) {
+          print('[spotify-search] section error: $e');
+        }
+      }
+
       emit(SearchSuccess(
           sections: feed['sections'],
           continuation: feed['continuation'],
@@ -42,12 +77,13 @@ class SearchCubit extends Cubit<SearchState> {
     try {
       final feed = await _ytmusic.search('',
           endpoint: endpoint, additionalParams: current.continuation!);
-      // UPSTREAM BUG: constructed but never emitted (see header).
-      SearchSuccess(
+      // FIXED (round after SP-2 smoke): result was constructed but never
+      // emitted, so pagination stalled with loadingMore=true forever.
+      emit(SearchSuccess(
         sections: [...current.sections, ...feed['sections']],
         continuation: feed['continuation'],
         loadingMore: false,
-      );
+      ));
     } catch (e, st) {
       emit(SearchError(e.toString(), st.toString()));
     }

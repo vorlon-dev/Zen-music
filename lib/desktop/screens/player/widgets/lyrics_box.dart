@@ -1,8 +1,16 @@
+// ZenMusic Desktop — ported from Echo Music (GPL-3.0), player/widgets/lyrics_box.dart.
+// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
+// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
+// DEVIATION: lyric text size / line spacing / alignment read AppearancePrefs
+// (hydrated user preferences). File-local AnimatedBuilder intentionally
+// shadows Flutter's — verbatim upstream design, do not remove.
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:get_it/get_it.dart';
 import 'package:zenmusic/desktop/models/lyrics_model.dart';
+import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/lyrics.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -33,6 +41,7 @@ class _LyricsBoxState extends State<LyricsBox> {
   @override
   void initState() {
     super.initState();
+    unawaited(AppearancePrefs.load());
     _initFetchLyrics();
     _initWakelock();
   }
@@ -112,7 +121,6 @@ class _LyricsBoxState extends State<LyricsBox> {
               return LoadedLyricsWidget(lyrics: snapshot.data!);
             }
             if (snapshot.hasError) {
-              // return Text('Error: ${snapshot.error}');
               return const Text('No Lyrics Found');
             }
             return const ExpressiveLoadingIndicator();
@@ -176,11 +184,11 @@ class PlainLyricsWidget extends StatelessWidget {
         child: SelectableText(
           "\n${lyrics.lyricsPlain}\n",
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 34,
+          style: TextStyle(
+            fontSize: AppearancePrefs.lyricsTextSize.value + 15,
             fontWeight: FontWeight.w800,
             color: Colors.white,
-            height: 1.5,
+            height: AppearancePrefs.lyricsLineSpacing.value + 0.1,
             letterSpacing: 0.2,
           ),
         ),
@@ -209,12 +217,10 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
   Duration duration = Duration.zero;
   int _currentLyricIndex = 0;
 
-  // Scrolling Logic
   bool _isUserScrolling = false;
   Timer? _userScrollTimer;
   final Duration _userScrollCooldown = const Duration(milliseconds: 1500);
 
-  // Animation
   late AnimationController _glowController;
   late Animation<double> _glowAnimation;
 
@@ -222,24 +228,21 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
   void initState() {
     super.initState();
 
-    // Glow animation for current lyric
     _glowController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2000), // Slower breathing
+      duration: const Duration(milliseconds: 2000),
     )..repeat(reverse: true);
 
     _glowAnimation = Tween<double>(begin: 0.2, end: 0.9).animate(
       CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
     );
 
-    // Verify MediaPlayer availability
     try {
       _streamSubscription =
           GetIt.I<MediaPlayer>().player.positionStream.listen((event) {
             if (mounted) {
               duration = event;
               final newIndex = _findCurrentLyricIndex();
-              // Only update if the lyric index actually changed
               if (newIndex != _currentLyricIndex) {
                 setState(() {
                   _currentLyricIndex = newIndex;
@@ -265,9 +268,9 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
     if (_itemScrollController.isAttached && !_isUserScrolling) {
       _itemScrollController.scrollTo(
         index: index,
-        duration: const Duration(milliseconds: 700), // Smoother scroll
-        curve: Curves.easeOutCubic, // Apple Music-like curve
-        alignment: 0.5, // Center alignment
+        duration: const Duration(milliseconds: 700),
+        curve: Curves.easeOutCubic,
+        alignment: 0.5,
       );
     }
   }
@@ -288,13 +291,22 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
     return index == _currentLyricIndex;
   }
 
-  // Seek to the tapped lyric's timestamp
   void _seekToLyric(int index) {
     if (widget.lyrics.parsedLyrics == null) return;
     final lyric = widget.lyrics.parsedLyrics!.lyrics[index];
     GetIt.I<MediaPlayer>().player.seek(lyric.start);
-    // Explicitly scroll to tapped lyric
     _scrollToCurrentLyric(index);
+  }
+
+  TextAlign _align() {
+    switch (AppearancePrefs.lyricsPosition.value) {
+      case 'center':
+        return TextAlign.center;
+      case 'right':
+        return TextAlign.right;
+      default:
+        return TextAlign.left;
+    }
   }
 
   @override
@@ -312,28 +324,24 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
             Colors.white,
             Colors.transparent
           ],
-          stops: [0.0, 0.15, 0.85, 1.0], // Increased fade area
+          stops: [0.0, 0.15, 0.85, 1.0],
         ).createShader(bounds);
       },
       blendMode: BlendMode.dstIn,
       child: NotificationListener<UserScrollNotification>(
         onNotification: (notification) {
           if (notification.direction != ScrollDirection.idle) {
-            // User is scrolling
             setState(() {
               _isUserScrolling = true;
             });
             _userScrollTimer?.cancel();
           } else {
-            // Scroll ended (idle) - start cooldown
-            _userScrollTimer?.cancel();
             _userScrollTimer?.cancel();
             _userScrollTimer = Timer(_userScrollCooldown, () {
               if (mounted) {
                 setState(() {
                   _isUserScrolling = false;
                 });
-                // Resume follow mode
                 _scrollToCurrentLyric(_currentLyricIndex);
               }
             });
@@ -346,15 +354,12 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
             itemScrollController: _itemScrollController,
             itemPositionsListener: _itemPositionsListener,
             itemCount: widget.lyrics.parsedLyrics!.lyrics.length,
-            // Huge padding to allow first and last items to be centered
             padding: EdgeInsets.symmetric(
                 vertical: MediaQuery.of(context).size.height / 2.5),
             itemBuilder: (context, index) {
               final isCurrent = isCurrentLyric(index);
               final lyricText = widget.lyrics.parsedLyrics!.lyrics[index].text;
-
-              // Only apply blur if not current and not too close to current (optional optimization)
-              // For now, simpler is better: Opacity handle focus
+              final baseSize = AppearancePrefs.lyricsTextSize.value;
 
               return GestureDetector(
                 onTap: () => _seekToLyric(index),
@@ -369,17 +374,16 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
                         duration: const Duration(milliseconds: 400),
                         curve: Curves.easeOutCubic,
                         style: TextStyle(
-                          fontSize: isCurrent ? 38 : 28, // Large active, small inactive
+                          fontSize: isCurrent ? baseSize + 10 : baseSize,
                           fontWeight:
                           isCurrent ? FontWeight.w900 : FontWeight.w600,
                           color: isCurrent
                               ? Colors.white
-                              : Colors.white.withValues(alpha: 0.35), // Transparent inactive
-                          height: 1.4,
+                              : Colors.white.withValues(alpha: 0.35),
+                          height: AppearancePrefs.lyricsLineSpacing.value,
                           letterSpacing: isCurrent ? 0.5 : -0.3,
                           shadows: isCurrent
                               ? [
-                            // Spicy Lyrics Glow Effect
                             Shadow(
                               color: Colors.white.withValues(
                                   alpha: _glowAnimation.value * 0.8),
@@ -400,7 +404,7 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
                         ),
                         child: Text(
                           lyricText,
-                          textAlign: TextAlign.center,
+                          textAlign: _align(),
                         ),
                       );
                     },

@@ -1,4 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
+﻿// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
 
 import 'package:bloc/bloc.dart';
 import 'package:flutter/material.dart';
@@ -15,13 +15,13 @@ class AppearanceCubit extends Cubit<AppearanceState> {
 
   AppearanceCubit()
       : super(
-    AppearanceLoaded(
-      themeMode: GetIt.I<SettingsManager>().themeMode,
-      accentColor: GetIt.I<SettingsManager>().accentColor,
-      amoledBlack: GetIt.I<SettingsManager>().amoledBlack,
-      dynamicColors: GetIt.I<SettingsManager>().dynamicColors,
-    ),
-  ) {
+          AppearanceLoaded(
+            themeMode: GetIt.I<SettingsManager>().themeMode,
+            accentColor: GetIt.I<SettingsManager>().accentColor,
+            amoledBlack: GetIt.I<SettingsManager>().amoledBlack,
+            dynamicColors: GetIt.I<SettingsManager>().dynamicColors,
+          ),
+        ) {
     _listener = () {
       if (!isClosed) {
         _emitState();
@@ -46,7 +46,6 @@ class AppearanceCubit extends Cubit<AppearanceState> {
 
   Future<void> setThemeMode(ThemeMode mode) async {
     await _settings.setThemeMode(mode);
-    // listener will emit
   }
 
   void setAmoledBlack(bool value) {

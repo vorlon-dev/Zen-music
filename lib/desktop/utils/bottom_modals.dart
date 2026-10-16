@@ -1,16 +1,12 @@
 // ZenMusic Desktop — ported from Echo Music (GPL-3.0), utils/bottom_modals.dart.
 // Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
 // remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// PORT SCOPE (R8c): the modals reachable from SHIPPED screens — showSongBottomModal,
-// showPlaylistBottomModal, showGlassWindow, showCreateplaylistModal,
-// showImportplaylistModal (needs R8d spotify.dart — button disabled with a
-// visible note), showArtistsBottomModal, addToPlaylist, showTimerModal,
-// showCenterLoadingModal, showPlayerOptionsModal, showConfirmBottomModal.
-// Deferred with their consumers: selection/rename/download/accent/track-
-// options internals (R8d-R8e). l10n -> English literals throughout.
+// PORT SCOPE: modals reachable from shipped screens. R8 additions:
+// "Watch Video" (song window + player popup), "Download" on songs
+// (window + popup, status-aware) and playlists (playlist window) via
+// the cross-platform DownloadManager.
 
 import 'dart:io';
-import 'dart:math';
 import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:duration_picker/duration_picker.dart';
@@ -26,9 +22,9 @@ import 'package:share_plus/share_plus.dart';
 import 'package:zenmusic/desktop/screens/import_dialog.dart';
 import 'package:zenmusic/desktop/services/import_service.dart';
 import 'package:zenmusic/desktop/services/bottom_message.dart';
+import 'package:zenmusic/desktop/services/download_manager.dart';
 import 'package:zenmusic/desktop/services/library.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
-import 'package:zenmusic/desktop/services/settings_manager.dart';
 import 'package:zenmusic/desktop/themes/colors.dart';
 import 'package:zenmusic/desktop/themes/text_styles.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
@@ -362,6 +358,35 @@ class _AppleMusicStylePopup extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const SizedBox(height: 6),
+                          if ((song['videoId'] ?? '')
+                              .toString()
+                              .isNotEmpty &&
+                              !['DOWNLOADING', 'DOWNLOADED']
+                                  .contains(song['status']))
+                            _menuItem(
+                              context,
+                              icon: Icons.ondemand_video_rounded,
+                              title: 'Watch Video',
+                              onTap: () {
+                                Navigator.pop(context);
+                                context.push('/video',
+                                    extra: song['videoId']);
+                              },
+                            ),
+                          if (!['DOWNLOADING', 'DOWNLOADED']
+                              .contains(song['status']))
+                            _menuItem(
+                              context,
+                              icon: AdaptiveIcons.download,
+                              title: 'Download',
+                              onTap: () {
+                                Navigator.pop(context);
+                                BottomMessage.showText(
+                                    context, 'Downloading song');
+                                GetIt.I<DownloadManager>()
+                                    .downloadSong(song);
+                              },
+                            ),
                           _menuItem(
                             context,
                             icon: AdaptiveIcons.library_add,
@@ -926,6 +951,9 @@ class _SongWindowContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDownloaded = song['status'] == 'DOWNLOADED';
+    final isDownloading = song['status'] == 'DOWNLOADING';
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -974,6 +1002,16 @@ class _SongWindowContent extends StatelessWidget {
         const SizedBox(height: 8),
 
         // Actions
+        if ((song['videoId'] ?? '').toString().isNotEmpty)
+          _buildAction(
+            context,
+            icon: Icons.ondemand_video_rounded,
+            title: 'Watch Video',
+            onTap: () {
+              Navigator.pop(context);
+              context.push('/video', extra: song['videoId']);
+            },
+          ),
         _buildAction(
           context,
           icon: AdaptiveIcons.playlist_play,
@@ -1019,6 +1057,27 @@ class _SongWindowContent extends StatelessWidget {
                 }
               },
             );
+          },
+        ),
+        // DOWNLOAD — status-aware (final)
+        _buildAction(
+          context,
+          icon: isDownloaded
+              ? Icons.download_done_rounded
+              : isDownloading
+              ? Icons.downloading_rounded
+              : AdaptiveIcons.download,
+          title: isDownloaded
+              ? 'Downloaded'
+              : isDownloading
+              ? 'Downloading…'
+              : 'Download',
+          onTap: (isDownloaded || isDownloading)
+              ? null
+              : () {
+            Navigator.pop(context);
+            BottomMessage.showText(context, 'Downloading song');
+            GetIt.I<DownloadManager>().downloadSong(song);
           },
         ),
         _buildAction(
@@ -1085,7 +1144,7 @@ class _SongWindowContent extends StatelessWidget {
   Widget _buildAction(BuildContext context,
       {required IconData icon,
         required String title,
-        required VoidCallback onTap,
+        required VoidCallback? onTap,
         Widget? trailing}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1100,15 +1159,19 @@ class _SongWindowContent extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                Icon(icon, color: Colors.white, size: 22),
+                Icon(icon,
+                    color: onTap == null ? Colors.white30 : Colors.white,
+                    size: 22),
                 const SizedBox(width: 16),
                 Expanded(
                   child: Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
-                        color: Colors.white),
+                        color: onTap == null
+                            ? Colors.white30
+                            : Colors.white),
                   ),
                 ),
                 if (trailing != null) trailing,
@@ -1200,6 +1263,21 @@ class _PlaylistWindowContent extends StatelessWidget {
           onTap: () async {
             Navigator.pop(context);
             await GetIt.I<MediaPlayer>().addToQueue(Map.from(playlist));
+          },
+        ),
+        // DOWNLOAD (final) — whole playlist via the manager
+        _buildAction(
+          context,
+          icon: AdaptiveIcons.download,
+          title: 'Download',
+          onTap: playlist['isPredefined'] == false &&
+              (playlist['songs'] as List?)?.isNotEmpty != true
+              ? null
+              : () {
+            Navigator.pop(context);
+            BottomMessage.showText(
+                context, 'Downloading playlist');
+            GetIt.I<DownloadManager>().downloadPlaylist(playlist);
           },
         ),
         if (playlist['isPredefined'] == false)
@@ -1319,7 +1397,7 @@ class _PlaylistWindowContent extends StatelessWidget {
   Widget _buildAction(BuildContext context,
       {required IconData icon,
         required String title,
-        required VoidCallback onTap,
+        required VoidCallback? onTap,
         Widget? trailing}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1334,15 +1412,19 @@ class _PlaylistWindowContent extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                Icon(icon, color: Colors.white, size: 22),
+                Icon(icon,
+                    color: onTap == null ? Colors.white30 : Colors.white,
+                    size: 22),
                 const SizedBox(width: 16),
                 Expanded(
                   child: Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
-                        color: Colors.white),
+                        color: onTap == null
+                            ? Colors.white30
+                            : Colors.white),
                   ),
                 ),
                 if (trailing != null) trailing,
@@ -1407,7 +1489,7 @@ class _CreatePlaylistWindowContentState
                   },
                   child: const Text(
                     'Create',
-                    style: const TextStyle(
+                    style: TextStyle(
                         color: Colors.black, fontWeight: FontWeight.bold),
                   ),
                 )
@@ -1431,7 +1513,7 @@ class _ImportPlaylistWindowContent extends StatelessWidget {
               onChanged: (value) => title = value,
               keyboardType: TextInputType.url,
               fillColor: Colors.white.withOpacity(0.1),
-              hintText: 'Spotify / YouTube / YTM Playlist URL',
+              hintText: 'spotify / YouTube / YTM Playlist URL',
               prefix: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Icon(Icons.link, color: Colors.white),
@@ -1468,7 +1550,7 @@ class _ImportPlaylistWindowContent extends StatelessWidget {
                   },
                   child: const Text(
                     'Import',
-                    style: const TextStyle(
+                    style: TextStyle(
                         color: Colors.black, fontWeight: FontWeight.bold),
                   ),
                 )

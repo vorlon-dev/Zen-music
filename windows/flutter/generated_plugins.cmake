@@ -4,7 +4,9 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
+  desktop_webview_window
   dynamic_color
+  flutter_inappwebview_windows
   media_kit_libs_windows_audio
   permission_handler_windows
   record_windows

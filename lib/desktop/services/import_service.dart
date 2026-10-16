@@ -1,7 +1,7 @@
 // ZenMusic Desktop — ported from Echo Music (GPL-3.0), services/import_service.dart.
 // Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
 // remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// R8d: Spotify branch restored verbatim now that spotify.dart is vendored.
+// R8d: spotify branch restored verbatim now that spotify.dart is vendored.
 
 import 'package:get_it/get_it.dart';
 
@@ -80,7 +80,7 @@ class ImportService {
 
   Stream<ImportState> _importSpotify(String url) async* {
     try {
-      yield ImportState(total: 0, current: 0, message: "Connecting to Spotify...");
+      yield ImportState(total: 0, current: 0, message: "Connecting to spotify...");
       final token = await _spotify.getAccessTokenCC();
 
       String? playlistId;
@@ -91,7 +91,7 @@ class ImportService {
       }
 
       if (playlistId == null) {
-        yield ImportState(total: 0, current: 0, message: "Invalid Spotify URL", isError: true);
+        yield ImportState(total: 0, current: 0, message: "Invalid spotify URL", isError: true);
         return;
       }
 

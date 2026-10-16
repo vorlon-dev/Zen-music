@@ -1,215 +1,119 @@
+// ZenMusic — MOBILE entry (Android). [Option B redesign]
+// Boots the DESKTOP service stack on Android: same YTMusic client,
+// MediaPlayer (just_audio -> ExoPlayer on Android), Hive services and the
+// Echo-port UI as the Windows build. The legacy mobile stack
+// (ZenAudioHandler + old screens) is retired on this branch — preserved on
+// `main` and in history.
+//
+// Desktop entry: lib/desktop/main.dart (unchanged, Windows-only).
+//
+// PORT DEVIATION (mobile-only): FileStorage.initialise() can fail on Android
+// before storage permission is granted — falls back to app-private storage
+// (always writable); the user can switch folders later in Settings ->
+// Backup and storage.
+//
+// ANDROID VIDEO: native extraction (zen/innertubex MethodChannel — Kotlin
+// host untouched on this branch) warms at boot for the video watch page.
+
 import 'dart:async';
 
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:get_it/get_it.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:just_audio_background/just_audio_background.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
-import 'audio/zen_audio_handler.dart';
-import 'models/song.dart';
-import 'screens/home_screen.dart';
-import 'services/diagnostics_service.dart';
-import 'services/share_intent_service.dart';
-import 'services/storage_service.dart';
-import 'services/youtube_service.dart';
-import 'theme/spotify_theme.dart';
-import 'ui/lw/lw_nav_dock.dart';
-import 'ui/lw/lw_shell.dart';
-import 'ui/lw/lw_theme.dart';
-
-late ZenAudioHandler audioHandler;
-late StorageService storage;
-
-/// Global navigator key — used by the share-intent service to push the
-/// video watch page when a YouTube link is shared into the app.
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
-/// UI-arc experiment flag: mounts the LastWave-port shell (floating glass
-/// dock + swipeable pages) instead of the stock home container. Compile-
-/// time on purpose — flip, rebuild, compare. false = untouched app.
-const bool kUseLwShell = false;
-
-/// UI-arc theme flag: swaps the hardcoded Spotify palette for the
-/// LastWave hue-seeded dynamic scheme (seeded with the brass hex).
-const bool kUseLwTheme = false;
-
-void main() {
-  // Diagnostics capture: run the app inside a zone whose print handler
-  // feeds the in-app log viewer (print AND debugPrint both funnel here)
-  // while still forwarding to logcat. CRITICAL ORDER: the ENTIRE body —
-  // including WidgetsFlutterBinding.ensureInitialized() — must run
-  // INSIDE the zone; the binding caches the zone at init time, so a
-  // root-zone init makes every later print() escape the interceptor.
-  // runZonedGuarded's onError additionally captures uncaught crashes.
-  final spec = ZoneSpecification(
-    print: (self, parent, zone, line) {
-      DiagnosticsService.instance.capture(line);
-      parent.print(zone, line);
-    },
-  );
-  runZonedGuarded(
-        () => _runApp(),
-        (error, stack) => DiagnosticsService.instance.log('crash', '$error'),
-    zoneSpecification: spec,
-  );
-}
-
-Future<void> _runApp() async {
+import 'package:zenmusic/desktop/main.dart' show ZenDesktopApp, initialiseHive;
+import 'package:zenmusic/desktop/services/appearance_prefs.dart';
+import 'package:zenmusic/desktop/services/download_manager.dart';
+import 'package:zenmusic/desktop/services/file_storage.dart';
+import 'package:zenmusic/desktop/services/innertubex_bridge.dart';
+import 'package:zenmusic/desktop/services/library.dart';
+import 'package:zenmusic/desktop/services/lyrics.dart';
+import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/services/settings_manager.dart';
+import 'package:zenmusic/desktop/services/yt_audio_stream.dart';
+import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
+import 'package:zenmusic/desktop/ytmusic/modals/yt_config.dart';
+import 'package:zenmusic/desktop/services/appearance_prefs.dart';
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Hive storage
-  storage = StorageService();
-  await storage.init();
-
-  // yt_downloader needs no initialization — video mode is always
-  // available.
-  YoutubeService.videoEnabled = true;
-
-  // Full-screen app: hide the status bar and the 3-button nav bar
-  // globally. Immersive-sticky re-hides them automatically after the
-  // user swipes the edge, like the YouTube app.
-  await SystemChrome.setEnabledSystemUIMode(
-    SystemUiMode.immersiveSticky,
+  await initialiseHive();
+  await AppearancePrefs.load();
+  // Media notifications + background playback. just_audio_background is the
+  // standard ANDROID path — the recorded audio_service crash was
+  // Windows-only (audio_service has no Windows implementation; Android is
+  // its home platform). The AndroidManifest already carries the
+  // audio_service declarations from the legacy stack.
+  await JustAudioBackground.init(
+    androidNotificationChannelId: 'com.zen.music.zenmusic.audio',
+    androidNotificationChannelName: 'ZenMusic Playback',
+    androidNotificationOngoing: true,
+    androidStopForegroundOnPause: true,
   );
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    systemNavigationBarColor: Colors.transparent,
-    systemNavigationBarDividerColor: Colors.transparent,
-    // DARK THEME: light (white) icons on the dark background.
-    statusBarIconBrightness: Brightness.light,
-    systemNavigationBarIconBrightness: Brightness.light,
-  ));
 
-  // Initialize audio service
-  audioHandler = await AudioService.init(
-    builder: () => ZenAudioHandler(storage: storage),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.zenmusic.audio',
-      androidNotificationChannelName: 'ZenMusic Playback',
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: true,
+  // Appearance prefs (slider style, lyric size/alignment, etc.) — hydrate
+  // before any UI mounts.
+  await AppearancePrefs.load();
+
+  // MOBILE DEVIATION: storage bootstrap (see header).
+  try {
+    await FileStorage.initialise();
+  } catch (_) {
+    // Storage not grantable yet (fresh install) — fall back to
+    // app-private storage so the app always boots.
+    final docs = await getApplicationDocumentsDirectory();
+    await Hive.box('SETTINGS').put('APP_FOLDER', docs.path);
+    await FileStorage.initialise();
+  }
+
+  // ANDROID VIDEO: warm the native extraction resolver (zen/innertubex) —
+  // primes visitorData for the video watch page. No-op on other platforms
+  // (bridge reports available=false).
+  unawaited(InnertubexBridge.warm());
+
+  // PORT: desktop service set, verbatim ordering.
+  String? visitorId = await Hive.box('SETTINGS').get('VISITOR_ID');
+  YTMusic ytMusic = YTMusic(
+    config: YTConfig(
+        visitorData: visitorId ?? '', language: 'en', location: 'IN'),
+    onIdUpdate: (visitorId) async {
+      await Hive.box('SETTINGS').put('VISITOR_ID', visitorId);
+    },
+  );
+
+  final settingsManager = SettingsManager();
+  GetIt.I.registerSingleton<SettingsManager>(settingsManager);
+
+  final String audioStreamUrl = await createAudioStreamServer();
+  GetIt.I.registerSingleton<String>(audioStreamUrl,
+      instanceName: 'audioStreamUrl');
+
+  final MediaPlayer mediaPlayer = MediaPlayer();
+  GetIt.I.registerSingleton<MediaPlayer>(mediaPlayer);
+
+  final libraryService = LibraryService();
+  GetIt.I.registerSingleton<LibraryService>(libraryService);
+
+  final fileStorage = FileStorage();
+  GetIt.I.registerSingleton<FileStorage>(fileStorage);
+
+  GetIt.I.registerSingleton<DownloadManager>(DownloadManager());
+
+  GetIt.I.registerSingleton<LyricsService>(LyricsService());
+
+  GetIt.I.registerSingleton<YTMusic>(ytMusic);
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => settingsManager),
+        ChangeNotifierProvider(create: (_) => mediaPlayer),
+        ChangeNotifierProvider(create: (_) => libraryService),
+      ],
+      child: const ZenDesktopApp(),
     ),
   );
-
-  runApp(const ZenMusicApp());
-}
-
-class ZenMusicApp extends StatefulWidget {
-  const ZenMusicApp({super.key});
-
-  @override
-  State<ZenMusicApp> createState() => _ZenMusicAppState();
-}
-
-class _ZenMusicAppState extends State<ZenMusicApp> with WidgetsBindingObserver {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    // Share-target: YouTube links shared from other apps open the video
-    // watch page directly. Registered after the first frame so the
-    // navigator exists.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final nav = navigatorKey.currentState;
-      if (nav != null) {
-        ShareIntentService.instance.init(nav);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    ShareIntentService.instance.dispose();
-    super.dispose();
-  }
-
-  // Re-assert immersive mode whenever the app resumes — the system can
-  // restore system bars after dialogs, permission prompts, or the
-  // in-app APK installer opens over us.
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => PlayerController(),
-      child: MaterialApp(
-        navigatorKey: navigatorKey,
-        title: 'ZenMusic',
-        debugShowCheckedModeBanner: false,
-        theme: kUseLwTheme ? LwThemes.dark() : SpotifyTheme.dark(),
-        home: kUseLwShell ? const _LwShellHome() : const HomeScreen(),
-      ),
-    );
-  }
-}
-
-/// Flag-gated shell preview: three placeholder pages so the dock's pill
-/// morph, tab selection sync and page swipes can be felt in isolation.
-/// (HomeScreen docking into page 0 is a later wiring round — it brings
-/// its own Scaffold/nav and needs the padding contract checked first.)
-class _LwShellHome extends StatelessWidget {
-  const _LwShellHome();
-
-  @override
-  Widget build(BuildContext context) {
-    return LwShell(
-      tabs: const [
-        LwNavItemSpec(label: 'Home', icon: Icons.home_rounded),
-        LwNavItemSpec(label: 'Stats', icon: Icons.leaderboard_rounded),
-        LwNavItemSpec(label: 'Playlists', icon: Icons.queue_music_rounded),
-      ],
-      pages: const [
-        _PlaceholderShellPage(title: 'Home'),
-        _PlaceholderShellPage(title: 'Stats'),
-        _PlaceholderShellPage(title: 'Playlists'),
-      ],
-    );
-  }
-}
-
-class _PlaceholderShellPage extends StatelessWidget {
-  const _PlaceholderShellPage({required this.title});
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      backgroundColor: scheme.surface,
-      body: SafeArea(
-        child: Center(
-          child: Text(
-            title,
-            style: TextStyle(
-              color: scheme.onSurfaceVariant,
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class PlayerController extends ChangeNotifier {
-  Song? currentSong;
-  bool isPlaying = false;
-
-  PlayerController() {
-    audioHandler.currentSongStream.listen((song) {
-      currentSong = song;
-      notifyListeners();
-    });
-    audioHandler.playingStream.listen((playing) {
-      isPlaying = playing;
-      notifyListeners();
-    });
-  }
 }
