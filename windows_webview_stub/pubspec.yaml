@@ -1,0 +1,11 @@
+﻿name: flutter_inappwebview_windows_fx
+version: 1.0.1
+publish_to: 'none'
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.0.0"
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: FlutterInappwebviewWindowsFxPlugin

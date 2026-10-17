@@ -28,7 +28,7 @@ dependencies:
   # ─────────────────────────────────────────────
   # 📝 Lyrics
   # ─────────────────────────────────────────────
-  flutter_lyric: ^3.0.8                # ← UPDATED
+  flutter_lyric: ^3.0.8
   http: ^1.2.2
 
   # ─────────────────────────────────────────────
@@ -102,6 +102,12 @@ dependencies:
   ffi: ^2.1.3
   pub_semver: ^2.1.4
   flutter_markdown_plus: ^1.0.4
+
+# ▼▼▼ MUST BE AT THE ROOT LEVEL (No indentation) ▼▼▼
+dependency_overrides:
+  flutter_inappwebview_windows_fx:
+    path: ./windows_webview_stub
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -117,7 +123,6 @@ flutter:
     - family: Retro Blendy
       fonts:
         - asset: assets/fonts/Retro Blendy.otf
-
 
 flutter_launcher_icons:
   image_path: "assets/icon/logo.png"

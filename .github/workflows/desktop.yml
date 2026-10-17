@@ -24,6 +24,21 @@ jobs:
       - name: Pub get
         run: flutter pub get
 
+      # ▼▼▼ ADD THIS STEP TO FIX THE CMAKE ERROR ▼▼▼
+      - name: Patch broken Windows WebView plugin
+        shell: pwsh
+        run: |
+          $pubCache = "$env:LOCALAPPDATA\Pub\Cache\hosted\pub.dev"
+          $pluginPath = Get-ChildItem -Path $pubCache -Filter "in_app_webview_flutter*" | Select-Object -First 1
+          if ($pluginPath) {
+            $winDir = Join-Path $pluginPath.FullName "windows"
+            if (Test-Path $winDir) {
+              Remove-Item -Recurse -Force $winDir
+              Write-Host "✅ Patched: Removed broken Windows folder from in_app_webview_flutter"
+            }
+          }
+      # ▲▲▲ END OF PATCH ▲▲▲
+
       - name: Build Windows exe (desktop entrypoint, release)
         run: flutter build windows --release -t lib/desktop/main.dart
 
@@ -31,7 +46,6 @@ jobs:
         id: ver
         shell: bash
         run: |
-          # Remove 'v' prefix and replace '+' with '_' for safe filenames
           RAW_VERSION=${GITHUB_REF_NAME#v}
           SAFE_VERSION=${RAW_VERSION//+/-}
           echo "VERSION=$SAFE_VERSION" >> $GITHUB_OUTPUT
@@ -44,11 +58,8 @@ jobs:
         run: |
           $env:PATH = "${env:PATH};C:\Program Files (x86)\Inno Setup 6"
           iscc /DMyAppVersion="${{ steps.ver.outputs.VERSION }}" windows\installer.iss
-          Write-Host "=== Checking Output Directory ==="
           if (Test-Path "windows\Output") {
             Get-ChildItem -Path "windows\Output"
-          } else {
-            Write-Host "Error: windows\Output directory not found!"
           }
 
       - name: Create GitHub Release
@@ -57,16 +68,7 @@ jobs:
           name: ZenMusic Desktop v${{ steps.ver.outputs.VERSION }}
           body: |
             ## ZenMusic Desktop v${{ steps.ver.outputs.VERSION }}
-
             One-time installer for Windows. Download, run the `.exe`, and follow the setup wizard.
-
-            ### Notes
-            - First launch may be slow (extracts mpv/native libs).
-            - If the UI renders blank/white on some GPUs, update your GPU driver.
-            - Requires Windows 10 or newer (x64).
-
-            See the repository for source and license (GPL-3.0).
-          # Use wildcard to catch the .exe regardless of exact version string formatting
           files: |
             windows/Output/*.exe
           draft: false

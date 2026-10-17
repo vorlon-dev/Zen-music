@@ -599,13 +599,12 @@ packages:
     source: hosted
     version: "1.2.0"
   flutter_inappwebview_windows_fx:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: flutter_inappwebview_windows_fx
-      sha256: "00f615504fc33907be98117ae310d4106944c159efc22c3caabc35280a807eb9"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.7.0"
+      path: windows_webview_stub
+      relative: true
+    source: path
+    version: "1.0.1"
   flutter_launcher_icons:
     dependency: "direct dev"
     description:
