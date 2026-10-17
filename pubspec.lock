@@ -542,22 +542,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.0"
-  flutter_inappwebview:
-    dependency: "direct main"
-    description:
-      name: flutter_inappwebview
-      sha256: "80092d13d3e29b6227e25b67973c67c7210bd5e35c4b747ca908e31eb71a46d5"
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.1.5"
-  flutter_inappwebview_android:
+  flutter_inappwebview_android_fx:
     dependency: transitive
     description:
-      name: flutter_inappwebview_android
-      sha256: "62557c15a5c2db5d195cb3892aab74fcaec266d7b86d59a6f0027abd672cddba"
+      name: flutter_inappwebview_android_fx
+      sha256: "061d33d1f65faceb3ec37b87e08c979294b6ff0c8e5ab98344f8b1a40801a9e3"
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.3"
+    version: "1.2.0"
   flutter_inappwebview_internal_annotations:
     dependency: transitive
     description:
@@ -566,46 +558,54 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.3.0"
-  flutter_inappwebview_ios:
+  flutter_inappwebview_ios_fx:
     dependency: transitive
     description:
-      name: flutter_inappwebview_ios
-      sha256: "5818cf9b26cf0cbb0f62ff50772217d41ea8d3d9cc00279c45f8aabaa1b4025d"
+      name: flutter_inappwebview_ios_fx
+      sha256: "41990996e4a27fc25595fd56df5aea46abe70b1ca4496f346e3f19547e400160"
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.2"
-  flutter_inappwebview_macos:
+    version: "1.2.0"
+  flutter_inappwebview_linux_fx:
     dependency: transitive
     description:
-      name: flutter_inappwebview_macos
-      sha256: c1fbb86af1a3738e3541364d7d1866315ffb0468a1a77e34198c9be571287da1
+      name: flutter_inappwebview_linux_fx
+      sha256: "5da6f472579475c7000b441df8e6309e9914c78a8d6872fe16dbd9bbf2784ebb"
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.2"
-  flutter_inappwebview_platform_interface:
+    version: "0.1.0"
+  flutter_inappwebview_macos_fx:
     dependency: transitive
     description:
-      name: flutter_inappwebview_platform_interface
-      sha256: cf5323e194096b6ede7a1ca808c3e0a078e4b33cc3f6338977d75b4024ba2500
+      name: flutter_inappwebview_macos_fx
+      sha256: "200ccdd3edb30b7a403f7fd4c209d648fc5293df11060d6af95044ba2e251a1a"
       url: "https://pub.dev"
     source: hosted
-    version: "1.3.0+1"
-  flutter_inappwebview_web:
+    version: "1.2.0"
+  flutter_inappwebview_platform_interface_fx:
     dependency: transitive
     description:
-      name: flutter_inappwebview_web
-      sha256: "55f89c83b0a0d3b7893306b3bb545ba4770a4df018204917148ebb42dc14a598"
+      name: flutter_inappwebview_platform_interface_fx
+      sha256: da2615a1f88710ac1728137bfeeeeb26223085f143fb37dac69859b194aa55e9
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.2"
-  flutter_inappwebview_windows:
+    version: "1.4.0"
+  flutter_inappwebview_web_fx:
     dependency: transitive
     description:
-      name: flutter_inappwebview_windows
-      sha256: "8b4d3a46078a2cdc636c4a3d10d10f2a16882f6be607962dbfff8874d1642055"
+      name: flutter_inappwebview_web_fx
+      sha256: f3cd22b00a83c32ea7b0fbfe343e5d849abb18695e4cd2ecdf72b750c2dfe2a6
       url: "https://pub.dev"
     source: hosted
-    version: "0.6.0"
+    version: "1.2.0"
+  flutter_inappwebview_windows_fx:
+    dependency: transitive
+    description:
+      name: flutter_inappwebview_windows_fx
+      sha256: "00f615504fc33907be98117ae310d4106944c159efc22c3caabc35280a807eb9"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.0"
   flutter_launcher_icons:
     dependency: "direct dev"
     description:
@@ -805,6 +805,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.12.0"
+  in_app_webview_flutter:
+    dependency: "direct main"
+    description:
+      name: in_app_webview_flutter
+      sha256: b7869949ab998d94465041a7b78dea6afa7fa9f7caebb0c8d10dac51cebf5ce7
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
   internet_connection_checker_plus:
     dependency: "direct main"
     description:

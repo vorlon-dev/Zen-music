@@ -27,6 +27,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // REMOVED: prefab = true (causes script compilation error)
         }
         // Flutter's `profile` build type: without this the :just_audio
         // module's profile compile classpath finds no matching variant

@@ -13,7 +13,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:in_app_webview_flutter/flutter_inappwebview.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
