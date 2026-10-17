@@ -39,6 +39,28 @@ subprojects {
     }
 }
 
+// ─────────────────────────────────────────────
+// ✅ FIX for flutter_inappwebview_android ProGuard error
+// AGP 9.0+ no longer accepts the legacy 'proguard-android.txt'.
+// This forces the plugin to use the optimized file instead.
+// ─────────────────────────────────────────────
+subprojects {
+    afterEvaluate {
+        if (name == "flutter_inappwebview_android") {
+            val androidExt = extensions.findByName("android") as? com.android.build.gradle.BaseExtension
+            androidExt?.buildTypes?.getByName("release")?.apply {
+                // Override the legacy proguard file with the new optimized one
+                proguardFiles(
+                    androidExt.getDefaultProguardFile("proguard-android-optimize.txt"),
+                    "proguard-rules.pro"
+                )
+                // Optional fallback: If it still fails, you can uncomment the line below:
+                // isMinifyEnabled = false
+            }
+        }
+    }
+}
+
 gradle.projectsEvaluated {
     val flutterJsProject = subprojects.find { it.name == "flutter_js" }
     flutterJsProject?.tasks?.withType<JavaCompile>()?.configureEach {

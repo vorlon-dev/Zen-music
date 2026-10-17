@@ -38,8 +38,18 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // ─────────────────────────────────────────────
+            // Enabled minify & shrink to use your ProGuard rules.
+            // If your app crashes after release, set this back to false.
+            // ─────────────────────────────────────────────
+            isMinifyEnabled = true
+            isShrinkResources = true
+
+            // Explicitly link your ProGuard rules
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
