@@ -3,7 +3,7 @@
 // backup_storage/about/downloads/privacy/player/ytmusic/appearance routes live.
 // /listen = Listen Together. /video = mobile video watch (native bridge).
 // /settings/player/equalizer = device EQ. /chart_details = REAL page.
-// ZERO stubs remain — stubs.dart deleted.
+// SP-6: /saved/spotify_library and /saved/spotify_playlist added.
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -29,6 +29,8 @@ import 'package:zenmusic/desktop/screens/library/history/history_page.dart';
 import 'package:zenmusic/desktop/screens/library/downloads/downloads_page.dart';
 import 'package:zenmusic/desktop/screens/library/downloads/downloading/downloading_page.dart';
 import 'package:zenmusic/desktop/screens/library/downloads/playlist/download_playlist_page.dart';
+import 'package:zenmusic/desktop/screens/library/spotify/spotify_library_page.dart';
+import 'package:zenmusic/desktop/screens/library/spotify/spotify_playlist_page.dart';
 import 'package:zenmusic/desktop/screens/listen_together/listen_together_page.dart';
 import 'package:zenmusic/desktop/screens/chart/chart_details_page.dart';
 import 'package:zenmusic/desktop/services/chart_model.dart';
@@ -182,6 +184,21 @@ List<StatefulShellBranch> branches = [
               final args = state.extra as Map<String, dynamic>? ?? {};
               return PlaylistDetailsPage(
                 playlistkey: args['playlistkey'] as String? ?? '',
+              );
+            },
+          ),
+          // SP-6: Spotify account library routes.
+          GoRoute(
+            path: 'spotify_library',
+            builder: (context, state) => const SpotifyLibraryPage(),
+          ),
+          GoRoute(
+            path: 'spotify_playlist',
+            builder: (context, state) {
+              final args = state.extra as Map<String, dynamic>? ?? {};
+              return SpotifyPlaylistPage(
+                playlistId: args['playlistId'] as String? ?? '',
+                title: args['title'] as String?,
               );
             },
           ),

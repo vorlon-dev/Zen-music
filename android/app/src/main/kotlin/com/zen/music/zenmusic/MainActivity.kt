@@ -28,7 +28,6 @@ import com.zen.music.zenmusic.dsp.core.models.FilterType
 import com.zen.music.zenmusic.dsp.core.models.ParametricEQ
 import com.zen.music.zenmusic.dsp.core.models.ParametricEQBand
 import com.zen.music.zenmusic.dsp.core.parser.ParametricEQParser
-import com.zen.music.zenmusic.extensions.ZenExtensionManager
 import com.zen.music.zenmusic.innertube.ZenInnertubeResolver
 import com.zen.music.zenmusic.lossless.NativeAudioEngine
 import com.zen.music.zenmusic.lossless.broadcastNativeEqualizer
@@ -39,11 +38,9 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import org.json.JSONObject
 import timber.log.Timber
 
 class MainActivity : AudioServiceActivity() {
-    private lateinit var extensionManager: ZenExtensionManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
     // Audio-device (Bluetooth) event stream state.
@@ -77,7 +74,9 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        registerExtensions(flutterEngine)
+
+        // REMOVED: registerExtensions(flutterEngine)
+
         registerAudioDeviceEvents(flutterEngine)
         registerVolumeEvents(flutterEngine)
         registerAudioChannel(flutterEngine)
@@ -116,25 +115,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     // ═══════════════════════════════════════════
-    // AUDIO DEVICE (Bluetooth) EVENTS — receiver-only (do NOT re-add
-    // AudioDeviceCallback — unresolved in this project's toolchain;
-    // the broadcast set fully covers the feature).
-    //
-    // LEAK-SAFE REGISTRATION (do not revert): receivers register on
-    // applicationContext, NEVER on the Activity. The Dart listener is
-    // app-lifetime and never cancels, so if the Activity is destroyed
-    // first (hot restart, background kill/restore), onCancel never runs
-    // — an Activity-tied receiver would leak (IntentReceiverLeaked).
-    // Application-context receivers are process-scoped: no leak.
-    // onListen also unregisters any previous receiver first, so engine
-    // restarts without onCancel never accumulate duplicates.
-    //
-    // RACE NOTE (do not remove the delayed re-pushes): ACL_DISCONNECTED
-    // fires BEFORE the A2DP profile teardown completes, so the device
-    // is still present in getDevices() when the broadcast arrives.
-    // Re-checking at +500ms and +1200ms reads the settled state — the
-    // disconnect then pushes null. Repeated pushes are harmless:
-    // Dart's ValueNotifier ignores same-value writes.
+    // AUDIO DEVICE (Bluetooth) EVENTS
     // ═══════════════════════════════════════════
 
     private fun registerAudioDeviceEvents(flutterEngine: FlutterEngine) {
@@ -142,8 +123,6 @@ class MainActivity : AudioServiceActivity() {
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(args: Any?, events: EventChannel.EventSink?) {
                     audioDeviceEvents = events
-                    // Drop any leftover receiver (engine restart without
-                    // onCancel) before registering a fresh one.
                     audioReceiver?.let {
                         try {
                             applicationContext.unregisterReceiver(it)
@@ -184,7 +163,6 @@ class MainActivity : AudioServiceActivity() {
 
     private val AUDIO_DEVICE_TOKEN = Any()
 
-    /// Immediate push + settled-state re-pushes (see the race note).
     private fun scheduleAudioDevicePushes() {
         pushAudioDeviceName()
         mainHandler.postDelayed(
@@ -199,8 +177,6 @@ class MainActivity : AudioServiceActivity() {
         audioDeviceEvents?.success(connectedBluetoothDeviceName())
     }
 
-    /// The active Bluetooth output device's product name, or null.
-    /// getDevices(OUTPUTS) is the source of truth on API 23+.
     private fun connectedBluetoothDeviceName(): String? {
         val audioManager =
             getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -220,16 +196,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     // ═══════════════════════════════════════════
-    // INNERTUBE — Tier-0 stream extraction through the vendored
-    // :innertube module (raw player API, direct-URL clients). The
-    // channel name stays 'zen/innertubex' — legacy but deliberate:
-    // innertubex_bridge.dart is untouched and every Dart call site
-    // keeps working. "extractVideo" serves the video watch page:
-    // audio + video from ONE player response (same recording,
-    // guaranteed sync); maxHeight caps the video stream (the quality
-    // picker). "relatedSongs" is the watch queue's second source.
-    // "channelThumb" serves the channel avatar. "videoQualities"
-    // serves the quality picker's height list.
+    // INNERTUBE
     // ═══════════════════════════════════════════
 
     private fun registerInnertubexChannel(flutterEngine: FlutterEngine) {
@@ -356,12 +323,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     // ═══════════════════════════════════════════
-    // DSP — parametric EQ via the :dsp-core JVM module. Stateless
-    // math: preset parsing/validation (AutoEq text format) and
-    // biquad magnitude response for curve rendering + system-EQ
-    // projection. NO audio flows through here — the module computes
-    // numbers; playback filtering is the audio pipeline's business
-    // (the forked-just_audio round).
+    // DSP
     // ═══════════════════════════════════════════
 
     private fun registerDspChannel(flutterEngine: FlutterEngine) {
@@ -372,9 +334,6 @@ class MainActivity : AudioServiceActivity() {
                     "parsePresetText" -> {
                         val text = call.argument<String>("text") ?: ""
                         Thread {
-                            // Parse failures resolve to null (Dart
-                            // contract), never an error — unparseable
-                            // text is a normal user outcome.
                             val eq = try {
                                 ParametricEQParser.parseText(text)
                             } catch (_: Throwable) {
@@ -412,9 +371,6 @@ class MainActivity : AudioServiceActivity() {
                     }
                     "responseAtFrequencies" -> {
                         val eq = eqFromCall(call)
-                        // JVM payloads are star-projected — `dynamic`
-                        // is Kotlin/JS-only and does not compile on
-                        // the JVM toolchain.
                         val freqsRaw: List<*> =
                             call.argument("frequencies") ?: emptyList<Any?>()
                         val freqs = freqsRaw.mapNotNull { (it as? Number)?.toDouble() }
@@ -435,10 +391,6 @@ class MainActivity : AudioServiceActivity() {
             }
     }
 
-    /// Response over a LOG-SPACED grid:
-    ///   f(i) = minHz * (maxHz/minHz)^(i / (points - 1))
-    /// Dart's DspService.frequencyGrid mirrors this exactly — the two
-    /// implementations must stay in lockstep (contract).
     private fun magnitudeResponse(
         eq: ParametricEQ, points: Int, minHz: Double, maxHz: Double
     ): List<Double> {
@@ -484,8 +436,6 @@ class MainActivity : AudioServiceActivity() {
     }
 
     private fun eqFromCall(call: MethodCall): ParametricEQ? {
-        // JVM payloads are star-projected — `dynamic` is
-        // Kotlin/JS-only and does not compile on the JVM toolchain.
         val bandsRaw: List<*> = call.argument("bands") ?: return null
         val bands = bandsRaw.mapNotNull { b ->
             (b as? Map<*, *>)?.let { bandFromMap(it) }
@@ -509,10 +459,7 @@ class MainActivity : AudioServiceActivity() {
     )
 
     // ═══════════════════════════════════════════
-    // LOSSLESS — native DSP engine control. The 15-band equalizer fans
-    // out through the C++ instance registry, so every just_audio player
-    // (main + crossfade) receives updates. Band centers mirror the
-    // fixed ISO centers in DspProcessor.cpp (kEqFrequenciesHz).
+    // LOSSLESS
     // ═══════════════════════════════════════════
 
     private fun registerLosslessChannel(flutterEngine: FlutterEngine) {
@@ -543,11 +490,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     // ═══════════════════════════════════════════
-    // ADDON — lossless source resolver (ported from LastWave, GPL-3.0).
-    // Config is pushed from Dart and held process-wide; persistence
-    // lives Dart-side. resolveStream returns the matched lossless
-    // stream (DASH data-URL / FLAC) or null — the strict-matching core
-    // (language gate, version gate, duration ceiling) runs in Kotlin.
+    // ADDON
     // ═══════════════════════════════════════════
 
     private val addonApi: LosslessMusicApi by lazy { LosslessMusicApi() }
@@ -626,9 +569,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     // ═══════════════════════════════════════════
-    // VOLUME EVENTS — STREAM_MUSIC {volume, max} on change + subscribe.
-    // Same leak-safe registration as above (applicationContext +
-    // idempotent onListen).
+    // VOLUME EVENTS
     // ═══════════════════════════════════════════
 
     private fun registerVolumeEvents(flutterEngine: FlutterEngine) {
@@ -685,7 +626,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     // ═══════════════════════════════════════════
-    // AUDIO CHANNEL — enumeration, volume, BT permission.
+    // AUDIO CHANNEL
     // ═══════════════════════════════════════════
 
     private fun registerAudioChannel(flutterEngine: FlutterEngine) {
@@ -756,8 +697,6 @@ class MainActivity : AudioServiceActivity() {
         }
     }
 
-    /// All audio output devices:
-    /// {name, type: bluetooth|wired|usb|hdmi|speaker, battery?, id}.
     private fun outputDevices(): List<Map<String, Any?>> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return emptyList()
         val audioManager =
@@ -785,9 +724,6 @@ class MainActivity : AudioServiceActivity() {
 
             val battery =
                 if (d.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP && hasBtPermission) {
-                    // Match by MAC ADDRESS first (exact — productName
-                    // often differs from the Bluetooth device name),
-                    // falling back to a name match.
                     @SuppressLint("MissingPermission")
                     val address = try {
                         d.address
@@ -813,10 +749,6 @@ class MainActivity : AudioServiceActivity() {
         return out
     }
 
-    /// Battery of the BT device, via the hidden getBatteryLevel()
-    /// (same approach as the reference). Address match is exact;
-    /// junk reads (null, <= 0, > 100) return null so the UI shows
-    /// no ring instead of a wrong percentage.
     private fun btBatteryLevel(name: String?, address: String?): Int? {
         return try {
             val manager =
@@ -862,86 +794,5 @@ class MainActivity : AudioServiceActivity() {
         } catch (_: Exception) {
             null
         }
-    }
-
-    private fun registerExtensions(flutterEngine: FlutterEngine) {
-        extensionManager = ZenExtensionManager(applicationContext)
-        extensionManager.restoreInstalled()
-
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/extensions")
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "list" -> result.success(extensionManager.list().toString())
-                    "install" -> {
-                        val path = call.argument<String>("uri") ?: ""
-                        extensionManager.installFromPath(path).fold(
-                            onSuccess = {
-                                result.success(mapOf("id" to it.id, "name" to it.name))
-                            },
-                            onFailure = {
-                                result.error("INSTALL_FAILED", it.message, null)
-                            }
-                        )
-                    }
-                    "select" -> result.success(
-                        extensionManager.select(call.argument<String>("id") ?: "")
-                    )
-                    "deselect" -> result.success(extensionManager.clearActive())
-                    "homeFeedPage" -> {
-                        val continuation = call.argument<String>("continuation")
-                        Thread {
-                            try {
-                                val json = extensionManager.homeFeedPage(continuation)
-                                mainHandler.post { result.success(json.toString()) }
-                            } catch (t: Throwable) {
-                                mainHandler.post {
-                                    result.error("HOME_FEED_FAILED", t.message, null)
-                                }
-                            }
-                        }.start()
-                    }
-                    "search" -> {
-                        val query = call.argument<String>("query") ?: ""
-                        Thread {
-                            try {
-                                val json = extensionManager.search(query)
-                                mainHandler.post { result.success(json.toString()) }
-                            } catch (t: Throwable) {
-                                mainHandler.post {
-                                    result.error("SEARCH_FAILED", t.message, null)
-                                }
-                            }
-                        }.start()
-                    }
-                    "loadDetail" -> {
-                        val itemJson = call.argument<String>("item") ?: "{}"
-                        Thread {
-                            try {
-                                val json = extensionManager.loadDetail(itemJson)
-                                mainHandler.post { result.success(json.toString()) }
-                            } catch (t: Throwable) {
-                                mainHandler.post {
-                                    result.error("LOAD_DETAIL_FAILED", t.message, null)
-                                }
-                            }
-                        }.start()
-                    }
-                    "resolveStream" -> {
-                        val trackJson =
-                            JSONObject(call.argument<String>("track") ?: "{}")
-                        Thread {
-                            try {
-                                val stream = extensionManager.resolveStream(trackJson)
-                                mainHandler.post { result.success(stream.toString()) }
-                            } catch (t: Throwable) {
-                                mainHandler.post {
-                                    result.error("RESOLVE_FAILED", t.message, null)
-                                }
-                            }
-                        }.start()
-                    }
-                    else -> result.notImplemented()
-                }
-            }
     }
 }

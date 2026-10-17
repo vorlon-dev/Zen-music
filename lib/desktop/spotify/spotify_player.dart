@@ -1,39 +1,16 @@
-// ZenMusic — spotify playback resolution (SP-2).
+// ZenMusic — spotify playback resolution (SP-2 + SP-7 autoqueue).
 // Ported from Stopify's SpotifyConnectService/SpotifyWebClient (MIT).
 // ZenMusic remains GPL-3.0.
-// Pipeline: login session (SpotifyAuth) -> Dealer WebSocket (connection-id)
-// -> device registration -> connect-state play command -> state-machine
-// manifest (file_ids_mp4 captured, incl. autoqueue) -> storage-resolve v2
-// -> signed CDN URL. DEVIATION: Melody telemetry and cluster-state updater
-// dropped (not required for resolve); errors surface instead of fallback
-// bearer tokens.
 //
-// FIXES (CDN = null):
-//  * Dealer connection-id header is matched case-insensitively (it is
-//    "Spotify-Connection-Id").
-//  * gzip+base64 dealer payloads are decoded.
-//  * MANIFEST SCAN REWRITTEN: file ids are captured wherever they sit in a
-//    payload (file_ids_mp4 / file_ids_mp4_dual), attributed to the nearest
-//    enclosing spotify:track: uri, and also to relink aliases
-//    (linked_from_uri / original_uri ...). Before, only
-//    tracks[].manifest was read, so the requested track was missed while
-//    its autoqueue neighbours were captured.
-//  * RETRY USES A FRESH DEVICE ID: replaying "play" for the same context on
-//    the same device produces no new state push (second attempt received
-//    nothing). The retry registers a new random device id.
-//  * Per-attempt wait is 10 s (two attempts fit a 30 s smoke test).
-//  * Timeouts no longer turn into an empty file id; HTTP failures are
-//    detected immediately; Completer double-complete fixed; concurrent
-//    dealer connects de-duplicated.
-//  * Diagnostics: "spotify: ..." at every stage, plus a per-payload list of
-//    the tracks the dealer sent and what their manifest contained, and a
-//    dump of the requested track's entry when it carries no file id.
-//  * RELINK IDENTITY FIXED (wrong-song bug): a neighbour entry's file id is
-//    only aliased to the requested track via explicit relink fields
-//    (linked_from_uri / original_uri / ...). The old "metadata mentions the
-//    wanted id" rule also matched context_uri — queue context — so the
-//    SP-2 smoke aliased a radio neighbour (ATC) to the requested id and
-//    would have played the wrong song.
+// SP-7 ADDITION: while a resolve is in flight, every track node the Dealer
+// pushes carries full metadata (name, artists, album, cover, duration, uri)
+// in its `metadata` map. Those nodes are the requested track PLUS Spotify's
+// own autoqueue neighbours — the exact "next" list the Web Player would
+// play. We now capture that metadata and expose:
+//   * lastResolvedSong          -> the requested track (song-map shape)
+//   * lastAutoqueueNeighbours   -> the OTHER tracks from the same payload
+// MediaPlayer._tryEnginePlay reads these to build the Spotify queue. No
+// protocol change, no new request — we just stop throwing the data away.
 
 import 'dart:async';
 import 'dart:convert';
@@ -95,6 +72,24 @@ class SpotifyPlayer {
   // Pending resolve futures completed when the Dealer pushes a manifest.
   final Map<String, Completer<String>> _pending = {};
 
+  // ── SP-7 autoqueue capture ──
+  /// Metadata for every track uri we've seen in a dealer payload. Grows as
+  /// the user plays more; harmless (a few hundred bytes per track).
+  final Map<String, Map<String, dynamic>> _trackMeta = {};
+  /// Track uris seen since the current resolve began. Cleared on each new
+  /// resolve; read at the end to assemble the autoqueue.
+  final Set<String> _seenThisResolve = {};
+
+  /// The most recently resolved Spotify track, in desktop song-map shape
+  /// (identical to what spotify_search.dart produces). Null until a resolve
+  /// has succeeded.
+  Map<String, dynamic>? lastResolvedSong;
+
+  /// Autoqueue neighbours Spotify pushed alongside the resolved track.
+  /// This is Spotify's own "play next" — not a search section. Empty if
+  /// the payload contained only the requested track.
+  List<Map<String, dynamic>> lastAutoqueueNeighbours = [];
+
   void _log(String m) {
     if (debugLogs) debugPrint('spotify: $m');
   }
@@ -112,7 +107,6 @@ class SpotifyPlayer {
 
   Future<String?> _ensureDealer() {
     if (_channel != null && _handshaken) return Future.value(_connectionId);
-    // One connect at a time (parallel resolves used to open several sockets).
     return _dealerInFlight ??=
         _connectDealer().whenComplete(() => _dealerInFlight = null);
   }
@@ -148,9 +142,6 @@ class SpotifyPlayer {
     _connectionId = null;
     final completer = Completer<String?>();
 
-    // NOTE: build the url as a string. Uri.replace(queryParameters: ...) on a
-    // wss:// uri yields an explicit ":0" port and the connect then fails with
-    // "was not upgraded to websocket".
     final baseUrl = SpotifyConfig.dealerWsUrl;
     final sep = baseUrl.contains('?') ? '&' : '?';
     final wsUri = Uri.parse(
@@ -158,13 +149,10 @@ class SpotifyPlayer {
     _log('dealer: connecting ${wsUri.host}');
     final channel = WebSocketChannel.connect(wsUri);
     _channel = channel;
-    // Connection failures also surface on these futures; without handlers
-    // they become "Unhandled Exception"s.
     channel.ready.then((_) {}, onError: (_) {});
     channel.sink.done.catchError((_) {});
 
     void closed() {
-      // Ignore callbacks from an old, already replaced socket.
       if (!identical(_channel, channel)) return;
       _log('dealer: socket closed');
       _channel = null;
@@ -195,8 +183,6 @@ class SpotifyPlayer {
 
           for (final pObj in _payloads(json)) {
             _scanPayload(pObj, json['uri']?.toString());
-
-            // Remote commands (browser/phone control) — surfaced, not acted on.
             final cmd = pObj['command'];
             if (cmd is Map) {
               _log('remote command ${cmd['endpoint']}');
@@ -226,8 +212,6 @@ class SpotifyPlayer {
     return null;
   }
 
-  /// Dealer payloads: plain JSON objects, JSON strings, or gzip+base64
-  /// strings (Transfer-Encoding: gzip).
   List<Map> _payloads(Map json) {
     final out = <Map>[];
     final arr = json['payloads'];
@@ -455,8 +439,6 @@ class SpotifyPlayer {
 
   // ── MANIFEST CAPTURE (file_ids + autoqueue) ──
 
-  /// Walks a dealer payload, captures every file id it can attribute to a
-  /// spotify:track: uri, and prints what tracks the dealer sent.
   void _scanPayload(Map payload, String? messageUri) {
     final diag = <String>[];
     _scan(payload, null, 0, diag);
@@ -470,8 +452,6 @@ class SpotifyPlayer {
     }
   }
 
-  /// Copy of a payload without file ids / manifests and with long strings
-  /// and lists cut, safe to print.
   dynamic _redact(dynamic n, [int depth = 0]) {
     if (depth > 10) return '…';
     if (n is Map) {
@@ -506,7 +486,6 @@ class SpotifyPlayer {
     final ownUri = _trackUriOf(node);
     final uri = ownUri ?? ctxUri;
 
-    // File id sitting directly in this node (e.g. the manifest map itself).
     final fileId = _fileIdIn(node);
     if (fileId != null && uri != null) {
       _remember(uri, fileId, _aliasesOf(node));
@@ -519,6 +498,12 @@ class SpotifyPlayer {
     // Diagnostics for track-like entries (metadata.uri present).
     final meta = node['metadata'];
     if (ownUri != null && meta is Map) {
+      // SP-7: capture metadata for the autoqueue. The node with
+      // metadata.uri is also the node carrying name/authors/album/cover/
+      // duration. Read by MediaPlayer._tryEnginePlay to build the queue.
+      _trackMeta[ownUri] = _metaToSongMap(ownUri, meta);
+      if (_pending.isNotEmpty) _seenThisResolve.add(ownUri);
+
       final clean = ownUri.replaceAll('spotify:track:', '');
       final manifest = node['manifest'];
       final mk = manifest is Map ? manifest.keys.join(',') : 'none';
@@ -529,10 +514,6 @@ class SpotifyPlayer {
       if (wanted != null && clean != wanted) {
         final wantedUri = 'spotify:track:$wanted';
         final fid = _fileIds[ownUri];
-        // Relinked track: identity comes from explicit relink fields ONLY
-        // (linked_from_uri & co, via _aliasesOf). NEVER context_uri — that
-        // is queue context, and matching on any mention once aliased a
-        // radio neighbour's file id to the requested track.
         if (fid != null &&
             !_fileIds.containsKey(wantedUri) &&
             _aliasesOf(node).contains('spotify:track:$wanted')) {
@@ -549,6 +530,52 @@ class SpotifyPlayer {
     }
   }
 
+  /// SP-7: metadata map -> desktop song-map shape. Same shape as
+  /// spotify_search.dart produces so playSong / playFromSection /
+  /// _tryEnginePlay all accept it unchanged.
+  Map<String, dynamic> _metaToSongMap(String uri, Map meta) {
+    final id = uri.replaceFirst('spotify:track:', '');
+    final title = meta['name']?.toString() ?? '';
+
+    final artistNames = <String>[];
+    final authors = meta['authors'];
+    if (authors is List) {
+      for (final a in authors) {
+        final n = a is Map ? a['name']?.toString() ?? '' : '';
+        if (n.isNotEmpty) artistNames.add(n);
+      }
+    }
+
+    final albumName = meta['group_name']?.toString() ?? '';
+    final durationMs = (meta['duration'] as num?)?.toInt() ?? 0;
+
+    String cover = '';
+    final imgs = meta['images'];
+    if (imgs is List && imgs.isNotEmpty) {
+      for (final i in imgs) {
+        if (i is Map && (i['height'] as num?)?.toInt() == 300) {
+          cover = i['url']?.toString() ?? '';
+          break;
+        }
+      }
+      if (cover.isEmpty && imgs.first is Map) {
+        cover = (imgs.first as Map)['url']?.toString() ?? '';
+      }
+    }
+
+    return {
+      'videoId': id,
+      'title': title.isEmpty ? 'Unknown' : title,
+      'artist': artistNames.isEmpty ? 'Unknown Artist' : artistNames.join(', '),
+      'artists': [for (final n in artistNames) {'name': n}],
+      'thumbnails': [{'url': cover}],
+      'duration': Duration(milliseconds: durationMs),
+      'album': {'name': albumName},
+      'spotifyUri': uri,
+      'type': 'SPOTIFY',
+    };
+  }
+
   String? _trackUriOf(Map node) {
     final meta = node['metadata'];
     final candidates = [
@@ -562,7 +589,6 @@ class SpotifyPlayer {
     return null;
   }
 
-  /// Relinked tracks: the playable file belongs to another track id.
   List<String> _aliasesOf(Map node) {
     final out = <String>[];
     final meta = node['metadata'];
@@ -622,18 +648,22 @@ class SpotifyPlayer {
   // ── PUBLIC RESOLVE ──
 
   /// Resolves a track (id or spotify:track: uri) to a signed CDN URL.
-  /// Returns null on failure; the reason is printed as "spotify: ...".
+  /// Also populates lastResolvedSong + lastAutoqueueNeighbours on success.
   Future<String?> resolveTrack(String trackIdOrUri) async {
     final uri = trackIdOrUri.startsWith('spotify:track:')
         ? trackIdOrUri
         : 'spotify:track:$trackIdOrUri';
     final trackId = uri.replaceAll('spotify:track:', '');
 
+    // SP-7: reset autoqueue staging for this resolve.
+    _seenThisResolve.clear();
+    lastResolvedSong = null;
+    lastAutoqueueNeighbours = [];
+
     // 1. Cached file_id?
     var fileId = _fileIds[uri] ?? _fileIds[trackId];
 
-    // 2. Dealer pipeline. The retry starts from a fresh connection AND a
-    //    fresh device id (re-playing on the same device pushes no new state).
+    // 2. Dealer pipeline (retry with fresh device id on stall).
     for (var attempt = 0; attempt < 2 && fileId == null; attempt++) {
       if (attempt > 0) {
         _log('retrying $trackId with a fresh dealer connection + device id');
@@ -648,11 +678,26 @@ class SpotifyPlayer {
       return null;
     }
     final cdn = await _resolveCdn(fileId);
-    _log(cdn == null ? 'CDN resolve FAILED for $trackId' : 'CDN ok for $trackId');
+
+    // SP-7: publish the resolved track + neighbours for the queue.
+    if (cdn != null) {
+      final resolved = _trackMeta[uri];
+      if (resolved != null) lastResolvedSong = resolved;
+      for (final u in _seenThisResolve) {
+        if (u == uri) continue;
+        final m = _trackMeta[u];
+        if (m != null) lastAutoqueueNeighbours.add(m);
+      }
+      _log('autoqueue: ${lastAutoqueueNeighbours.length} neighbours; '
+          'resolved=${resolved != null ? resolved['title'] : '?'}');
+    }
+
+    _log(cdn == null
+        ? 'CDN resolve FAILED for $trackId'
+        : 'CDN ok for $trackId');
     return cdn;
   }
 
-  /// register -> play command -> wait for the manifest on the Dealer.
   Future<String?> _fetchFileId(String uri, String trackId) async {
     if (!await _ensureRegistered()) return null;
 
@@ -670,7 +715,6 @@ class SpotifyPlayer {
       );
       if (id.isNotEmpty) return id;
 
-      // The manifest may have landed just before the timeout fired.
       final cached = _fileIds[uri] ?? _fileIds[trackId];
       if (cached == null) {
         _log('timeout: dealer never pushed a manifest for $trackId');
@@ -682,7 +726,6 @@ class SpotifyPlayer {
     }
   }
 
-  /// storage-resolve v2 -> signed CDN URL (audio-ak.spotifycdn.com).
   Future<String?> _resolveCdn(String fileId) async {
     final token = await _auth.getAccessToken();
     if (token == null) return null;
@@ -716,7 +759,6 @@ class SpotifyPlayer {
     }
   }
 
-  /// Pre-resolve in the background (queue warm-up).
   Future<void> preResolve(String trackIdOrUri) async {
     unawaited(resolveTrack(trackIdOrUri).catchError((_) => null));
   }

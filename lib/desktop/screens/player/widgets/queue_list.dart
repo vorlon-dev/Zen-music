@@ -1,5 +1,13 @@
+// ZenMusic — queue drawer. SP-6: switches source based on who owns
+// playback. Engine-owned tracks render from MediaPlayer.queueSnapshot (the
+// section the user tapped); just_audio-owned tracks render from the player
+// sequence as before. Engine tiles are read-only (no reorder/dismiss) but
+// tappable — tapping plays that item from the snapshot.
+
 import 'dart:io';
 import 'dart:ui';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:just_audio/just_audio.dart';
@@ -16,82 +24,190 @@ class QueueList extends StatelessWidget {
     final mediaPlayer = GetIt.I<MediaPlayer>();
     final player = mediaPlayer.player;
 
-    return StreamBuilder(
-      stream: mediaPlayer.currentTrackStream,
-      builder: (context, snapshot) {
-        final sequence = snapshot.data?.sequence ?? [];
-        final currentIndex = snapshot.data?.currentIndex ?? 0;
+    return ValueListenableBuilder<bool>(
+      valueListenable: mediaPlayer.engineOwnsNotifier,
+      builder: (context, engineOwns, _) {
+        if (engineOwns) {
+          return ValueListenableBuilder<List<Map<String, dynamic>>>(
+            valueListenable: mediaPlayer.queueSnapshot,
+            builder: (context, snapshot, _) => _Shell(
+              mediaPlayer: mediaPlayer,
+              player: player,
+              children: [
+                for (int i = 0; i < snapshot.length; i++)
+                  _EngineQueueTile(
+                    key: ValueKey('eng-${snapshot[i]['videoId'] ?? i}'),
+                    index: i,
+                    song: snapshot[i],
+                  ),
+              ],
+              reorderable: false,
+            ),
+          );
+        }
+        return StreamBuilder(
+          stream: mediaPlayer.currentTrackStream,
+          builder: (context, snapshot) {
+            final sequence = snapshot.data?.sequence ?? [];
+            final currentIndex = snapshot.data?.currentIndex ?? 0;
+            return _Shell(
+              mediaPlayer: mediaPlayer,
+              player: player,
+              children: [
+                for (int i = 0; i < sequence.length; i++)
+                  QueueTile(
+                    key: Key(sequence[i].tag?.id ?? '$i'),
+                    index: i,
+                    isCurrent: i == currentIndex,
+                    source: sequence[i],
+                  ),
+              ],
+              reorderable: true,
+            );
+          },
+        );
+      },
+    );
+  }
+}
 
-        return Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).scaffoldBackgroundColor.withAlpha(70),
-          ),
-          child: ClipRRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 3, sigmaY: 3),
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: ReorderableListView(
-                        onReorder: (oldIndex, newIndex) async {
-                          if (newIndex > oldIndex) newIndex -= 1;
-                          await player.moveAudioSource(oldIndex, newIndex);
-                        },
-                        children: [
-                          for (int i = 0; i < sequence.length; i++)
-                            QueueTile(
-                              key: Key(sequence[i].tag?.id ?? '$i'),
-                              index: i,
-                              isCurrent: i == currentIndex,
-                              source: sequence[i],
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (Platform.isAndroid)
-                      StreamBuilder<bool>(
-                        stream: player.shuffleModeEnabledStream,
-                        builder: (context, snapshot) {
-                          final shuffle = snapshot.data ?? false;
-                          return Padding(
-                            padding:
-                            const EdgeInsets.symmetric(horizontal: 16.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                TextButton.icon(
-                                  style: ButtonStyle(
-                                    backgroundColor: WidgetStatePropertyAll(
-                                      shuffle
-                                          ? Colors.white
-                                          : Colors.white.withAlpha(50),
-                                    ),
-                                    foregroundColor: WidgetStatePropertyAll(
-                                      shuffle
-                                          ? Theme.of(context)
-                                          .scaffoldBackgroundColor
-                                          : Colors.white,
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    player.setShuffleModeEnabled(!shuffle);
-                                  },
-                                  icon: const Icon(Icons.shuffle_outlined),
-                                  label: const Text('Shuffle'),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                  ],
+class _Shell extends StatelessWidget {
+  const _Shell({
+    required this.mediaPlayer,
+    required this.player,
+    required this.children,
+    required this.reorderable,
+  });
+  final MediaPlayer mediaPlayer;
+  final AudioPlayer player;
+  final List<Widget> children;
+  final bool reorderable;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor.withAlpha(70),
+      ),
+      child: ClipRRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 3, sigmaY: 3),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              children: [
+                Expanded(
+                  child: reorderable
+                      ? ReorderableListView(
+                    onReorder: (oldIndex, newIndex) async {
+                      if (newIndex > oldIndex) newIndex -= 1;
+                      await player.moveAudioSource(oldIndex, newIndex);
+                    },
+                    children: children,
+                  )
+                      : ListView(children: children),
                 ),
-              ),
+                if (Platform.isAndroid)
+                  StreamBuilder<bool>(
+                    stream: player.shuffleModeEnabledStream,
+                    builder: (context, snapshot) {
+                      final shuffle = snapshot.data ?? false;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton.icon(
+                              style: ButtonStyle(
+                                backgroundColor: WidgetStatePropertyAll(
+                                  shuffle
+                                      ? Colors.white
+                                      : Colors.white.withAlpha(50),
+                                ),
+                                foregroundColor: WidgetStatePropertyAll(
+                                  shuffle
+                                      ? Theme.of(context).scaffoldBackgroundColor
+                                      : Colors.white,
+                                ),
+                              ),
+                              onPressed: () {
+                                player.setShuffleModeEnabled(!shuffle);
+                              },
+                              icon: const Icon(Icons.shuffle_outlined),
+                              label: const Text('Shuffle'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+              ],
             ),
           ),
-        );
+        ),
+      ),
+    );
+  }
+}
+
+class _EngineQueueTile extends StatelessWidget {
+  const _EngineQueueTile({
+    super.key,
+    required this.index,
+    required this.song,
+  });
+  final int index;
+  final Map<String, dynamic> song;
+
+  @override
+  Widget build(BuildContext context) {
+    final mp = GetIt.I<MediaPlayer>();
+    final currentId = mp.currentSongNotifier.value?.id;
+    final isCurrent = song['videoId'] == currentId;
+    final thumb = (song['thumbnails'] as List?)?.isNotEmpty == true
+        ? (song['thumbnails'].first as Map)['url']?.toString() ?? ''
+        : '';
+    return ListTile(
+      key: ValueKey('eng-tile-$index'),
+      title: Text(song['title']?.toString() ?? '', maxLines: 1),
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Stack(
+          children: [
+            thumb.isEmpty
+                ? const SizedBox(
+                width: 50,
+                height: 50,
+                child: Icon(Icons.music_note))
+                : CachedNetworkImage(
+              imageUrl: thumb,
+              height: 50,
+              width: 50,
+              fit: BoxFit.cover,
+            ),
+            if (isCurrent)
+              Container(
+                height: 50,
+                width: 50,
+                color: Colors.black.withOpacity(0.6),
+              ),
+            if (isCurrent)
+              const Positioned(
+                width: 34,
+                height: 34,
+                left: 8,
+                top: 8,
+                child: Center(
+                  child:
+                  Icon(Icons.music_note_outlined, color: Colors.white),
+                ),
+              ),
+          ],
+        ),
+      ),
+      subtitle: Text(song['artist']?.toString() ?? '', maxLines: 1),
+      onTap: () {
+        mp.playFromSection(mp.queueSnapshot.value, index);
       },
     );
   }
@@ -131,7 +247,6 @@ class QueueTile extends StatelessWidget {
           song.artist ?? song.album ?? song.extras?['subtitle'] ?? '',
           maxLines: 1,
         ),
-        // trailing: const Icon(Icons.drag_handle),
         onTap: () {
           player.seek(Duration.zero, index: index);
         },

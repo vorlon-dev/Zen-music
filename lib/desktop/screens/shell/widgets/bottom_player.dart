@@ -6,6 +6,9 @@
 // animation, swipe left/right = next/previous, swipe up / tap = open
 // player, press-scale). audioHandler streams -> MediaPlayer (GetIt);
 // spotify theme colours -> artwork palette colour.
+// SP-5b: song source is MediaPlayer.currentSongNotifier (works for both
+// just_audio and the Spotify desktop engine); transport routes through
+// MediaPlayer.togglePlayPause/skipNext/skipPrevious.
 
 import 'dart:math' as math;
 
@@ -49,10 +52,12 @@ class _BottomPlayerState extends State<BottomPlayer> {
   @override
   Widget build(BuildContext context) {
     final mediaPlayer = GetIt.I<MediaPlayer>();
-    return StreamBuilder(
-      stream: mediaPlayer.currentTrackStream,
-      builder: (context, snapshot) {
-        final currentSong = snapshot.data?.currentItem;
+    // SP-5b: source song from currentSongNotifier so this works for both
+    // just_audio and the engine (just_audio's sequence is empty when the
+    // engine owns playback).
+    return ValueListenableBuilder<MediaItem?>(
+      valueListenable: mediaPlayer.currentSongNotifier,
+      builder: (context, currentSong, _) {
         if (currentSong == null) {
           return const SizedBox();
         }
@@ -151,12 +156,12 @@ class _MiniBodyState extends State<_MiniBody>
 
   void _next() {
     _noteSlideIntent(true);
-    _mp.player.seekToNext();
+    _mp.skipNext(); // SP-5b
   }
 
   void _previous() {
     _noteSlideIntent(false);
-    _mp.player.seekToPrevious();
+    _mp.skipPrevious(); // SP-5b
   }
 
   Widget _slideOnChange({required String slideKey, required Widget child}) {
@@ -451,8 +456,8 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
                 )
               else
                 IconButton(
-                  onPressed: () =>
-                  mp.player.playing ? mp.player.pause() : mp.player.play(),
+                  // SP-5b: MediaPlayer.togglePlayPause
+                  onPressed: () => mp.togglePlayPause(),
                   splashColor: Colors.transparent,
                   highlightColor: Colors.transparent,
                   visualDensity: VisualDensity.compact,

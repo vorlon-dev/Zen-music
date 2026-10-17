@@ -18,12 +18,18 @@
 //     path the tiles use, then play the resolved list.
 //  7. Spotify branch: song maps from the Spotify search section carry
 //     'spotifyUri'.
-//     ANDROID: Widevine L3 DRM playback via the patched just_audio host
-//     (x-zen-drm header marker -> DrmConfiguration; Stopify recipe, MIT).
-//     Resolved CDN URL + license headers are built from SpotifyAuth.
-//     DESKTOP: mpv/media_kit has no Widevine CDM (CENC ciphertext conf) —
-//     the same song is played via YT Music (search-and-play, isChart-style)
-//     with the original Spotify tag so artwork/title stay correct.
+//     ANDROID: Widevine L3 DRM playback via the patched just_audio host.
+//     DESKTOP (SP-5b): the hidden WebView2 EME engine owns playback for the
+//     current track; just_audio listeners stand down while it's active.
+//  8. SP-6 queue snapshot: queueSnapshot mirrors what the user tapped (a
+//     whole search section, playlist, or liked songs). Fills the queue
+//     drawer when the engine owns playback and provides a real queue for
+//     JioSaavn sections that autofetch can't extend.
+//  9. SP-7 Spotify autoqueue: when the engine plays a Spotify track, the
+//     queue drawer is replaced with Spotify's OWN next-up list — the
+//     resolved track plus the autoqueue neighbours from the same Dealer
+//     payload (SpotifyPlayer.lastResolvedSong / lastAutoqueueNeighbours).
+//     Non-Spotify paths keep the section snapshot from SP-6.
 
 import 'dart:async';
 import 'dart:convert';
@@ -44,6 +50,7 @@ import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/spotify/spotify_player.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_config.dart';
+import 'package:zenmusic/desktop/spotify/spotify_desktop_engine.dart';
 
 // From Stopify's SpotifyAudioPlayer (MIT) — Widevine license endpoint for
 // web-player CENC audio. Consumed by the patched just_audio Android host.
@@ -77,9 +84,23 @@ class MediaPlayer extends ChangeNotifier {
 
   bool autoFetching = false;
 
+  // ── SP-5b engine wiring ──
+  bool _engineOwnsPlayback = false;
+  bool _engineListenersAttached = false;
+
+  // ── SP-6 queue snapshot ──
+  final ValueNotifier<List<Map<String, dynamic>>> queueSnapshot =
+  ValueNotifier<List<Map<String, dynamic>>>([]);
+  final ValueNotifier<bool> engineOwnsNotifier = ValueNotifier<bool>(false);
+
+  void _setEngineOwns(bool v) {
+    if (_engineOwnsPlayback != v) {
+      _engineOwnsPlayback = v;
+      engineOwnsNotifier.value = v;
+    }
+  }
+
   MediaPlayer() {
-    // ANDROID: session EQ pipeline (device bands). Desktop: plain player —
-    // EQ arrives via the mpv arc.
     if (Platform.isAndroid) {
       _eq = AndroidEqualizer();
       _player = AudioPlayer(
@@ -100,6 +121,7 @@ class MediaPlayer extends ChangeNotifier {
   bool get shuffleModeEnabled => _shuffleModeEnabled;
   ValueNotifier<LoopMode> get loopMode => _loopMode;
   ValueNotifier<Duration?> get timerDuration => _timerDuration;
+  bool get engineOwnsPlayback => _engineOwnsPlayback;
 
   Stream<
       ({
@@ -133,6 +155,124 @@ class MediaPlayer extends ChangeNotifier {
     },
   );
 
+  // ═══════════════════════════════════════════════════════════════════
+  // SP-5b / SP-6 / SP-7 — SpotifyDesktopEngine bridge
+  // ═══════════════════════════════════════════════════════════════════
+
+  void _attachEngineListeners() {
+    if (_engineListenersAttached) return;
+    _engineListenersAttached = true;
+    final engine = SpotifyDesktopEngine.instance;
+
+    engine.position.addListener(() {
+      if (!_engineOwnsPlayback) return;
+      final old = _progressBarState.value;
+      if (old.current != engine.position.value) {
+        _progressBarState.value = ProgressBarState(
+          current: engine.position.value,
+          buffered: old.buffered,
+          total: old.total,
+        );
+      }
+    });
+    engine.duration.addListener(() {
+      if (!_engineOwnsPlayback) return;
+      final old = _progressBarState.value;
+      if (old.total != engine.duration.value) {
+        _progressBarState.value = ProgressBarState(
+          current: old.current,
+          buffered: old.buffered,
+          total: engine.duration.value,
+        );
+      }
+    });
+    engine.playing.addListener(() {
+      if (!_engineOwnsPlayback) return;
+      _buttonState.value = engine.playing.value
+          ? ButtonState.playing
+          : ButtonState.paused;
+    });
+    engine.ended.addListener(() {
+      if (!_engineOwnsPlayback) return;
+      if (engine.ended.value) {
+        unawaited(engine.seek(Duration.zero));
+        unawaited(engine.pause());
+        _buttonState.value = ButtonState.paused;
+      }
+    });
+  }
+
+  Future<bool> _tryEnginePlay(Map<String, dynamic> song) async {
+    if (!Platform.isWindows) return false;
+    if (_engineOwnsPlayback) {
+      await SpotifyDesktopEngine.instance.stop();
+      _setEngineOwns(false);
+    }
+    try {
+      await _player.pause();
+      await _player.stop();
+      await _player.clearAudioSources();
+    } catch (_) {}
+
+    _attachEngineListeners();
+
+    final tag = MediaItem(
+      id: song['videoId'],
+      title: song['title'] ?? 'Title',
+      album: song['album']?['name'],
+      artUri: Uri.parse(getEnhancedImage(
+          song['thumbnails']?.first['url'] ?? '',
+          quality: 'high')),
+      artist: song['artists']?.map((a) => a['name']).join(','),
+      extras: song,
+    );
+    _currentSongNotifier.value = tag;
+    _buttonState.value = ButtonState.loading;
+    _progressBarState.value = ProgressBarState();
+    notifyListeners();
+
+    final ok = await SpotifyDesktopEngine.instance.play(song);
+    if (!ok) {
+      print('[sp-engine] play() failed for ${song['spotifyUri']}');
+      _buttonState.value = ButtonState.paused;
+      return false;
+    }
+    _setEngineOwns(true);
+
+    // ★ SP-7: Spotify owns the queue. Use the autoqueue neighbours Spotify
+    // pushed in the state-machine payload — those are the real "next"
+    // tracks, not the search-section list. Falls back to the caller's song
+    // if metadata capture missed (e.g. cached file_id path).
+    final sp = SpotifyPlayer.instance;
+    final resolved = sp.lastResolvedSong;
+    final neighbours = sp.lastAutoqueueNeighbours;
+    if (resolved != null) {
+      queueSnapshot.value = [resolved, ...neighbours];
+      print('[sp-engine] queue: resolved + ${neighbours.length} neighbours');
+    }
+
+    _buttonState.value = ButtonState.playing;
+    _progressBarState.value = ProgressBarState(
+      current: Duration.zero,
+      buffered: Duration.zero,
+      total: SpotifyDesktopEngine.instance.duration.value,
+    );
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> _releaseEngine() async {
+    if (!_engineOwnsPlayback) return;
+    _setEngineOwns(false);
+    await SpotifyDesktopEngine.instance.stop();
+    _currentSongNotifier.value = null;
+    _buttonState.value = ButtonState.paused;
+    _progressBarState.value = ProgressBarState();
+    notifyListeners();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+
   Future<void> _init() async {
     _listenToChangesInPlaylist();
     _listenToPlaybackState();
@@ -155,6 +295,7 @@ class MediaPlayer extends ChangeNotifier {
 
   void _listenToChangesInPlaylist() {
     _player.sequenceStream.listen((playlist) {
+      if (_engineOwnsPlayback) return;
       final List<IndexedAudioSource> newList =
       (playlist).cast<IndexedAudioSource>();
 
@@ -186,6 +327,7 @@ class MediaPlayer extends ChangeNotifier {
 
   void _listenToPlaybackState() {
     _player.playerStateStream.listen((event) {
+      if (_engineOwnsPlayback) return;
       final isPlaying = event.playing;
       final processingState = event.processingState;
       if (processingState == ProcessingState.loading ||
@@ -199,7 +341,6 @@ class MediaPlayer extends ChangeNotifier {
         _player.pause();
         _buttonState.value = ButtonState.paused;
       } else {
-        // idle state
         _buttonState.value = ButtonState.paused;
       }
     });
@@ -209,6 +350,7 @@ class MediaPlayer extends ChangeNotifier {
     _player.playbackEventStream.listen(
           (event) {},
       onError: (Object e, StackTrace st) {
+        if (_engineOwnsPlayback) return;
         _buttonState.value = ButtonState.paused;
         notifyListeners();
       },
@@ -217,6 +359,7 @@ class MediaPlayer extends ChangeNotifier {
 
   void _listenToCurrentPosition() {
     _player.positionStream.listen((position) {
+      if (_engineOwnsPlayback) return;
       final oldState = _progressBarState.value;
       if (oldState.current != position) {
         _progressBarState.value = ProgressBarState(
@@ -230,6 +373,7 @@ class MediaPlayer extends ChangeNotifier {
 
   void _listenToBufferedPosition() {
     _player.bufferedPositionStream.listen((position) {
+      if (_engineOwnsPlayback) return;
       final oldState = _progressBarState.value;
       if (oldState.buffered != position) {
         _progressBarState.value = ProgressBarState(
@@ -243,6 +387,7 @@ class MediaPlayer extends ChangeNotifier {
 
   void _listenToTotalDuration() {
     _player.durationStream.listen((position) {
+      if (_engineOwnsPlayback) return;
       final oldState = _progressBarState.value;
       if (oldState.total != position) {
         _progressBarState.value = ProgressBarState(
@@ -263,6 +408,7 @@ class MediaPlayer extends ChangeNotifier {
 
   void _listenToChangesInSong() {
     _player.currentIndexStream.listen((index) {
+      if (_engineOwnsPlayback) return;
       if (_songList.isNotEmpty && _currentIndex.value != index) {
         _currentIndex.value = index;
         _currentSongNotifier.value =
@@ -317,13 +463,8 @@ class MediaPlayer extends ChangeNotifier {
     if (isDownloaded) {
       return AudioSource.file(song['path'], tag: tag);
     } else {
-      // Spotify (SP-3): song maps from the Spotify search section carry
-      // spotifyUri.
       final spotifyUri = song['spotifyUri'] as String?;
       if (spotifyUri != null && spotifyUri.isNotEmpty) {
-        // ANDROID: real Spotify audio — resolve CDN + Widevine L3 DRM via
-        // the patched just_audio host. On any failure, fall back to YT so
-        // playback never dies on an expired/missing session.
         if (Platform.isAndroid) {
           try {
             final cdn = await SpotifyPlayer.instance.resolveTrack(spotifyUri);
@@ -336,8 +477,6 @@ class MediaPlayer extends ChangeNotifier {
                 'User-Agent': SpotifyConfig.userAgent,
                 'Origin': 'https://open.spotify.com',
                 'Referer': 'https://open.spotify.com/',
-                // Marker consumed by the just_audio host (never sent as an
-                // HTTP header): license URL + license request headers.
                 'x-zen-drm': jsonEncode({
                   'licenseUri': _kSpotifyWidevineLicenseUrl,
                   'headers': {
@@ -357,16 +496,12 @@ class MediaPlayer extends ChangeNotifier {
             print('[spotify-play] DRM error: $e, falling back to YT');
           }
         }
-        // DESKTOP (or Android failure): same song via YT Music.
         return _ytFallbackSource(song, tag);
       }
-      // JioSaavn: direct 320kbps URL baked into the song map — no
-      // extraction needed, plays on every platform.
       final saavnUrl = song['jiosaavnStreamUrl'] as String?;
       if (saavnUrl != null && saavnUrl.isNotEmpty) {
         return AudioSource.uri(Uri.parse(saavnUrl), tag: tag);
       }
-      // Use direct URL approach for macOS for better compatibility with AVFoundation
       if (Platform.isMacOS) {
         final quality =
         GetIt.I<SettingsManager>().streamingQuality.name.toLowerCase();
@@ -380,9 +515,6 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
-  /// Spotify rows on DRM-less platforms (desktop) and Android DRM failures:
-  /// play the same song via YT Music (isChart-style search-and-play) while
-  /// keeping the ORIGINAL Spotify tag so artwork/title stay from Spotify.
   Future<AudioSource> _ytFallbackSource(
       Map<String, dynamic> song, MediaItem tag) async {
     try {
@@ -414,11 +546,19 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> playSong(Map<String, dynamic> song) async {
     if (song['videoId'] == null) return;
+    queueSnapshot.value = [Map<String, dynamic>.from(song)];
+
+    // SP-5b: Windows + Spotify URI -> engine takes over.
+    if (Platform.isWindows) {
+      final spUri = song['spotifyUri'] as String?;
+      if (spUri != null && spUri.isNotEmpty) {
+        if (await _tryEnginePlay(song)) return;
+      }
+    }
 
     final int requestId = DateTime.now().millisecondsSinceEpoch;
     _lastPlayRequestId = requestId;
 
-    // OPTIMISTIC UPDATE: show the song immediately with loading state.
     MediaItem tempTag = MediaItem(
       id: song['videoId'],
       title: song['title'] ?? 'Title',
@@ -433,24 +573,21 @@ class MediaPlayer extends ChangeNotifier {
     _buttonState.value = ButtonState.loading;
     notifyListeners();
 
-    // stop and set the tapped song as the single source so it plays immediately
     try {
       await _player.pause();
       await _player.stop();
-      if (_lastPlayRequestId != requestId) return; // Stale request
+      if (_lastPlayRequestId != requestId) return;
       await _player.clearAudioSources();
-      if (_lastPlayRequestId != requestId) return; // Stale request
+      if (_lastPlayRequestId != requestId) return;
     } catch (e) {
       // Ignore stop errors
     }
 
     try {
       final source = await _getAudioSource(song);
-      if (_lastPlayRequestId != requestId) return; // Stale request
-
+      if (_lastPlayRequestId != requestId) return;
       await _player.setAudioSource(source);
       if (_lastPlayRequestId != requestId) return;
-
       await _player.play();
     } catch (e) {
       if (_lastPlayRequestId == requestId) {
@@ -461,8 +598,48 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
+  /// SP-6: section-aware tap. The whole section becomes the "session":
+  /// queueSnapshot mirrors it, engine takes over for Spotify on Windows,
+  /// and everything else plays through just_audio with the tapped song first
+  /// and the rest of the section lazily preloaded.
+  Future<void> playFromSection(
+      List<Map<String, dynamic>> section, int index) async {
+    if (section.isEmpty) return;
+    if (index < 0 || index >= section.length) return;
+
+    queueSnapshot.value =
+        section.map((s) => Map<String, dynamic>.from(s)).toList();
+
+    final song = Map<String, dynamic>.from(section[index]);
+
+    if (Platform.isWindows &&
+        (song['spotifyUri'] as String?)?.isNotEmpty == true) {
+      // SP-7: _tryEnginePlay replaces queueSnapshot with the Spotify
+      // autoqueue on success. Falls through to just_audio on failure.
+      if (await _tryEnginePlay(song)) return;
+    }
+
+    _buttonState.value = ButtonState.loading;
+    notifyListeners();
+    try {
+      await _player.stop();
+      await _player.clearAudioSources();
+      final first = await _getAudioSource(song);
+      await _player.setAudioSource(first);
+      _player.play();
+      if (section.length > 1) {
+        Future(() => _addRemainingToPlaylist(section, index));
+      }
+    } catch (e) {
+      print('playFromSection error: $e');
+      _buttonState.value = ButtonState.paused;
+      notifyListeners();
+    }
+  }
+
   Future<void> playNext(Map<String, dynamic> mediaItem) async {
-    // Case 1: A single video/song
+    if (_engineOwnsPlayback) await _releaseEngine();
+
     if (mediaItem['videoId'] != null) {
       final audioSource = await _getAudioSource(mediaItem);
 
@@ -475,13 +652,9 @@ class MediaPlayer extends ChangeNotifier {
       } else {
         await _player.setAudioSource(audioSource);
       }
-
-      // Case 2: Custom or Downloaded Playlist
     } else if (mediaItem['songs'] != null) {
       List songs = mediaItem['songs'];
       await _addSongListToQueue(songs, isNext: true);
-
-      // Case 3: Online Playlist
     } else if (mediaItem['playlistId'] != null) {
       List songs = mediaItem['type'] == 'ARTIST'
           ? await GetIt.I<YTMusic>()
@@ -493,6 +666,9 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> playAll(List songs, {int index = 0}) async {
     if (songs.isEmpty) return;
+    queueSnapshot.value =
+        songs.map((s) => Map<String, dynamic>.from(s as Map)).toList();
+    if (_engineOwnsPlayback) await _releaseEngine();
 
     _buttonState.value = ButtonState.loading;
     notifyListeners();
@@ -502,9 +678,6 @@ class MediaPlayer extends ChangeNotifier {
 
       final selectedSong = Map<String, dynamic>.from(songs[index]);
 
-      // Chart-aware (deviation 6): isChart rows carry no stream — resolve
-      // each via the search-and-play path the tiles use, then play the
-      // resolved list.
       if (selectedSong['isChart'] == true) {
         final resolved = <Map<String, dynamic>>[];
         for (final s in songs) {
@@ -525,9 +698,7 @@ class MediaPlayer extends ChangeNotifier {
                 resolved.add(Map<String, dynamic>.from(contents[0]));
               }
             }
-          } catch (_) {
-            // Skip rows that fail to resolve.
-          }
+          } catch (_) {}
         }
         if (resolved.isEmpty) {
           _buttonState.value = ButtonState.paused;
@@ -542,7 +713,7 @@ class MediaPlayer extends ChangeNotifier {
       final firstSource = await _getAudioSource(selectedSong2);
 
       await _player.setAudioSource(firstSource);
-      _player.play(); // Don't await — start playing while we add more
+      _player.play();
 
       if (songs.length > 1) {
         Future(() => _addRemainingToPlaylist(songs, index));
@@ -554,7 +725,6 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
-  // Lazy loading: only preload the next few songs, not the entire playlist.
   Future<void> _addRemainingToPlaylist(List songs, int playedIndex) async {
     try {
       final int maxPreload = 3;
@@ -594,6 +764,7 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> startRelated(Map<String, dynamic> song,
       {bool radio = false, bool shuffle = false, bool isArtist = false}) async {
+    if (_engineOwnsPlayback) await _releaseEngine();
     await _player.clearAudioSources();
     if (!isArtist) {
       await addToQueue(song);
@@ -609,6 +780,7 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   Future<void> startPlaylistSongs(Map endpoint) async {
+    if (_engineOwnsPlayback) await _releaseEngine();
     await _player.clearAudioSources();
     List songs = await GetIt.I<YTMusic>().getNextSongList(
         playlistId: endpoint['playlistId'], params: endpoint['params']);
@@ -622,12 +794,103 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    if (_engineOwnsPlayback) await _releaseEngine();
     await _player.stop();
     await _player.clearAudioSources();
     await _player.seek(Duration.zero, index: 0);
     _currentIndex.value = null;
     _currentSongNotifier.value = null;
     notifyListeners();
+  }
+
+  // ── SP-5b transport routing ──
+
+  Future<void> togglePlayPause() async {
+    if (_engineOwnsPlayback) {
+      final engine = SpotifyDesktopEngine.instance;
+      if (engine.playing.value) {
+        await engine.pause();
+      } else {
+        await engine.resume();
+      }
+      return;
+    }
+    if (_player.playing) {
+      await _player.pause();
+    } else {
+      await _player.play();
+    }
+  }
+
+  Future<void> seekTo(Duration d) async {
+    if (_engineOwnsPlayback) {
+      await SpotifyDesktopEngine.instance.seek(d);
+      return;
+    }
+    await _player.seek(d);
+  }
+
+  /// SP-6 / SP-7: when the engine owns playback, walk the queue snapshot.
+  /// For Spotify tracks the snapshot is [resolved, ...autoqueueNeighbours]
+  /// (SP-7). For everything else it's whatever the caller set (SP-6).
+  Future<void> skipNext() async {
+    if (_engineOwnsPlayback) {
+      final snapshot = queueSnapshot.value;
+      final currentId = _currentSongNotifier.value?.id;
+      final idx = snapshot.indexWhere((s) => s['videoId'] == currentId);
+      if (idx >= 0 && idx + 1 < snapshot.length) {
+        final next = Map<String, dynamic>.from(snapshot[idx + 1]);
+        if (Platform.isWindows &&
+            (next['spotifyUri'] as String?)?.isNotEmpty == true) {
+          if (await _tryEnginePlay(next)) return;
+        }
+        _setEngineOwns(false);
+        await SpotifyDesktopEngine.instance.stop();
+        try {
+          await _player.stop();
+          await _player.clearAudioSources();
+          final src = await _getAudioSource(next);
+          await _player.setAudioSource(src);
+          await _player.play();
+        } catch (e) {
+          print('[skipNext] fallback error: $e');
+        }
+        return;
+      }
+      await _releaseEngine();
+      return;
+    }
+    await _player.seekToNext();
+  }
+
+  Future<void> skipPrevious() async {
+    if (_engineOwnsPlayback) {
+      final snapshot = queueSnapshot.value;
+      final currentId = _currentSongNotifier.value?.id;
+      final idx = snapshot.indexWhere((s) => s['videoId'] == currentId);
+      if (idx > 0) {
+        final prev = Map<String, dynamic>.from(snapshot[idx - 1]);
+        if (Platform.isWindows &&
+            (prev['spotifyUri'] as String?)?.isNotEmpty == true) {
+          if (await _tryEnginePlay(prev)) return;
+        }
+        _setEngineOwns(false);
+        await SpotifyDesktopEngine.instance.stop();
+        try {
+          await _player.stop();
+          await _player.clearAudioSources();
+          final src = await _getAudioSource(prev);
+          await _player.setAudioSource(src);
+          await _player.play();
+        } catch (e) {
+          print('[skipPrevious] fallback error: $e');
+        }
+        return;
+      }
+      await _releaseEngine();
+      return;
+    }
+    await _player.seekToPrevious();
   }
 
   Future<void> _addSongListToQueue(List songs, {bool isNext = false}) async {
@@ -651,6 +914,7 @@ class MediaPlayer extends ChangeNotifier {
 
   void _listenToAutofetch() {
     player.currentIndexStream.listen((index) async {
+      if (_engineOwnsPlayback) return;
       if (index == null) return;
       if (player.sequence.length - index < 5 &&
           GetIt.I<SettingsManager>().autofetchSongs &&
@@ -690,8 +954,6 @@ class MediaPlayer extends ChangeNotifier {
   static const _eqEnabledKey = 'EQ_ENABLED';
   static const _eqBandsKey = 'EQ_BANDS';
 
-  /// Parameters for the EQ screen: null when unavailable (non-Android or
-  /// pipeline not ready yet — the screen retries on next open).
   Future<EqParams?> getEqParameters() async {
     final eq = _eq;
     if (eq == null || !Platform.isAndroid) return null;

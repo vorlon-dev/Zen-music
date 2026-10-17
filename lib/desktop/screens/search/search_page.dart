@@ -11,6 +11,11 @@
 // on a suggestion no longer unfocuses the text field (which was removing the
 // overlay before the tap could complete). The focus-lost hide is also delayed
 // slightly as a safety net.
+//
+// SP-6: search tiles for JioSaavn and Spotify go through
+// MediaPlayer.playFromSection — the whole section becomes the "session"
+// so the queue drawer is populated and skip next/prev walk the section
+// (instead of one-song-only playSong, which left JioSaavn with no queue).
 
 import 'dart:async';
 import 'dart:io';
@@ -181,6 +186,7 @@ class _SearchSectionItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final contents = (section['contents'] as List?) ?? const [];
     return Column(
       children: [
         if (section['title'] != null && !isMore)
@@ -213,9 +219,13 @@ class _SearchSectionItem extends StatelessWidget {
             )
                 : null,
           ),
-        ...section['contents'].map((item) {
-          return _SearchListTile(item: item);
-        })
+        ...contents.asMap().entries.map((entry) {
+          return _SearchListTile(
+            item: entry.value,
+            section: contents,
+            index: entry.key,
+          );
+        }),
       ],
     );
   }
@@ -224,8 +234,13 @@ class _SearchSectionItem extends StatelessWidget {
 class _SearchListTile extends StatelessWidget {
   const _SearchListTile({
     required this.item,
+    required this.section,
+    required this.index,
   });
   final Map item;
+  final List section;
+  final int index;
+
   @override
   Widget build(BuildContext context) {
     return AdaptiveListTile(
@@ -238,7 +253,20 @@ class _SearchListTile extends StatelessWidget {
       },
       onTap: () async {
         if (item['videoId'] != null) {
-          await GetIt.I<MediaPlayer>().playSong(Map.from(item));
+          // SP-6: JioSaavn and Spotify rows enter the section queue; YT
+          // keeps the previous single-song + autofetch behavior.
+          final isSpotify =
+              (item['spotifyUri'] as String?)?.isNotEmpty == true;
+          final isJioSaavn =
+              (item['jiosaavnStreamUrl'] as String?)?.isNotEmpty == true;
+          if (isSpotify || isJioSaavn) {
+            await GetIt.I<MediaPlayer>().playFromSection(
+              List<Map<String, dynamic>>.from(section),
+              index,
+            );
+          } else {
+            await GetIt.I<MediaPlayer>().playSong(Map.from(item));
+          }
         } else if (item['endpoint'] != null && item['videoId'] == null) {
           context.push(
             '/browse',
@@ -286,10 +314,6 @@ class _SearchListTile extends StatelessWidget {
 }
 
 /// In-tree replacement for flutter_typeahead (deviation, see header).
-/// TAP CONTRACT: the outside-tap catcher is the PARENT of the suggestion
-/// panel — the deepest recognizer (the tapped item) always beats the parent
-/// catcher in the gesture arena, so item taps fire and outside taps close.
-/// Picked actions run FIRST; overlay teardown defers to after the frame.
 class SearchSuggestField extends StatefulWidget {
   const SearchSuggestField({
     super.key,
@@ -324,8 +348,6 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
       if (_focusNode.hasFocus) {
         _showOverlay();
       } else {
-        // Give a pending tap on a suggestion time to complete before
-        // tearing the overlay down.
         Future.delayed(const Duration(milliseconds: 150), () {
           if (mounted && !_focusNode.hasFocus) _hideOverlay();
         });
@@ -336,7 +358,6 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
   @override
   void dispose() {
     _debounce?.cancel();
-    // Remove the overlay BEFORE disposing the things it references.
     _hideOverlay();
     _controller.dispose();
     _focusNode.dispose();
@@ -353,9 +374,6 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
     if (_overlay != null) return;
     final overlay = Overlay.of(context, rootOverlay: true);
     _overlay = OverlayEntry(builder: (context) {
-      // Panel nested INSIDE the catcher: taps on items are claimed by the
-      // item's own recognizer (deepest wins the arena), taps anywhere else
-      // bubble up to the catcher and close. No sibling arena fight.
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _hideOverlay,
@@ -367,8 +385,6 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
               followerAnchor: Alignment.topLeft,
               showWhenUnlinked: false,
               offset: const Offset(0, 8),
-              // TextFieldTapRegion: taps inside the panel count as "inside"
-              // the text field, so the field does NOT unfocus on mouse-down.
               child: TextFieldTapRegion(
                 child: Material(
                   elevation: 8,
@@ -413,8 +429,6 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
     });
   }
 
-  /// Runs the picked action FIRST, then tears the overlay down after the
-  /// frame — teardown inside the tap callback was killing follow-through.
   void _runPicked(void Function() action) {
     action();
     WidgetsBinding.instance.addPostFrameCallback((_) {
