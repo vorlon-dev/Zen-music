@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: write # required to create the Release
+  contents: write
 
 jobs:
   release-windows:
@@ -21,9 +21,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Show Flutter version
-        run: flutter --version
-
       - name: Pub get
         run: flutter pub get
 
@@ -33,17 +30,26 @@ jobs:
       - name: Extract version from tag
         id: ver
         shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        run: |
+          # Remove 'v' prefix and replace '+' with '_' for safe filenames
+          RAW_VERSION=${GITHUB_REF_NAME#v}
+          SAFE_VERSION=${RAW_VERSION//+/-}
+          echo "VERSION=$SAFE_VERSION" >> $GITHUB_OUTPUT
 
       - name: Install Inno Setup
         run: choco install innosetup -y
 
       - name: Build Installer
         shell: pwsh
-        # Pass the version from the tag to the Inno Setup script
         run: |
           $env:PATH = "${env:PATH};C:\Program Files (x86)\Inno Setup 6"
           iscc /DMyAppVersion="${{ steps.ver.outputs.VERSION }}" windows\installer.iss
+          Write-Host "=== Checking Output Directory ==="
+          if (Test-Path "windows\Output") {
+            Get-ChildItem -Path "windows\Output"
+          } else {
+            Write-Host "Error: windows\Output directory not found!"
+          }
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -60,7 +66,8 @@ jobs:
             - Requires Windows 10 or newer (x64).
 
             See the repository for source and license (GPL-3.0).
+          # Use wildcard to catch the .exe regardless of exact version string formatting
           files: |
-            windows/Output/ZenMusic-Setup-${{ steps.ver.outputs.VERSION }}.exe
+            windows/Output/*.exe
           draft: false
           prerelease: false
