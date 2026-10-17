@@ -10,24 +10,61 @@
 
 <br/>
 
-[**Website**](https://vorlon-dev.github.io/Zen-music/) · [**Download**](#download-now) · [**Features**](#features) · [**Build**](#building-from-source) · [**Contribute**](#contributing) · [**Legal**](#legal)
+[**Website**](https://vorlon-dev.github.io/Zen-music/) · [**Download**](#download-now) · [**Features**](#features) · [**Build**](#building-from-source) · [**Troubleshooting**](#troubleshooting) · [**Contribute**](#contributing) · [**Legal**](#legal)
 
 </div>
 
 > [!IMPORTANT]
 > ZenMusic is still in development. Features may change and you may run into bugs. Updates are delivered through GitHub Releases.
 >
-> The **Windows desktop version is available as a preview**: core playback, search, browsing, lyrics and the queue are working, while some screens (Saved, Settings, Equalizer) are still under active development.
+> The **Windows desktop version is available as an installer**: core playback, search, browsing, lyrics, the queue, and Spotify integration are working.
 
 > [!TIP]
 > **Future Updates** - Coming in the next update:
-> - Youtube And Ytm Login
-> - Spotify login and Playlist import
-> - Liquid Glass And More Themes
+> - **YouTube Music Login** support
+> - **Lossless Quality** streaming (FLAC / Hi-Res)
+> - Spotify Playlist import
+> - Liquid Glass and more themes
 > - And many more things, very soon. Stay tuned!
 
 > [!NOTE]
 > **Regional availability** - If YouTube Music or JioSaavn is unavailable in your region, that source may not work without a **VPN or proxy** connecting to a supported region.
+
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+## Table of Contents
+
+- [About](#about)
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [Supported Platforms](#supported-platforms)
+- [Download Now](#download-now)
+- [Installation Guide](#installation-guide)
+- [Building from Source](#building-from-source)
+- [Project Structure](#project-structure)
+- [Configuration & Data](#configuration--data)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Special Thanks](#special-thanks)
+- [Contributors](#contributors)
+- [Legal](#legal)
+
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+## About
+
+**ZenMusic** is a Flutter-based music player that brings several streaming sources into one clean, fast interface. It pulls from **JioSaavn**, **YouTube Music** and **Spotify**, and wraps them in a polished player with synced lyrics, offline downloads, multiple player skins, and a Listen Together mode for syncing playback with friends.
+
+It runs on **Android** (phone and tablet) and **Windows** (a full desktop experience with its own Spotify engine and a responsive layout).
+
+**Design goals**
+
+- **One app, many sources:** search and play across providers without switching apps.
+- **Great playback UX:** gapless-feeling queue, sleep timer, equalizer, and lyrics that follow the song.
+- **Make it yours:** player skins, slider styles, thumbnail radius, lyric layout and more.
+- **Open and hackable:** GPL-3.0, with an extension system for adding sources.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -37,14 +74,14 @@
 
 <img src="screenshots/home.png" alt="Home screen" width="30%" />
 <img src="screenshots/player.png" alt="Player screen" width="30%" />
-<img src="screenshots/lyrics.png" alt="Lyrics screen" width="30%" />
-<img src="screenshots/listen_together.png" alt="Listen together screen" width="30%" />
 <img src="screenshots/search.png" alt="Search screen" width="30%" />
 <img src="screenshots/library.png" alt="Library screen" width="30%" />
-<img src="screenshots/ytvideo.png" alt="YouTube video screen" width="30%" />
-<img src="screenshots/videoscreen.png" alt="Video player screen" width="30%" />
 <br/>
-<img src="screenshots/fullscreen.png" alt="Fullscreen player screen" width="91%" />
+<img src="screenshots/Desktop-1.png" alt="Desktop Player Skin 1" width="45%" />
+<img src="screenshots/Desktop-2.png" alt="Desktop Player Skin 2" width="45%" />
+<br/>
+<img src="screenshots/Desktop-3.png" alt="Desktop Player Skin 3" width="45%" />
+<img src="screenshots/Desktop-4.png" alt="Desktop Player Skin 4" width="45%" />
 
 </div>
 
@@ -54,12 +91,14 @@
 
 <a id="features"></a><img src="assets/banners/features.svg" alt="Features" width="720" />
 
+</div>
+
 <table>
   <tr>
     <td width="50%" valign="top">
 
 #### Playback
-- Multi-source streaming: JioSaavn (320 kbps AAC) and YouTube Music
+- Multi-source streaming: JioSaavn (320 kbps AAC), YouTube Music, and Spotify
 - Source extensions
 - Offline downloads
 - Sleep timer with end-of-song option
@@ -70,6 +109,7 @@
 #### Audio
 - System equalizer
 - Bass and treble controls
+- Widevine DRM (Spotify)
 
 </td>
   </tr>
@@ -85,7 +125,7 @@
     <td width="50%" valign="top">
 
 #### Library
-- Import playlists from Spotify (CSV export)
+- Import playlists from Spotify
 - Download and manage songs offline
 
 </td>
@@ -101,11 +141,11 @@
     <td width="50%" valign="top">
 
 #### Interface
+- 6 custom player skins (Modern, Retro, CD, Cassette, Liquid Glass, Jungle)
 - Ambient mode: landscape player with animated glow from album art
-- Player background styles
 - Three progress slider styles
 - Thumbnail radius, haptics and more
-- OTA update checks via GitHub Releases: download once, install whenever you're ready
+- OTA update checks via GitHub Releases
 
 </td>
   </tr>
@@ -114,13 +154,58 @@
 
 #### Platforms
 - **Android**: full experience (phone and tablet)
-- **Windows**: desktop preview with YouTube Music browsing, search, synced lyrics, queue, downloads and library, in a responsive desktop layout
+- **Windows**: full desktop experience with a custom Spotify engine, responsive UI, and an installer
 
 </td>
   </tr>
 </table>
 
-</div>
+### Feature details
+
+#### Sources
+
+| Source | Quality | Notes |
+| --- | --- | --- |
+| JioSaavn | Up to 320 kbps AAC | May require a VPN/proxy outside supported regions |
+| YouTube Music | Stream-dependent | Stream extraction via Innertube; login support planned |
+| Spotify | Web Player protocol | Uses Widevine DRM; custom engine on Windows |
+
+Extra sources can be added through the **extension** system.
+
+#### Lyrics
+
+- Time-synced lyrics are fetched from [LRCLIB](https://lrclib.net/).
+- Customize font size, line spacing and alignment to taste.
+- Lyrics scroll in sync with playback and can be shown alongside the player.
+
+#### Listen Together
+
+1. One person creates a room and becomes the **host**.
+2. They share the room code.
+3. Everyone who joins hears the same track in sync.
+4. The host controls play, pause, seek and track changes for the whole room.
+
+#### Offline downloads
+
+Download songs for offline playback and manage them from your library. Downloaded tracks play without a network connection.
+
+#### Song recognition
+
+Tap the recognition button to identify music playing around you. It uses a fingerprinting flow based on the Shazam discovery API.
+
+#### Player skins & appearance
+
+Choose between six skins: **Modern, Retro, CD, Cassette, Liquid Glass and Jungle**. Combine them with three progress-slider styles, adjustable thumbnail radius and optional haptics. **Ambient mode** switches to a landscape player with an animated glow derived from the album art.
+
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+## Supported Platforms
+
+| Platform | Status | Notes |
+| --- | --- | --- |
+| Android (phone & tablet) | Full experience | APKs via GitHub Releases and Obtainium |
+| Windows 10/11 (x64) | Full desktop experience | Installer (`.exe`), custom Spotify engine, responsive UI |
+| iOS / macOS / Linux | Not supported | Not currently a build target |
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -132,8 +217,8 @@
 
 <table>
   <tr>
-    <th align="center">Obtainium</th>
-    <th align="center">GitHub</th>
+    <th align="center">Obtainium (Android)</th>
+    <th align="center">GitHub (Android)</th>
   </tr>
   <tr>
     <td align="center">
@@ -147,24 +232,23 @@
       </a>
     </td>
   </tr>
-  <!-- Uncomment each store once the listing is live, and replace YOUR.PACKAGE.NAME / YOUR-OPENAPK-SLUG.
+</table>
+
+<h2>Windows (Desktop)</h2>
+
+<table>
   <tr>
-    <th align="center">IzzyOnDroid</th>
-    <th align="center">OpenAPK</th>
+    <th align="center">Download Installer</th>
   </tr>
   <tr>
     <td align="center">
-      <a href="https://apt.izzysoft.de/fdroid/index/apk/YOUR.PACKAGE.NAME">
-        <img src="assets/badges/izzyondroid.svg" alt="Get ZenMusic on IzzyOnDroid" height="100">
+      <a href="https://github.com/vorlon-dev/Zen-music/releases/latest">
+        <img src="assets/icon/Windows-button.png" alt="Download for Windows" height="80">
       </a>
-    </td>
-    <td align="center">
-      <a href="https://www.openapk.net/YOUR-OPENAPK-SLUG/YOUR.PACKAGE.NAME/">
-        <img src="assets/badges/openapk.svg" alt="Get ZenMusic on OpenAPK" height="100">
-      </a>
+      <br/>
+      <p>Download the <code>.exe</code> installer from the latest Release.</p>
     </td>
   </tr>
-  -->
 </table>
 
 <h2>Nightly Build</h2>
@@ -182,11 +266,30 @@
   </tr>
 </table>
 
-<h2>Windows (Desktop Preview)</h2>
-
-Windows builds are produced automatically on every push. Grab the latest build from the [Actions tab](https://github.com/vorlon-dev/Zen-music/actions): open the most recent green **Desktop Build** run, download the `ZenMusic-Desktop` artifact, unzip it and run `zenmusic.exe`. It is portable, so no installer is needed. Windows builds will ship with official Releases soon.
-
 </div>
+
+> [!WARNING]
+> Nightly builds are automatically generated and may be unstable. Use the stable release unless you want the newest changes and can tolerate bugs.
+
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+## Installation Guide
+
+### Android
+
+1. Open the [latest release](https://github.com/vorlon-dev/Zen-music/releases/latest) on your phone.
+2. Download the APK that matches your device. If unsure, use the universal APK; otherwise pick your ABI (usually `arm64-v8a`).
+3. Open the file and allow **Install unknown apps** for your browser or file manager when prompted.
+4. Launch ZenMusic.
+
+**Tip:** Add the repository to [Obtainium](https://github.com/ImranR98/Obtainium) using the badge above to get automatic update notifications.
+
+### Windows
+
+1. Download the `.exe` installer from the [latest release](https://github.com/vorlon-dev/Zen-music/releases/latest).
+2. Run the installer and follow the prompts.
+3. If Windows SmartScreen warns about an unrecognized app, choose **More info → Run anyway**.
+4. Launch ZenMusic from the Start menu.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -194,18 +297,26 @@ Windows builds are produced automatically on every push. Grab the latest build f
 
 <a id="building-from-source"></a><img src="assets/banners/building-from-source.svg" alt="Building from Source" width="720" />
 
+<img src="assets/build-terminal.svg" alt="Build ZenMusic from source" width="720" />
+
 </div>
 
 ZenMusic targets **Android and Windows**.
 
-<div align="center">
-<img src="assets/build-terminal.svg" alt="Build ZenMusic from source" width="720" />
-</div>
+### Prerequisites
 
-<details>
-<summary>Copy the commands</summary>
+| Requirement | Android | Windows |
+| --- | :---: | :---: |
+| [Flutter SDK](https://docs.flutter.dev/get-started/install) (stable channel) | ✅ | ✅ |
+| Git | ✅ | ✅ |
+| Android Studio / Android SDK | ✅ | |
+| Visual Studio 2022 with **Desktop development with C++** | | ✅ |
+| Windows **Developer Mode** (required for plugin symlinks) | | ✅ |
+| [Inno Setup](https://jrsoftware.org/isinfo.php) (only to build the installer) | | ✅ |
 
-#### Android
+Run `flutter doctor -v` and make sure there are no errors for your target platform before building.
+
+### Android
 
 ```bash
 git clone https://github.com/vorlon-dev/Zen-music.git
@@ -221,17 +332,39 @@ flutter build apk --release --split-per-abi   # per-ABI splits
 flutter build apk --release                   # universal APK
 ```
 
-#### Windows (desktop)
+### Windows (desktop)
 
-Requires the Visual Studio C++ toolchain (**Desktop development with C++** workload). The desktop app uses its own entrypoint, so always pass `-t lib/desktop/main.dart`:
+The desktop app uses its **own entrypoint**, so always pass `-t lib/desktop/main.dart`.
 
-```bash
-git clone https://github.com/vorlon-dev/Zen-music.git
-cd Zen-music
-flutter pub get
-flutter run -d windows -t lib/desktop/main.dart            # dev run
-flutter build windows --release -t lib/desktop/main.dart   # release exe
+1. Enable **Developer Mode** (Flutter needs it to create plugin symlinks):
+
+   ```powershell
+   start ms-settings:developers
+   ```
+
+2. Clone and run:
+
+   ```bash
+   git clone https://github.com/vorlon-dev/Zen-music.git
+   cd Zen-music
+   flutter pub get
+   flutter run -d windows -t lib/desktop/main.dart            # dev run
+   flutter build windows --release -t lib/desktop/main.dart   # release exe
+   ```
+
+The release output is written to `build\windows\x64\runner\Release\`.
+
+#### Building the Windows installer
+
+Install [Inno Setup](https://jrsoftware.org/isinfo.php), build the release exe as above, then compile the installer script:
+
+```powershell
+iscc windows\installer.iss
 ```
+
+(Or open `windows/installer.iss` in the Inno Setup IDE and press **Compile**.)
+
+#### Blank player screen on older GPUs
 
 On some GPUs (older iGPUs without Vulkan), Flutter's Impeller GL backend can render custom-painted screens blank. If the player screen appears white, run development builds with:
 
@@ -239,9 +372,150 @@ On some GPUs (older iGPUs without Vulkan), Flutter's Impeller GL backend can ren
 flutter run -d windows --no-enable-impeller -t lib/desktop/main.dart
 ```
 
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+## Project Structure
+
+A high-level overview of the parts you are most likely to touch:
+
+```text
+Zen-music/
+├── lib/
+│   ├── main.dart            # Android / mobile entrypoint
+│   └── desktop/
+│       └── main.dart        # Windows desktop entrypoint (use with -t)
+├── android/                 # Android host project
+├── windows/                 # Windows host project
+│   └── installer.iss        # Inno Setup installer script
+├── assets/                  # Banners, badges, icons used by the app and README
+├── screenshots/             # Images used in this README
+└── pubspec.yaml             # Dependencies and asset declarations
+```
+
+> The tree above is a simplified overview. See the repository for the full layout.
+
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+## Configuration & Data
+
+- **Updates:** the app checks GitHub Releases for new versions (OTA update checks).
+- **Downloads:** offline songs are stored locally on the device and can be managed from the Library.
+- **Lyrics:** fetched on demand from LRCLIB.
+- **Accounts:** Spotify uses the Web Player protocol with Widevine DRM; YouTube Music login is planned for an upcoming update.
+- **Regional access:** some sources are region-locked. Use a VPN or proxy if a source is unavailable where you live.
+
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+## Troubleshooting
+
+<details>
+<summary><b>Windows build fails: <code>Cannot open include file 'flutter_inappwebview_windows_fx_plugin.h'</code></b></summary>
+
+This means the compiler cannot find the plugin's own header. It is usually a broken plugin symlink or a stale build cache.
+
+1. Enable **Developer Mode** (`start ms-settings:developers`) and reopen your terminal.
+2. Do a full clean and regenerate the plugin links:
+
+   ```powershell
+   flutter clean
+   Remove-Item -Recurse -Force windows\flutter\ephemeral -ErrorAction SilentlyContinue
+   Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+   flutter pub get
+   flutter run -d windows --no-enable-impeller -t lib/desktop/main.dart
+   ```
+
+3. Verify the header exists in the package:
+
+   ```powershell
+   dir windows\flutter\ephemeral\.plugin_symlinks\flutter_inappwebview_windows_fx\windows\include -Recurse
+   ```
+
+4. If the project and the Pub cache (`%LOCALAPPDATA%\Pub\Cache`) are on different drives, symlinks can break. Move the project to the same drive, or point `PUB_CACHE` to a folder on the project's drive.
+5. If the header is genuinely missing from the package, pin a different version of the plugin in `pubspec.yaml` and run `flutter pub get` again.
+
 </details>
 
-If no keystore is configured, release builds fall back to debug signing so the build still works. Use your own release keystore for any APK you distribute, because Android only installs updates signed with the same key.
+<details>
+<summary><b>Player screen is blank or white on Windows</b></summary>
+
+Run with Impeller disabled:
+
+```bash
+flutter run -d windows --no-enable-impeller -t lib/desktop/main.dart
+```
+
+</details>
+
+<details>
+<summary><b>The app builds but shows the wrong (mobile) UI on Windows</b></summary>
+
+You forgot the desktop entrypoint. Always pass `-t lib/desktop/main.dart` for Windows runs and builds.
+
+</details>
+
+<details>
+<summary><b>A source (YouTube Music / JioSaavn) returns no results</b></summary>
+
+The source may be unavailable in your region. Connect through a VPN or proxy in a supported region and try again.
+
+</details>
+
+<details>
+<summary><b>Spotify tracks will not play</b></summary>
+
+Spotify playback relies on Widevine DRM. Make sure you are on a supported build (Android or the Windows installer) and that your network is not blocking DRM license requests.
+
+</details>
+
+<details>
+<summary><b>Android install is blocked</b></summary>
+
+Allow **Install unknown apps** for the app you used to download the APK (browser or file manager) in Android settings.
+
+</details>
+
+<details>
+<summary><b><code>flutter doctor</code> reports Visual Studio problems</b></summary>
+
+Open the Visual Studio Installer and make sure the **Desktop development with C++** workload is installed, including the Windows 10/11 SDK and CMake tools.
+
+</details>
+
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+## FAQ
+
+**Is ZenMusic free?**
+Yes. It is open source under GPL-3.0.
+
+**Does it work on iOS, macOS or Linux?**
+Not at the moment. Android and Windows are the supported targets.
+
+**Does ZenMusic host music?**
+No. It acts as a client for publicly available APIs. All content is served by the respective platforms.
+
+**Do I need a Spotify account?**
+Spotify features require signing in with your own account. Other sources work without one.
+
+**How do I get updates?**
+The app checks GitHub Releases for updates. Android users can also use Obtainium.
+
+**Can I add my own sources?**
+Yes. ZenMusic supports source extensions.
+
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+## Roadmap
+
+- [ ] YouTube Music login
+- [ ] Lossless streaming (FLAC / Hi-Res)
+- [ ] Spotify playlist import
+- [ ] Liquid Glass and additional themes
+- [x] Windows desktop app with installer
+- [x] Listen Together
+- [x] Time-synced lyrics
+- [x] Offline downloads
+- [x] Song recognition
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -253,15 +527,25 @@ If no keystore is configured, release builds fall back to debug signing so the b
 
 </div>
 
-1. Fork the repository.
-2. Create a branch for your change:
+### How to contribute
+
+1. **Fork** the repository.
+2. **Create a branch** for your change:
+
    ```bash
    git checkout -b feature/my-feature
    ```
-3. Make your changes and commit with a clear message.
-4. Push to your fork and open a Pull Request describing what changed and why.
 
-Please keep pull requests focused on a single change, and test on a real device before submitting.
+3. Make your changes and **commit** with a clear message.
+4. **Push** to your fork and open a **Pull Request** describing what changed and why.
+
+### Guidelines
+
+- Keep pull requests focused on a single change.
+- Test on a real device before submitting (and on Windows if you touched desktop code).
+- Run `flutter analyze` and fix warnings in the files you changed.
+- Match the existing code style and naming.
+- When reporting a bug, include your platform, app version, steps to reproduce, and logs or screenshots if possible.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -290,6 +574,10 @@ Please keep pull requests focused on a single change, and test on a real device 
       <td>UI design language, Listen Together client, recognition engine, Apple Music canvas and welcome dialog; basis of the Windows desktop shell</td>
     </tr>
     <tr>
+      <td align="center"><strong>Stopify</strong></td>
+      <td>Spotify Web Player protocol reverse-engineering and Widevine integration</td>
+    </tr>
+    <tr>
       <td align="center"><strong>Metrolist / metroserver</strong></td>
       <td>Listen Together server protocol and deployment</td>
     </tr>
@@ -311,7 +599,7 @@ Please keep pull requests focused on a single change, and test on a real device 
   </thead>
   <tbody>
     <tr>
-      <td align="center"><code>youtube_explode_dart</code> / <code>yt_extractor</code></td>
+      <td align="center"><code>youtube_explode_dart</code> / Innertube</td>
       <td>YouTube stream extraction</td>
     </tr>
     <tr>
@@ -337,7 +625,7 @@ Please keep pull requests focused on a single change, and test on a real device 
   </tbody>
 </table>
 
-<h3>We also thank the entire open-source community! For every library, tool, and API that powers this project.</h3>
+<h3>We also thank the entire open-source community, for every library, tool, and API that powers this project.</h3>
 
 </div>
 
@@ -345,7 +633,7 @@ Please keep pull requests focused on a single change, and test on a real device 
 
 <div align="center">
 
-<img src="assets/banners/contributors.svg" alt="Contributors" width="720" />
+<a id="contributors"></a><img src="assets/banners/contributors.svg" alt="Contributors" width="720" />
 
 <h3>This project wouldn't exist without these amazing people!</h3>
 
@@ -361,24 +649,27 @@ Please keep pull requests focused on a single change, and test on a real device 
 
 <a id="legal"></a><img src="assets/banners/legal.svg" alt="Legal" width="720" />
 
-ZenMusic is a fully open-source project created for educational purposes and personal use. It is not monetized in any way: there are no advertisements, premium features or subscriptions.
-
-The app acts strictly as a client to publicly available content and APIs of the platforms it supports. We do not host, upload, distribute or store any audio, video or copyrighted media files. All content is served by the respective platforms and remains the property of its copyright owners.
-
-This project is **not affiliated with, authorized, or endorsed by** YouTube, Google LLC, JioSaavn, or any of their affiliates. All trademarks and intellectual property rights belong to their respective owners.
-
-This software is provided "AS IS", without warranty of any kind. Users are solely responsible for ensuring their usage complies with their local copyright laws and the Terms of Service of the platforms they access.
-
-Licensed under [GPL-3.0](LICENSE)
-
 </div>
+
+### ⚠️ Disclaimer & Legal Notice
+
+ZenMusic is created strictly for **educational and research purposes only**.
+
+- **No Affiliation:** This application is not affiliated with, authorized, endorsed by, or in any way officially connected with YouTube, Google LLC, JioSaavn, Spotify, or any of their subsidiaries or affiliates. All product names, logos, and brands are property of their respective owners.
+- **No Hosting or Storage:** We do not host, upload, distribute, or store any audio, video, or copyrighted media files on our servers. The app acts strictly as a client that accesses publicly available APIs. All content is served directly by the respective platforms.
+- **User Responsibility:** By using this software, you agree that you are solely responsible for your actions. The developers of ZenMusic are not responsible for any misuse, copyright infringement, or Terms of Service violations committed by the end user.
+- **"AS IS" Warranty:** This software is provided "AS IS", without warranty of any kind, express or implied. The developers hold no liability for any legal issues, damages, or data loss that may arise from using this software.
+
+If you do not agree with these terms, please do not download or use the application.
+
+### License
+
+Licensed under **GPL-3.0**. See the [LICENSE](LICENSE) file for details.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
 <div align="center">
 
-<br/>
-
-**Made with ❤️ by [vorlon-dev](https://github.com/vorlon-dev)**
+Made with ❤️ by vorlon-dev
 
 </div>
