@@ -2,32 +2,16 @@
 // Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
 // remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
 //
-// PORT DEVIATIONS: sliding_up_panel vestigials dropped; WillPopScope removed;
-// dispose() typed void.
-//
-// REDESIGN v3 (desktop + mobile, one adaptive layout):
-//  * Fluent System Icons everywhere (single table: _Ic) with hover / press
-//    feedback on every control, tooltips on desktop.
-//  * Layouts: WIDE (>= 900 px): player column + glass lyrics panel.
-//    NARROW (< 900 px): one column, lyrics swap with the artwork. Heights are
-//    measured, so short windows shrink the artwork first and only then
-//    scroll.
-//  * Tinder-style SwipeArtworkStack kept (left = next, right = previous,
-//    skip buttons trigger the same animation, palette from the front card).
-//  * AUDIO QUALITY: chip under the title (tier + bitrate/codec) that opens a
-//    details sheet. Reads whatever the song's MediaItem.extras carries
-//    (itag, bitrate, codec, mimeType, sampleRate, bitDepth, quality...) or an
-//    explicit extras['zenQuality'] map; shows "Auto" when a source reports
-//    nothing — it never invents numbers.
-//  * Desktop keyboard: Space play/pause, Left/Right seek 5 s, Ctrl+Left/Right
-//    previous/next, L lyrics, Q queue, Esc close.
-//  * ZenSlider (7 styles) seek bar, tabular time labels, legibility scrim,
-//    breathing artwork, working shuffle, active-state dots, null-safety.
-//  * SP-5b: transport routes through MediaPlayer.togglePlayPause / seekTo /
-//    skipNext / skipPrevious (single code path for every engine).
-//  * SP-8: alternative skins (from player_skins.dart) are honored. When a
-//    non-classic skin is selected, this page returns PlayerSkinView. The
-//    classic layout remains exactly as before.
+// REDESIGN v4 (classic layout only; skins, canvas, quality, shortcuts intact):
+//  * Palette-tinted ambient glow behind the artwork + soft radial wash.
+//  * Artwork "breathes": full size while playing, gently shrinks on pause.
+//  * Coloured shadow under the artwork, matching the cover.
+//  * Seek bar + transport live in one frosted glass dock.
+//  * Play button glows with the cover colour.
+//  * Quality chip + lyrics pill row, wide layout keeps the glass lyrics panel.
+//  * Desktop keyboard: Space, Left/Right seek 5 s, Ctrl+Left/Right prev/next,
+//    L lyrics, Q queue, Esc close.
+//  * SP-5b transport via MediaPlayer, SP-8 skins, SP-9 Spotify Canvas kept.
 
 import 'dart:io';
 import 'dart:math';
@@ -51,10 +35,11 @@ import 'package:zenmusic/desktop/screens/player/widgets/animated_gradient_bg.dar
 import 'package:zenmusic/desktop/screens/player/widgets/lyrics_box.dart';
 import 'package:zenmusic/desktop/screens/player/widgets/queue_list.dart';
 import 'package:zenmusic/desktop/screens/player/widgets/swipe_artwork_stack.dart';
-import 'package:zenmusic/desktop/screens/player/player_skins.dart'; // SP-8
+import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/innertubex_bridge.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/spotify/spotify_canvas.dart'; // SP-9
 import 'package:zenmusic/desktop/themes/colors.dart';
 import 'package:zenmusic/desktop/themes/dark.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
@@ -63,14 +48,13 @@ import 'package:zenmusic/desktop/utils/zen_slider.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
 // ════════════════════════════════════════════════════════════════════
-// ICON TABLE — every Fluent icon the page uses lives here. If a name is
-// missing in your fluentui_system_icons version, change it in ONE place.
+// ICON TABLE — every Fluent icon the page uses lives here.
 // ════════════════════════════════════════════════════════════════════
 class _Ic {
   _Ic._();
   static const chevronDown = FluentIcons.chevron_down_24_regular;
   static const queue = FluentIcons.text_bullet_list_ltr_24_regular;
-  static const lyrics = FluentIcons.text_quote_24_regular; // alt: mic_24_regular
+  static const lyrics = FluentIcons.text_quote_24_regular;
   static const heart = FluentIcons.heart_24_regular;
   static const heartFill = FluentIcons.heart_24_filled;
   static const more = FluentIcons.more_horizontal_24_regular;
@@ -87,6 +71,7 @@ class _Ic {
 }
 
 const Color _kHeartRed = Color(0xFFFF4D6D);
+const Color _kFallbackTint = Color(0xFF5B3FD1);
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, this.videoId});
@@ -145,23 +130,38 @@ class _PlayerPageState extends State<PlayerPage> {
           _lyricsLoading = true;
           _hasLyrics = false;
           _showLyrics = false;
-          // Stale video of the previous song must not linger.
-          _videoBackdropUrl = null;
+          _videoBackdropUrl = null; // stale video must not linger
         });
       }
       _maybeLoadVideoBackdrop();
     }
   }
 
-  /// Android + native bridge + canvas pref + YTM-shaped id. Silent no-op
-  /// otherwise — the gradient stays the backdrop.
+  /// Android (YT video) + Windows/Desktop (Spotify Canvas) backdrop.
   Future<void> _maybeLoadVideoBackdrop() async {
-    if (!Platform.isAndroid) return;
     if (!AppearancePrefs.canvasEnabled.value) return;
     final id = currentSong?.id ?? '';
-    if (id.length != 11) return; // YTM ids only — JioSaavn/local skip
+    final spUri = currentSong?.extras?['spotifyUri'] as String?;
+
+    // 1. Spotify Canvas
+    if (spUri != null && spUri.isNotEmpty) {
+      final url = await SpotifyCanvas.instance.fetchCanvasUrl(spUri);
+      if (!mounted || currentSong?.id != id) return;
+      if (url != null) {
+        setState(() {
+          _videoBackdropUrl = url;
+          _videoHeaders = const {};
+        });
+      }
+      return;
+    }
+
+    // 2. YouTube Music video backdrop (Android only)
+    if (!Platform.isAndroid) return;
+    if (id.length != 11) return;
+
     final streams = await InnertubexBridge.extractVideo(id, maxHeight: 720);
-    if (!mounted || currentSong?.id != id) return; // song changed mid-flight
+    if (!mounted || currentSong?.id != id) return;
     if (streams?.videoUrl != null) {
       setState(() {
         _videoBackdropUrl = streams!.videoUrl;
@@ -204,7 +204,7 @@ class _PlayerPageState extends State<PlayerPage> {
       extracted = palette.colors.take(4).toList();
     }
     setState(() {
-      color = palette.dominantColor?.color;
+      color = palette.vibrantColor?.color ?? palette.dominantColor?.color;
       paletteColors = extracted;
     });
   }
@@ -227,6 +227,8 @@ class _PlayerPageState extends State<PlayerPage> {
 
   static MediaPlayer mediaPlayerOf(BuildContext context) =>
       context.read<MediaPlayer>();
+
+  Color get _tint => color ?? _kFallbackTint;
 
   // ---------------------------------------------------------- small actions
 
@@ -318,7 +320,9 @@ class _PlayerPageState extends State<PlayerPage> {
             if (skin != PlayerSkin.classic) {
               final mediaPlayer = GetIt.I<MediaPlayer>();
               final currentIndex = mediaPlayer.currentIndex.value ?? 0;
-              final total = mediaPlayer.songList.length > 0 ? mediaPlayer.songList.length : 1;
+              final total = mediaPlayer.songList.length > 0
+                  ? mediaPlayer.songList.length
+                  : 1;
 
               final ctx = PlayerCtx(
                 song: song,
@@ -393,6 +397,25 @@ class _PlayerPageState extends State<PlayerPage> {
                       ),
                     ),
 
+                  // Cover-colour ambient wash (top-centre glow)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 700),
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
+                            center: const Alignment(0, -0.45),
+                            radius: 1.05,
+                            colors: [
+                              _tint.withValues(alpha: 0.38),
+                              _tint.withValues(alpha: 0.0),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
                   // Legibility scrim: lighter at top, heavier behind controls
                   Positioned.fill(
                     child: IgnorePointer(
@@ -402,9 +425,9 @@ class _PlayerPageState extends State<PlayerPage> {
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: [
-                              Colors.black.withValues(alpha: 0.10),
-                              Colors.black.withValues(alpha: 0.28),
-                              Colors.black.withValues(alpha: 0.66),
+                              Colors.black.withValues(alpha: 0.12),
+                              Colors.black.withValues(alpha: 0.30),
+                              Colors.black.withValues(alpha: 0.72),
                             ],
                             stops: const [0, 0.45, 1],
                           ),
@@ -456,9 +479,9 @@ class _PlayerPageState extends State<PlayerPage> {
                   'NOW PLAYING',
                   style: TextStyle(
                     fontSize: 11,
-                    letterSpacing: 1.8,
+                    letterSpacing: 2.2,
                     fontWeight: FontWeight.w700,
-                    color: Colors.white.withValues(alpha: 0.62),
+                    color: Colors.white.withValues(alpha: 0.6),
                   ),
                 ),
                 if (subtitle != null && subtitle.isNotEmpty)
@@ -523,9 +546,9 @@ class _PlayerPageState extends State<PlayerPage> {
       );
     }
 
-    final hPad = box.maxWidth >= 600 ? 40.0 : 24.0;
+    final hPad = box.maxWidth >= 600 ? 40.0 : 22.0;
     return Padding(
-      padding: EdgeInsets.fromLTRB(hPad, 4, hPad, 20),
+      padding: EdgeInsets.fromLTRB(hPad, 4, hPad, 16),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
@@ -538,13 +561,13 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  /// Artwork (or lyrics) + info + quality + seek + transport. The artwork
-  /// takes whatever height is left; if even the minimum does not fit, the
-  /// column scrolls instead of overflowing.
+  /// Artwork (or lyrics) + info + quality + glass dock (seek + transport).
+  /// Artwork takes the height that is left; if even the minimum does not
+  /// fit, the column scrolls instead of overflowing.
   Widget _buildPlayerColumn(MediaItem song, BoxConstraints box,
       {required bool swap}) {
-    const controlsH = 322.0; // info + quality + seek + transport + gaps
-    const gap = 16.0;
+    const controlsH = 352.0; // info + quality + dock + gaps
+    const gap = 18.0;
     final room = box.maxHeight - controlsH - gap;
     final side = room.clamp(150.0, min(box.maxWidth, 520.0)).toDouble();
     final needsScroll = side + gap + controlsH > box.maxHeight + 0.5;
@@ -559,8 +582,23 @@ class _PlayerPageState extends State<PlayerPage> {
           Offstage(
             offstage: lyricsVisible,
             child: Center(
-              child: SizedBox(
-                  width: side, height: side, child: _buildArtwork(song)),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 600),
+                width: side,
+                height: side,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _tint.withValues(alpha: 0.50),
+                      blurRadius: 64,
+                      spreadRadius: -8,
+                      offset: const Offset(0, 26),
+                    ),
+                  ],
+                ),
+                child: _buildArtwork(song, breathing: true),
+              ),
             ),
           ),
           // Narrow layout: one stable lyrics slot, never re-parented.
@@ -583,12 +621,10 @@ class _PlayerPageState extends State<PlayerPage> {
         media,
         const SizedBox(height: gap),
         _buildInfoRow(song),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         _buildQualityRow(song, swap: swap),
-        const SizedBox(height: 14),
-        _buildSeekBar(),
-        const SizedBox(height: 10),
-        _buildTransport(),
+        const SizedBox(height: 12),
+        _buildDock(),
       ],
     );
 
@@ -601,13 +637,30 @@ class _PlayerPageState extends State<PlayerPage> {
     return Align(alignment: Alignment.center, child: content);
   }
 
+  /// Frosted dock holding the seek bar and the transport row.
+  Widget _buildDock() {
+    return _Glass(
+      radius: 30,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildSeekBar(),
+            const SizedBox(height: 6),
+            _buildTransport(),
+          ],
+        ),
+      ),
+    );
+  }
+
   // -------------------------------------------------------------- artwork
 
   /// Tinder-style swipeable artwork: swipe left = next song, right =
-  /// previous; neighbor cards pre-built underneath; queue-edge rubber-band;
-  /// skip buttons trigger the same animation via the key. Palette updates
-  /// from the front card only.
-  Widget _buildArtwork(MediaItem song) {
+  /// previous. [breathing] (classic layout only) shrinks the cover slightly
+  /// while paused and restores it on play. Skins call without it.
+  Widget _buildArtwork(MediaItem song, {bool breathing = false}) {
     final items = List<MediaItem>.from(GetIt.I<MediaPlayer>()
         .songList
         .map((src) => src.tag)
@@ -621,7 +674,7 @@ class _PlayerPageState extends State<PlayerPage> {
       builder: (context, state, _) {
         final active =
             state == ButtonState.playing || state == ButtonState.loading;
-        return SwipeArtworkStack(
+        final stack = SwipeArtworkStack(
           key: _swipeKey,
           current: song,
           next: next,
@@ -634,6 +687,13 @@ class _PlayerPageState extends State<PlayerPage> {
             borderRadius: 16,
             onImageReady: isFront ? updateBackgroundColor : null,
           ),
+        );
+        if (!breathing) return stack;
+        return AnimatedScale(
+          scale: active ? 1.0 : 0.93,
+          duration: const Duration(milliseconds: 520),
+          curve: Curves.easeOutCubic,
+          child: stack,
         );
       },
     );
@@ -661,7 +721,7 @@ class _PlayerPageState extends State<PlayerPage> {
   /// WIDE layout: frosted panel on the right.
   Widget _buildLyricsPanel(MediaItem song) {
     return _Glass(
-      radius: 28,
+      radius: 30,
       child: LayoutBuilder(
         builder: (context, c) {
           if (_hasLyrics) {
@@ -716,7 +776,7 @@ class _PlayerPageState extends State<PlayerPage> {
     final mediaPlayer = mediaPlayerOf(context);
     final videoId = song.extras?['videoId'];
     return SizedBox(
-      height: 62,
+      height: 66,
       child: Row(
         children: [
           Expanded(
@@ -727,10 +787,10 @@ class _PlayerPageState extends State<PlayerPage> {
                 TextScroll(
                   song.title,
                   style: const TextStyle(
-                    fontSize: 25,
+                    fontSize: 27,
                     fontWeight: FontWeight.w800,
                     color: Colors.white,
-                    letterSpacing: -0.4,
+                    letterSpacing: -0.6,
                   ),
                   mode: TextScrollMode.endless,
                 ),
@@ -740,7 +800,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 15.5,
                     fontWeight: FontWeight.w500,
                     color: Colors.white.withValues(alpha: 0.68),
                   ),
@@ -855,7 +915,6 @@ class _PlayerPageState extends State<PlayerPage> {
               style: ZenSliderStyle.fromName(AppearancePrefs.sliderStyle.value),
               value: totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0) : 0.0,
               isPlaying: playing,
-              // SP-5b: route through MediaPlayer so the engine handles seek.
               onChanged: (v) => mediaPlayer
                   .seekTo(Duration(milliseconds: (v * totalMs).round())),
               onChangeEnd: (v) => mediaPlayer
@@ -913,6 +972,7 @@ class _PlayerPageState extends State<PlayerPage> {
             valueListenable: mediaPlayer.buttonState,
             builder: (context, state, _) => _PlayButton(
               state: state,
+              glow: _tint,
               onPressed: () {
                 HapticFeedback.selectionClick();
                 mediaPlayer.togglePlayPause(); // SP-5b
@@ -1505,11 +1565,16 @@ class _ToggleBtn extends StatelessWidget {
   }
 }
 
-/// Big white play / pause button with loading ring.
+/// Big white play / pause button with loading ring and cover-colour glow.
 class _PlayButton extends StatefulWidget {
-  const _PlayButton({required this.state, required this.onPressed});
+  const _PlayButton({
+    required this.state,
+    required this.onPressed,
+    this.glow = _kFallbackTint,
+  });
   final ButtonState state;
   final VoidCallback onPressed;
+  final Color glow;
 
   @override
   State<_PlayButton> createState() => _PlayButtonState();
@@ -1540,13 +1605,19 @@ class _PlayButtonState extends State<_PlayButton> {
             scale: scale,
             duration: const Duration(milliseconds: 120),
             curve: Curves.easeOut,
-            child: Container(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 500),
               width: 74,
               height: 74,
               decoration: BoxDecoration(
                 color: Colors.white,
                 shape: BoxShape.circle,
                 boxShadow: [
+                  BoxShadow(
+                    color: widget.glow.withValues(alpha: playing ? 0.55 : 0.25),
+                    blurRadius: 30,
+                    spreadRadius: 1,
+                  ),
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.35),
                     blurRadius: 22,

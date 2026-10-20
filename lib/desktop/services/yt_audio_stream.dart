@@ -1,23 +1,3 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), services/yt_audio_stream.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-//
-// PORT DEVIATIONS (marked inline):
-//  1. Client chain updated for our vendored fork (synced to yt-dlp 2026-08-18):
-//     visionOs → ios → android. Echo used androidVr, which YouTube 403s since
-//     2026-08-17 (yt-dlp#17456).
-//  2. googlevideo binds a stream URL to the minting client's User-Agent and
-//     403s mismatches. _getManifestWithFallback returns the client that
-//     actually minted the manifest; the cache stores it and every byte
-//     request replays its headers (_clientRequestHeaders, logic copied from
-//     the fork's stream_client.dart).
-//  3. sortByBitrate is a local extension — the fork does not export
-//     helpers_extension.dart.
-//  4. YTMusic-dependent paths (none here) are deferred to R5.
-//
-// R3 DEBUG: the [yt_audio] prints are temporary instrumentation for the
-// playback investigation — strip or downgrade at R4.
-
 import 'dart:async';
 import 'dart:io';
 import '../utils/enhanced_image.dart';

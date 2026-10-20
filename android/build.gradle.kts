@@ -2,7 +2,6 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        // ▼▼▼ ADD THIS LINE ▼▼▼
         // Required for yt_extractor to resolve NewPipeExtractor
         maven { url = uri("https://jitpack.io") }
     }
@@ -19,32 +18,28 @@ subprojects {
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
 
-subprojects {
-    project.evaluationDependsOn(":app")
-}
-
 // ─────────────────────────────────────────────
-// ✅ Force JVM 17 consistency across ALL subprojects.
+// Force Java 17 + Kotlin 17 on every plugin.
+// Must be registered BEFORE evaluationDependsOn(":app").
 // ─────────────────────────────────────────────
 subprojects {
+    afterEvaluate {
+        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+        }
+    }
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
-
-    tasks.withType<JavaCompile>().configureEach {
-        sourceCompatibility = JavaVersion.VERSION_17.toString()
-        targetCompatibility = JavaVersion.VERSION_17.toString()
-    }
 }
 
-gradle.projectsEvaluated {
-    val flutterJsProject = subprojects.find { it.name == "flutter_js" }
-    flutterJsProject?.tasks?.withType<JavaCompile>()?.configureEach {
-        sourceCompatibility = JavaVersion.VERSION_17.toString()
-        targetCompatibility = JavaVersion.VERSION_17.toString()
-    }
+subprojects {
+    project.evaluationDependsOn(":app")
 }
 
 tasks.register<Delete>("clean") {

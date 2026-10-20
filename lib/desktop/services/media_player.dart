@@ -30,6 +30,9 @@
 //     resolved track plus the autoqueue neighbours from the same Dealer
 //     payload (SpotifyPlayer.lastResolvedSong / lastAutoqueueNeighbours).
 //     Non-Spotify paths keep the section snapshot from SP-6.
+//  10. SP-11 Local Cache: Automatically saves and restores the last played
+//      queue, index, and position using Hive so the app opens exactly where
+//      the user left off.
 
 import 'dart:async';
 import 'dart:convert';
@@ -51,6 +54,8 @@ import 'package:zenmusic/desktop/spotify/spotify_player.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_config.dart';
 import 'package:zenmusic/desktop/spotify/spotify_desktop_engine.dart';
+import 'package:zenmusic/hive/zen_duration_adapter.dart';
+
 
 // From Stopify's SpotifyAudioPlayer (MIT) — Widevine license endpoint for
 // web-player CENC audio. Consumed by the patched just_audio Android host.
@@ -156,6 +161,60 @@ class MediaPlayer extends ChangeNotifier {
   );
 
   // ═══════════════════════════════════════════════════════════════════
+  // SP-11 LOCAL CACHE (Save / Restore Session)
+  // ═══════════════════════════════════════════════════════════════════
+
+  void _saveCurrentState() {
+    if (queueSnapshot.value.isEmpty) return;
+    final idx = _currentIndex.value ?? 0;
+    final pos = _progressBarState.value.current;
+
+    final box = Hive.box('SETTINGS');
+    box.put('CACHE_QUEUE', queueSnapshot.value);
+    box.put('CACHE_INDEX', idx);
+    box.put('CACHE_POSITION', pos.inMilliseconds);
+  }
+
+  Future<void> restoreLastSession() async {
+    final box = Hive.box('SETTINGS');
+    final rawQueue = box.get('CACHE_QUEUE') as List?;
+    if (rawQueue == null || rawQueue.isEmpty) return;
+
+    final queue = rawQueue.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    final index = (box.get('CACHE_INDEX') as int? ?? 0).clamp(0, queue.length - 1);
+    final posMs = box.get('CACHE_POSITION') as int? ?? 0;
+
+    queueSnapshot.value = queue;
+    _currentIndex.value = index;
+
+    final song = queue[index];
+    final tag = MediaItem(
+      id: song['videoId'],
+      title: song['title'] ?? 'Title',
+      album: song['album']?['name'],
+      artUri: Uri.parse(getEnhancedImage(
+          song['thumbnails']?.first['url'] ?? '',
+          quality: 'high')),
+      artist: song['artists']?.map((a) => a['name']).join(','),
+      extras: song,
+    );
+
+    _currentSongNotifier.value = tag;
+    _progressBarState.value = ProgressBarState(
+      current: Duration(milliseconds: posMs),
+      total: Duration.zero,
+    );
+    _buttonState.value = ButtonState.paused;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _saveCurrentState();
+    super.dispose();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // SP-5b / SP-6 / SP-7 — SpotifyDesktopEngine bridge
   // ═══════════════════════════════════════════════════════════════════
 
@@ -258,6 +317,7 @@ class MediaPlayer extends ChangeNotifier {
       total: SpotifyDesktopEngine.instance.duration.value,
     );
     notifyListeners();
+    _saveCurrentState();
     return true;
   }
 
@@ -336,6 +396,7 @@ class MediaPlayer extends ChangeNotifier {
       } else if (processingState == ProcessingState.ready) {
         _buttonState.value =
         isPlaying ? ButtonState.playing : ButtonState.paused;
+        _saveCurrentState();
       } else if (processingState == ProcessingState.completed) {
         _player.seek(Duration.zero);
         _player.pause();
@@ -420,6 +481,7 @@ class MediaPlayer extends ChangeNotifier {
           addHistory(item.extras!);
         }
         notifyListeners();
+        _saveCurrentState();
       }
     });
   }
@@ -589,6 +651,7 @@ class MediaPlayer extends ChangeNotifier {
       await _player.setAudioSource(source);
       if (_lastPlayRequestId != requestId) return;
       await _player.play();
+      _saveCurrentState();
     } catch (e) {
       if (_lastPlayRequestId == requestId) {
         print("Error playing song: $e");
@@ -630,6 +693,7 @@ class MediaPlayer extends ChangeNotifier {
       if (section.length > 1) {
         Future(() => _addRemainingToPlaylist(section, index));
       }
+      _saveCurrentState();
     } catch (e) {
       print('playFromSection error: $e');
       _buttonState.value = ButtonState.paused;
@@ -718,6 +782,7 @@ class MediaPlayer extends ChangeNotifier {
       if (songs.length > 1) {
         Future(() => _addRemainingToPlaylist(songs, index));
       }
+      _saveCurrentState();
     } catch (e) {
       print('Error in playAll: $e');
       _buttonState.value = ButtonState.paused;
@@ -801,6 +866,7 @@ class MediaPlayer extends ChangeNotifier {
     _currentIndex.value = null;
     _currentSongNotifier.value = null;
     notifyListeners();
+    Hive.box('SETTINGS').delete('CACHE_QUEUE');
   }
 
   // ── SP-5b transport routing ──
@@ -813,10 +879,12 @@ class MediaPlayer extends ChangeNotifier {
       } else {
         await engine.resume();
       }
+      _saveCurrentState();
       return;
     }
     if (_player.playing) {
       await _player.pause();
+      _saveCurrentState();
     } else {
       await _player.play();
     }
@@ -825,9 +893,11 @@ class MediaPlayer extends ChangeNotifier {
   Future<void> seekTo(Duration d) async {
     if (_engineOwnsPlayback) {
       await SpotifyDesktopEngine.instance.seek(d);
+      _saveCurrentState();
       return;
     }
     await _player.seek(d);
+    _saveCurrentState();
   }
 
   /// SP-6 / SP-7: when the engine owns playback, walk the queue snapshot.
@@ -852,6 +922,7 @@ class MediaPlayer extends ChangeNotifier {
           final src = await _getAudioSource(next);
           await _player.setAudioSource(src);
           await _player.play();
+          _saveCurrentState();
         } catch (e) {
           print('[skipNext] fallback error: $e');
         }
@@ -882,6 +953,7 @@ class MediaPlayer extends ChangeNotifier {
           final src = await _getAudioSource(prev);
           await _player.setAudioSource(src);
           await _player.play();
+          _saveCurrentState();
         } catch (e) {
           print('[skipPrevious] fallback error: $e');
         }

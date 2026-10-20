@@ -3,7 +3,7 @@
 // which proved the full chain on WebView2 155.0.4283.45 +
 // desktop_webview_window 0.3.2.
 //
-// SP-5b-stealth (this build): THE WINDOW FIX, v3.
+// SP-5b-stealth: THE WINDOW FIX, v3.
 //   openHidden: true makes Chromium enter "hidden playback state" and
 //   MediaSource never fires sourceopen — no initData, no challenge, no
 //   license, no PLAYING. Browser args don't change this (visibility gate,
@@ -15,6 +15,16 @@
 //   WS_EX_LAYERED + LWA_ALPHA=0 so it renders nothing. Also adds
 //   WS_EX_TOOLWINDOW (no taskbar) and WS_EX_NOACTIVATE (no focus steal).
 //   Belt-and-suspenders: the window is still moved to (-32000,-32000).
+//
+// SP-5b-stealth v4 (this build): kills the visible gap.
+//   create() shows the window natively at default position and the v3 mask
+//   only landed ~1.1 s later (bringToForeground even fronted it — the flash
+//   the user saw on warm() / first Spotify play). The window is now BORN
+//   off-screen via the plugin's own config (useWindowPositionAndSize,
+//   windowPos -32000): IsWindowVisible() stays true from frame zero, so the
+//   hidden-playback gate never triggers and nothing can flash. The
+//   LAYERED/TOOLWINDOW/NOACTIVATE mask remains for taskbar + focus hygiene
+//   and now runs twice (right after create(), and after the 800 ms settle).
 //
 // SP-5b-fix: the missing setInterval that fed window.__sp4.licenseResponse
 //   back into session.update(raw).
@@ -286,34 +296,35 @@ setInterval(async () => {
       }
       final docs = await getApplicationSupportDirectory();
 
-      // openHidden MUST be false: a hidden WebView2 host makes Chromium
-      // enter hidden-playback state, MediaSource never fires sourceopen,
-      // and the whole EME chain stalls. Instead we keep the window
-      // technically visible and mask it with WS_EX_LAYERED alpha=0.
+      // openHidden MUST stay false (Chromium hidden-playback gate kills
+      // sourceopen). SP-5b-stealth v4: the window is BORN off-screen via
+      // the plugin's own config — IsWindowVisible() stays true from frame
+      // zero, so the EME chain is unaffected, but nothing can flash on the
+      // desktop. The LAYERED/TOOLWINDOW/NOACTIVATE mask below remains for
+      // taskbar-button + focus-steal hygiene.
       _webview = await WebviewWindow.create(
         configuration: CreateConfiguration(
           userDataFolderWindows: '${docs.path}/webview2-zen-engine',
           openHidden: false,
+          useWindowPositionAndSize: true,
+          windowPosX: -32000,
+          windowPosY: -32000,
         ),
       );
       _webview!.launch(_pageUrl!);
-      await Future.delayed(const Duration(milliseconds: 800));
 
-      // Make sure the plugin has fully realized the window before we touch
-      // its style. bringToForeground is optional for the mask, but ensures
-      // CreateWindowEx has finished its deferred work.
-      try {
-        await _webview!.bringToForeground();
-      } catch (e) {
-        _log('bringToForeground failed: $e');
-      }
-      await Future.delayed(const Duration(milliseconds: 300));
-
-      // Mask every non-main window in our process: offscreen + layered
-      // alpha=0 + tool window + no-activate.
+      // Pass 1 immediately: the HWND exists once create() resolves, so
+      // TOOLWINDOW (no taskbar button) applies within milliseconds.
       _maskWebViewWindows();
 
-      await Future.delayed(const Duration(milliseconds: 400));
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      // Pass 2: catches the WebView2 host window if the plugin realized it
+      // late. The walk is idempotent (styles OR-ed, position re-applied).
+      _maskWebViewWindows();
+
+      await Future.delayed(const Duration(milliseconds: 300));
+
       try {
         final vis =
         await _webview!.evaluateJavaScript('document.visibilityState');

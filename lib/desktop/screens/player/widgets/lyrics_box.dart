@@ -4,6 +4,8 @@
 // DEVIATION: lyric text size / line spacing / alignment read AppearancePrefs
 // (hydrated user preferences). File-local AnimatedBuilder intentionally
 // shadows Flutter's — verbatim upstream design, do not remove.
+// SP-10: Added Spotify Color Lyrics fallback and fixed the position stream
+// to support the hidden WebView2 Spotify engine via progressBarState.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -13,6 +15,7 @@ import 'package:zenmusic/desktop/models/lyrics_model.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/lyrics.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/spotify/spotify_lyrics.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:provider/provider.dart';
@@ -76,13 +79,8 @@ class _LyricsBoxState extends State<LyricsBox> {
   void _fetchLyrics() {
     if (context.mounted) {
       setState(() {
-        _fetchLyricsFuture = GetIt.I<LyricsService>().getLyrics(
-          title: widget.currentSong.title,
-          artist: widget.currentSong.artist,
-          album: widget.currentSong.album,
-          duration: widget.currentSong.duration?.inSeconds.toString(),
-        );
         _lyricsLoaded = false;
+        _fetchLyricsFuture = _loadLyricsInternal();
         _fetchLyricsFuture!.then((lyrics) {
           _lyricsLoaded =
               (lyrics.parsedLyrics?.lyrics.isNotEmpty ?? false) ||
@@ -96,6 +94,51 @@ class _LyricsBoxState extends State<LyricsBox> {
         });
       });
     }
+  }
+
+  Future<Lyrics> _loadLyricsInternal() async {
+    final spUri = widget.currentSong.extras?['spotifyUri'] as String?;
+    if (spUri != null && spUri.isNotEmpty) {
+      final coverUrl = widget.currentSong.artUri?.toString();
+      final spLyrics = await SpotifyLyricsService.instance.fetchColorLyrics(
+        spUri,
+        coverUrl: coverUrl,
+      );
+      if (spLyrics != null && spLyrics.lines.isNotEmpty) {
+        return _convertSpotifyLyrics(spLyrics);
+      }
+    }
+
+    // Fallback to LRCLIB
+    return GetIt.I<LyricsService>().getLyrics(
+      title: widget.currentSong.title,
+      artist: widget.currentSong.artist,
+      album: widget.currentSong.album,
+      duration: widget.currentSong.duration?.inSeconds.toString(),
+    );
+  }
+
+  Lyrics _convertSpotifyLyrics(SpotifyColorLyrics sp) {
+    final syncedBuffer = StringBuffer();
+
+    for (final line in sp.lines) {
+      // Format as standard LRC: [mm:ss.xx] text
+      final minutes = (line.startTimeMs ~/ 60000).toString().padLeft(2, '0');
+      final seconds = ((line.startTimeMs % 60000) / 1000).toStringAsFixed(2).padLeft(5, '0');
+
+      syncedBuffer.writeln('[$minutes:$seconds] ${line.words}');
+    }
+
+    // Passing the LRC string directly into lyricsPlain.
+    // The Lyrics model automatically parses this if it detects the format.
+    return Lyrics(
+      id: widget.currentSong.id,
+      title: widget.currentSong.title,
+      artist: widget.currentSong.artist ?? 'Unknown',
+      duration: widget.currentSong.duration?.inSeconds.toString() ?? '0',
+      provider: LyricsProvider.values.first, // Avoids hardcoding the enum name
+      lyricsPlain: syncedBuffer.toString().trim(),
+    );
   }
 
   @override
@@ -210,7 +253,6 @@ class SyncedLyricsWidget extends StatefulWidget {
 
 class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
     with TickerProviderStateMixin {
-  StreamSubscription? _streamSubscription;
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ItemPositionsListener _itemPositionsListener =
   ItemPositionsListener.create();
@@ -237,30 +279,32 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
       CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
     );
 
-    try {
-      _streamSubscription =
-          GetIt.I<MediaPlayer>().player.positionStream.listen((event) {
-            if (mounted) {
-              duration = event;
-              final newIndex = _findCurrentLyricIndex();
-              if (newIndex != _currentLyricIndex) {
-                setState(() {
-                  _currentLyricIndex = newIndex;
-                });
-                _scrollToCurrentLyric(newIndex);
-              }
-            }
-          });
-    } catch (e) {
-      print("Error attaching position stream: $e");
+    final mp = GetIt.I<MediaPlayer>();
+    duration = mp.progressBarState.value.current;
+    mp.progressBarState.addListener(_onProgress);
+  }
+
+  void _onProgress() {
+    if (!mounted) return;
+    final mp = GetIt.I<MediaPlayer>();
+    final newPos = mp.progressBarState.value.current;
+    if (newPos != duration) {
+      duration = newPos;
+      final newIndex = _findCurrentLyricIndex();
+      if (newIndex != _currentLyricIndex) {
+        setState(() {
+          _currentLyricIndex = newIndex;
+        });
+        _scrollToCurrentLyric(newIndex);
+      }
     }
   }
 
   @override
   void dispose() {
+    GetIt.I<MediaPlayer>().progressBarState.removeListener(_onProgress);
     _userScrollTimer?.cancel();
     _glowController.dispose();
-    _streamSubscription?.cancel();
     super.dispose();
   }
 
@@ -280,7 +324,7 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
 
     final lines = widget.lyrics.parsedLyrics!.lyrics;
     for (int i = 0; i < lines.length; i++) {
-      if (lines[i].start.inMilliseconds > duration.inMilliseconds) {
+      if (lines[i]!.start.inMilliseconds > duration.inMilliseconds) {
         return i > 0 ? i - 1 : 0;
       }
     }
@@ -294,8 +338,10 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
   void _seekToLyric(int index) {
     if (widget.lyrics.parsedLyrics == null) return;
     final lyric = widget.lyrics.parsedLyrics!.lyrics[index];
-    GetIt.I<MediaPlayer>().player.seek(lyric.start);
-    _scrollToCurrentLyric(index);
+    if (lyric != null) {
+      GetIt.I<MediaPlayer>().seekTo(lyric.start);
+      _scrollToCurrentLyric(index);
+    }
   }
 
   TextAlign _align() {
@@ -358,7 +404,8 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
                 vertical: MediaQuery.of(context).size.height / 2.5),
             itemBuilder: (context, index) {
               final isCurrent = isCurrentLyric(index);
-              final lyricText = widget.lyrics.parsedLyrics!.lyrics[index].text;
+              final lyricText =
+                  widget.lyrics.parsedLyrics!.lyrics[index]?.text ?? '';
               final baseSize = AppearancePrefs.lyricsTextSize.value;
 
               return GestureDetector(
@@ -419,7 +466,6 @@ class _SyncedLyricsWidgetState extends State<SyncedLyricsWidget>
   }
 }
 
-// AnimatedBuilder is a simpler version of AnimatedWidget for inline use
 class AnimatedBuilder extends AnimatedWidget {
   final Widget Function(BuildContext context, Widget? child) builder;
   final Widget? child;

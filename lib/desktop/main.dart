@@ -8,9 +8,12 @@
 // Ported from Echo Music (GPL-3.0). Echo Music is Copyright (C) its authors;
 // this port and ZenMusic remain GPL-3.0.
 //
-// SP-4 PROBE (TEMPORARY wiring — remove with the spike block after the
-// verdict): runWebViewTitleBarWidget(args) first (desktop_webview_window
-// requirement), then the hidden secure-context EME probe on Windows.
+// SP-4 PROBE: RETIRED. The spike harness (sp4_probe.dart) is kept for future
+// diagnostics but no longer auto-runs: it created its own UNMASKED WebView
+// window at every launch — that was the cold-start "white tab for a few
+// seconds" (SP-5b-stealth v4 only masks the ENGINE window, and v4 confirmed
+// the engine itself never flashes). Flip kSp4SpikeEnabled to true to run the
+// spike deliberately.
 
 import 'dart:async';
 import 'dart:io';
@@ -38,7 +41,15 @@ import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/ytmusic/modals/yt_config.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
+import 'package:zenmusic/desktop/spotify/spotify_desktop_engine.dart';
 import 'package:zenmusic/desktop/spotify/sp4_probe.dart';
+import 'package:zenmusic/hive/zen_duration_adapter.dart';
+
+/// SP-4 spike harness gate. false = retired (normal builds). Flip to true
+/// only when deliberately re-running the SP-4 diagnostic spike: it opens a
+/// VISIBLE diagnostic WebView window, burns a real playback (CDN fetch +
+/// two license POSTs) and prints the verdict, then closes.
+const bool kSp4SpikeEnabled = false;
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -106,10 +117,20 @@ Future<void> main(List<String> args) async {
   // connection at boot.
   unawaited(SpotifyAuth.instance.load());
 
-  // SP-4 PROBE (temporary) — remove with the marked block after the verdict.
-  // Windows-only; a no-op elsewhere.
-  if (Platform.isWindows) {
+  // SP-4 PROBE: retired — gated off. The spike opens its own VISIBLE
+  // WebView window (no v4 masking) and burns a real playback per run;
+  // auto-running it here was the cold-start white flash.
+  if (kSp4SpikeEnabled && Platform.isWindows) {
     unawaited(runSp4Spike());
+  }
+
+  // SP-5b: pre-warm the engine WebView. Since SP-5b-stealth v4 the engine
+  // window is BORN off-screen and masked, so warming at launch shows
+  // nothing — and the first Spotify play skips the WebView2 + CDM spin-up.
+  // (This call was present in the pre-SP-4 architecture and fell out during
+  // manual edits; remove this block only if you dropped it deliberately.)
+  if (Platform.isWindows) {
+    unawaited(SpotifyDesktopEngine.instance.warm());
   }
 
   runApp(
@@ -160,6 +181,7 @@ Future<void> initialiseHive() async {
     "${(await getApplicationSupportDirectory()).path}/database";
   }
   await Hive.initFlutter(applicationDataDirectoryPath);
+  Hive.registerAdapter(ZenDurationAdapter());
   await Hive.openBox('SETTINGS');
   await Hive.openBox('LIBRARY');
   await Hive.openBox('SEARCH_HISTORY');

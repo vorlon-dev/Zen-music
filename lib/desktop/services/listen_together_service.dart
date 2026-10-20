@@ -1,3 +1,39 @@
+// ZenMusic Desktop — ported from the retired mobile stack's
+// listen_together_service.dart. ZenMusic remains GPL-3.0.
+// Listen Together client for the metroserver protocol (protobuf Envelope).
+// PORT DEVIATIONS: bindings target the desktop MediaPlayer (GetIt); Song ->
+// local LtSong; guest lockout dropped (request_sync + heartbeat re-align
+// guests); host stream-hints metadata-only (legacy Hive cache retired).
+//
+// v3 (1 Hz sync): ping/pong every second, host heartbeat every second,
+// heartbeat-driven drift control that never fights a buffering player
+// (settle window, 2-in-a-row hysteresis, +/-3% speed nudge), clock offset
+// plausibility checks (falls back to RTT when the server timestamps are not
+// what we expect), fallback request_sync polling when heartbeats do not
+// arrive, liveness by ANY inbound frame, and a live LtSyncStats notifier +
+// one "lt:" log line per second (rtt, offset, drift, heartbeat age).
+//
+// SYNC DEVIATIONS (marked, bug-fix / feature):
+//  * Host seek broadcast is back: seeks (slider, +/-10s, anything that moves
+//    the position) are detected from the position stream and sent instantly
+//    as 'seek' (leading edge immediate, trailing coalesced while dragging).
+//    hostSeek() now carries track_id (guests used to ignore it).
+//  * Host heartbeat ('position' every 3 s) so guests keep correcting drift.
+//  * Guests compensate network latency using the server clock offset and the
+//    host's captured_at_server_time, and apply seek -> play in that order.
+//  * Clock offset: fixed NTP formula, burst pings right after the handshake,
+//    best (lowest RTT) of the recent samples is used.
+//  * Guest drift correction: hard seek only when far off, otherwise a tiny
+//    playback-speed nudge (+/-3%) so there is no audible glitch.
+//  * Guest actions run through a serial queue (no play/seek/pause races) and
+//    stale rapid seeks are dropped (latest wins).
+//  * Pending seeks while a track is loading are advanced by the time spent
+//    loading, so the guest lands on the live position.
+//  * connect() now waits for the handshake, so the reconnect message is
+//    really sent after a dropped socket.
+//  * Duplicate change_track for the already-loaded track is a no-op (it used
+//    to force play and cause a blip for existing guests when someone joined).
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -17,29 +53,39 @@ class ListenTogetherService {
   ListenTogetherService._();
   static final ListenTogetherService instance = ListenTogetherService._();
 
+  /// Prints one "lt: ..." line per second plus key events.
+  static bool debugLogs = true;
+
   static const _wsUrl = 'wss://zen-listen-together.antideploy.com/ws';
   static const _clientVersion = 'ZenMusic/1.0';
-  static const _pingInterval = Duration(seconds: 25);
-  static const _pongTimeout = Duration(seconds: 75);
+  static const _pingInterval = Duration(seconds: 1); // ping/pong every second
+  static const _livenessTimeoutMs = 12000; // no inbound frame this long -> reconnect
   static const _maxReconnectAttempts = 5;
 
   // ── sync tuning ──
-  static const _heartbeatInterval = Duration(seconds: 3);
-  static const _hardSeekMs = 400; // playing: seek only if drift is bigger
+  static const _heartbeatInterval = Duration(seconds: 1); // host position heartbeat
+  static const _hardSeekMs = 300; // playing: seek only if drift is bigger
   static const _pausedSeekMs = 120; // paused: be exact, nobody hears it
   static const _forceSeekMinMs = 60; // explicit host seek: ignore tiny diffs
   static const _softSync = true; // speed-nudge instead of seeking small drift
-  static const _softSyncMinMs = 45;
+  static const _softSyncMinMs = 30;
   static const _nudgeRate = 0.03; // +/-3% speed while catching up
   static const _seekDetectMs = 450; // host position jump that counts as seek
   static const _seekThrottleMs = 90; // coalesce seeks while dragging
   static const _trackChangeQuietMs = 800; // ignore position noise on skip
   static const _clockSamplesMax = 8;
-  static const _guestResyncInterval = Duration(seconds: 10);
+  static const _heartbeatStaleMs = 3500; // no heartbeat this long -> poll request_sync
+  static const _fallbackSyncMs = 2000;
+  static const _settleMs = 1200; // after a hard seek: no new corrections
+  static const _statsInterval = Duration(seconds: 1);
 
   MediaPlayer get _player => GetIt.I<MediaPlayer>();
 
   final Stopwatch _mono = Stopwatch()..start();
+
+  void _log(String m) {
+    if (debugLogs) debugPrint('lt: $m');
+  }
 
   String? get _currentSongId => _player.currentSongNotifier.value?.id;
   bool get _playingNow => _player.player.playing;
@@ -108,7 +154,14 @@ class ListenTogetherService {
   Completer<void>? _handshakeDone;
   int _reconnectAttempts = 0;
   int _pingSeq = 0;
-  int _lastPongAt = 0;
+  int _lastRxMono = 0; // any inbound frame (liveness)
+  int _lastHeartbeatRxMono = 0;
+  int _lastFallbackSyncMono = 0;
+  int _settleUntilMono = 0;
+  int _bigDrift = 0;
+  int _lastDriftMs = 0;
+  bool _clockValid = false;
+  Timer? _statsTimer;
   int _applyingRemote = 0;
   bool _lastPlaying = false;
   String? _lastBroadcastSongId;
@@ -154,6 +207,10 @@ class ListenTogetherService {
   ValueNotifier<LtPhase>(LtPhase.disconnected);
   final ValueNotifier<LtRoomSnapshot?> roomNotifier =
   ValueNotifier<LtRoomSnapshot?>(null);
+  /// Live sync health (rtt, clock offset, drift, heartbeat age) - bind a
+  /// small badge to this in the Listen Together page if you like.
+  final ValueNotifier<LtSyncStats> syncStats =
+  ValueNotifier<LtSyncStats>(LtSyncStats.idle);
   final _events = StreamController<LtEvent>.broadcast();
 
   Stream<LtEvent> get events => _events.stream;
@@ -208,6 +265,7 @@ class ListenTogetherService {
 
   void _onHandshake() {
     _handshaken = true;
+    _log('handshake ok');
     final c = _handshakeDone;
     if (c != null && !c.isCompleted) c.complete();
     _setPhase(LtPhase.connected);
@@ -267,6 +325,14 @@ class ListenTogetherService {
     _pendingSeekMs = null;
     _clockSamples.clear();
     _hostPosSongId = null;
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    _lastHeartbeatRxMono = 0;
+    _settleUntilMono = 0;
+    _bigDrift = 0;
+    _lastDriftMs = 0;
+    _clockValid = false;
+    syncStats.value = LtSyncStats.idle;
   }
 
   // ── ROOM OPERATIONS ──
@@ -333,13 +399,51 @@ class ListenTogetherService {
   // ── GUEST MODE ──
 
   void _applyGuestSyncTimer() {
+    _startStats();
     _guestSyncTimer?.cancel();
     _guestSyncTimer = null;
     if (!isInRoom || _isHost) return;
-    _guestSyncTimer = Timer.periodic(_guestResyncInterval, (_) {
+    _lastHeartbeatRxMono = 0;
+    _guestSyncTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!isInRoom || _isHost) return;
-      if (!_playingNow) return;
+      final now = _mono.elapsedMilliseconds;
+      final heartbeatOk = _lastHeartbeatRxMono > 0 &&
+          now - _lastHeartbeatRxMono < _heartbeatStaleMs;
+      if (heartbeatOk) return;
+      // No heartbeat (host paused, or the server does not relay them):
+      // poll the server state instead.
+      final playing = (_room?.isPlaying ?? false) || _playingNow;
+      final every = playing ? _fallbackSyncMs : 5000;
+      if (now - _lastFallbackSyncMono < every) return;
+      _lastFallbackSyncMono = now;
       _send('request_sync', null);
+    });
+  }
+
+  /// One status line + LtSyncStats per second while in a room.
+  void _startStats() {
+    _statsTimer?.cancel();
+    _statsTimer = Timer.periodic(_statsInterval, (_) {
+      if (!isInRoom) return;
+      final now = _mono.elapsedMilliseconds;
+      final hbAge = _isHost
+          ? 0
+          : (_lastHeartbeatRxMono == 0 ? -1 : now - _lastHeartbeatRxMono);
+      final st = _player.player.processingState.name;
+      syncStats.value = LtSyncStats(
+        isHost: _isHost,
+        rttMs: _rttMs,
+        clockOffsetMs: _serverOffsetMs,
+        clockValid: _clockValid,
+        driftMs: _lastDriftMs,
+        heartbeatAgeMs: hbAge,
+        speed: _currentSpeed,
+        playerState: st,
+      );
+      _log('${_isHost ? 'host ' : 'guest'} rtt=${_rttMs}ms '
+          'off=${_serverOffsetMs}ms${_clockValid ? '' : '(?)'} '
+          'drift=${_lastDriftMs}ms hb=${hbAge}ms '
+          'speed=${_currentSpeed.toStringAsFixed(2)} $st');
     });
   }
 
@@ -483,7 +587,9 @@ class ListenTogetherService {
           'duration': s.duration.inMilliseconds,
         }
     ];
-    final now = _serverNow();
+    // Only stamp server time when our clock offset is trustworthy; the
+    // guest falls back to the RTT estimate when the stamp is 0.
+    final now = _clockValid ? _serverNow() : 0;
     _send('playback_action', {
       'action': action,
       if (trackId != null && trackId.isNotEmpty) 'track_id': trackId,
@@ -540,6 +646,7 @@ class ListenTogetherService {
   // ── INCOMING ──
 
   void _onData(dynamic data) {
+    _lastRxMono = _mono.elapsedMilliseconds;
     if (data is String) {
       _onJsonFrame(data);
       return;
@@ -599,7 +706,7 @@ class ListenTogetherService {
       case 'server_capabilities':
         _onHandshake();
       case 'pong':
-        _lastPongAt = DateTime.now().millisecondsSinceEpoch;
+        break; // liveness already recorded in _onData
       default:
         break;
     }
@@ -724,7 +831,6 @@ class ListenTogetherService {
         final t1 = r.readInt(2); // server receive
         final t2 = r.readInt(3); // server send
         final t3 = DateTime.now().millisecondsSinceEpoch; // client receive
-        _lastPongAt = t3;
         _addClockSample(t0, t1, t2, t3);
       case 'error':
         final r = PbReader(payload);
@@ -780,6 +886,14 @@ class ListenTogetherService {
   /// trustworthy (least queueing delay), so that one is used.
   void _addClockSample(int t0, int t1, int t2, int t3) {
     if (t0 <= 0 || t1 <= 0) return;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    // Plausibility: the echoed client time must be recent and the server time
+    // a real epoch-ms value; otherwise the pong layout is not what we think
+    // and no clock offset may be derived from it.
+    if ((nowMs - t0).abs() > 15000 || (t1 - nowMs).abs() > 86400000) {
+      _clockValid = false;
+      return;
+    }
     if (t2 <= 0) t2 = t1; // server did not fill send time
     final rtt = (t3 - t0) - (t2 - t1);
     if (rtt < 0) return;
@@ -790,8 +904,13 @@ class ListenTogetherService {
     for (final s in _clockSamples) {
       if (s.$1 < best.$1) best = s;
     }
+    final changed = (best.$2 - _serverOffsetMs).abs() > 25;
     _rttMs = best.$1;
     _serverOffsetMs = best.$2;
+    _clockValid = _clockSamples.length >= 3 && _rttMs < 3000;
+    if (changed) {
+      _log('clock: offset=${_serverOffsetMs}ms rtt=${_rttMs}ms valid=$_clockValid');
+    }
   }
 
   /// Several quick pings right after the handshake so the clock offset is
@@ -887,11 +1006,12 @@ class ListenTogetherService {
       case 'position':
       // Host heartbeat: keeps everybody locked to the host.
         if (p.trackId.isEmpty || _currentSongId != p.trackId) break;
+        if (_lastHeartbeatRxMono == 0) _log('first heartbeat received');
+        _lastHeartbeatRxMono = _mono.elapsedMilliseconds;
         _desiredPlaying = true;
         _patchIsPlaying(true);
-        await _alignTo(
-            effectivePosition(p.positionMs, p.capturedAtServerTime, true),
-            playing: true);
+        await _alignHeartbeat(
+            effectivePosition(p.positionMs, p.capturedAtServerTime, true));
       case 'change_track':
         await _applyTrackChange(p, autoplay: true);
       case 'skip_next':
@@ -926,7 +1046,11 @@ class ListenTogetherService {
       _startGuestLoad(queue, index);
       _patchIsPlaying(p.isPlaying);
     } else {
-      await _alignTo(target, playing: p.isPlaying);
+      if (p.isPlaying) {
+        await _alignHeartbeat(target);
+      } else {
+        await _alignTo(target, playing: false);
+      }
       _patchIsPlaying(p.isPlaying);
     }
   }
@@ -1019,12 +1143,15 @@ class ListenTogetherService {
     final live = playing && p.playing;
     final lead = live ? _seekLeadMs : 0;
     final t0 = _mono.elapsedMilliseconds;
+    // No further corrections while the seek is in flight / settling.
+    _settleUntilMono = t0 + 30000;
     try {
       await p.seek(Duration(milliseconds: math.max(0, targetMs + lead)));
     } catch (_) {}
+    final done = _mono.elapsedMilliseconds;
+    _settleUntilMono = done + _settleMs;
     if (live) {
-      final took = _mono.elapsedMilliseconds - t0;
-      _seekLeadMs = ((_seekLeadMs + took) / 2).round().clamp(0, 400);
+      _seekLeadMs = ((_seekLeadMs + (done - t0)) / 2).round().clamp(0, 400);
     }
   }
 
@@ -1036,6 +1163,7 @@ class ListenTogetherService {
       {required bool playing, bool force = false}) async {
     final p = _player.player;
     final drift = _livePositionMs - targetMs; // + = guest ahead
+    _lastDriftMs = drift;
     final abs = drift.abs();
     final hardLimit =
     force ? _forceSeekMinMs : (playing ? _hardSeekMs : _pausedSeekMs);
@@ -1056,6 +1184,48 @@ class ListenTogetherService {
         await p.pause();
       }
     } catch (_) {}
+  }
+
+  /// Heartbeat-driven correction (1 Hz). Gentler than _alignTo:
+  ///  * never while a seek is settling or the player is buffering/loading
+  ///    (that would restart the buffer = audible glitch),
+  ///  * a hard seek needs the big drift on 2 consecutive heartbeats (or a
+  ///    huge one), so a single delayed packet cannot make us jump,
+  ///  * small drift is eased out with the +/-3% speed nudge.
+  Future<void> _alignHeartbeat(int targetMs) async {
+    final p = _player.player;
+    final now = _mono.elapsedMilliseconds;
+    if (!p.playing) {
+      try {
+        await p.play();
+      } catch (_) {}
+      return;
+    }
+    if (p.processingState != ProcessingState.ready) return;
+    if (now < _settleUntilMono) return;
+
+    final drift = _livePositionMs - targetMs; // + = guest ahead
+    _lastDriftMs = drift;
+    final abs = drift.abs();
+
+    if (abs > _hardSeekMs) {
+      _bigDrift++;
+      if (_bigDrift >= 2 || abs > _hardSeekMs * 3) {
+        _bigDrift = 0;
+        _resetSpeed();
+        _log('hard seek: drift ${drift}ms');
+        await _hardSeek(targetMs, playing: true);
+      } else if (_softSync) {
+        _nudge(drift); // start easing right away
+      }
+      return;
+    }
+    _bigDrift = 0;
+    if (_softSync && abs >= _softSyncMinMs) {
+      _nudge(drift);
+    } else {
+      _resetSpeed();
+    }
   }
 
   void _nudge(int driftMs) {
@@ -1082,8 +1252,11 @@ class ListenTogetherService {
 
   int effectivePosition(int position, int capturedAt, bool playing) {
     if (position <= 0 || !playing) return position;
-    if (capturedAt <= 0) return position;
-    final elapsed = _serverNow() - capturedAt;
+    // Trustworthy clocks: exact transit time. Otherwise assume about one
+    // round trip of transit (host -> server -> guest).
+    final elapsed = (_clockValid && capturedAt > 0)
+        ? _serverNow() - capturedAt
+        : _rttMs;
     if (elapsed < 0 || elapsed > 60000) return position;
     return position + elapsed;
   }
@@ -1364,11 +1537,12 @@ class ListenTogetherService {
 
   void _startPing() {
     _pingTimer?.cancel();
-    _lastPongAt = DateTime.now().millisecondsSinceEpoch;
+    _lastRxMono = _mono.elapsedMilliseconds;
     _pingTimer = Timer.periodic(_pingInterval, (_) {
       if (_channel == null) return;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if (now - _lastPongAt > _pongTimeout.inMilliseconds) {
+      // Liveness = ANY inbound frame (pong, heartbeat, state...).
+      if (_mono.elapsedMilliseconds - _lastRxMono > _livenessTimeoutMs) {
+        _log('no inbound data for ${_livenessTimeoutMs}ms');
         _reconnectAfterDrop();
         return;
       }
@@ -1396,6 +1570,7 @@ class ListenTogetherService {
       return;
     }
     _reconnectAttempts++;
+    _log('connection lost - reconnect attempt $_reconnectAttempts');
     _setPhase(LtPhase.reconnecting);
     _reconnectTimer =
         Timer(Duration(seconds: 2 * _reconnectAttempts), () async {
@@ -1417,6 +1592,38 @@ class ListenTogetherService {
 }
 
 // ── MODELS ──
+
+/// Sync health, refreshed once per second while in a room.
+class LtSyncStats {
+  const LtSyncStats({
+    this.isHost = false,
+    this.rttMs = 0,
+    this.clockOffsetMs = 0,
+    this.clockValid = false,
+    this.driftMs = 0,
+    this.heartbeatAgeMs = -1,
+    this.speed = 1.0,
+    this.playerState = 'idle',
+  });
+
+  static const idle = LtSyncStats();
+
+  final bool isHost;
+  final int rttMs;
+  final int clockOffsetMs;
+  final bool clockValid;
+
+  /// Guest position minus host position (+ = guest ahead).
+  final int driftMs;
+
+  /// Milliseconds since the last host heartbeat (-1 = none yet).
+  final int heartbeatAgeMs;
+  final double speed;
+  final String playerState;
+
+  /// True when the guest is within ~150 ms of the host.
+  bool get inSync => driftMs.abs() < 150;
+}
 
 enum LtPhase { disconnected, connecting, connected, inRoom, reconnecting }
 
