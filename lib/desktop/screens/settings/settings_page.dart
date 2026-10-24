@@ -1,14 +1,11 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), screens/settings/settings_page.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
+// ZenMusic — Settings page.
 //
-// REDESIGN v2: quiet, platform-native settings list.
-//  * Inset grouped lists, one neutral icon colour, platform icon sets
-//    (see utils/zen_icons.dart), sentence-case section titles.
-//  * Search filters every row (title, subtitle, keywords).
-//  * Single column (max 640) on phones / tablets, two columns of sections
-//    on wide desktop windows (>= 1000 px).
-//  * Same routes, same cubit, same Spotify logic as before.
+// SP-30: every feature/setup entry that used to be a card on the Saved
+// page now lives here — Crossfade (General), Mini player / Lyrics
+// overlay / Video backdrop (Desktop, Windows only), Last.fm (Services)
+// and Offline cache (Storage and privacy). Tapping the Spotify row while
+// connected opens your Spotify library. The Saved page is library
+// content only again.
 
 import 'dart:io';
 
@@ -18,10 +15,16 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:zenmusic/desktop/screens/library/backdrop_page.dart';
+import 'package:zenmusic/desktop/screens/library/crossfade_page.dart';
+import 'package:zenmusic/desktop/screens/library/lastfm_page.dart';
+import 'package:zenmusic/desktop/screens/offline/offline_cache_page.dart';
 import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/screens/settings/cubit/settings_system_cubit.dart';
 import 'package:zenmusic/desktop/screens/settings/seek_bar_page.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
+import 'package:zenmusic/desktop/services/lyrics_overlay_bridge.dart';
+import 'package:zenmusic/desktop/services/mini_player_bridge.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/themes/text_styles.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
@@ -57,6 +60,7 @@ class _Entry {
     this.keywords = const [],
     this.onTap,
     this.trailing,
+    this.chevron,
     this.builder,
   });
 
@@ -66,6 +70,9 @@ class _Entry {
   final List<String> keywords;
   final VoidCallback? onTap;
   final Widget? trailing;
+
+  /// Override the automatic chevron (action rows pass `false`).
+  final bool? chevron;
 
   /// Fully custom row (seek bar preview, Spotify).
   final WidgetBuilder? builder;
@@ -83,7 +90,7 @@ class _Entry {
             title: title,
             subtitle: subtitle,
             trailing: trailing,
-            chevron: trailing == null,
+            chevron: chevron ?? trailing == null,
             onTap: onTap,
           );
 }
@@ -122,6 +129,16 @@ class _SettingsBodyState extends State<_SettingsBody> {
           subtitle: 'Playback, equalizer and queue',
           keywords: const ['equalizer', 'eq', 'audio', 'playback'],
           onTap: () => context.go('/settings/player'),
+        ),
+        // SP-30: moved from the Saved page (crossfade_page.dart).
+        _Entry(
+          icon: Icons.compare_arrows,
+          title: 'Crossfade',
+          subtitle: 'Fade between tracks',
+          keywords: const ['crossfade', 'fade', 'transition', 'gapless'],
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const CrossfadePage()),
+          ),
         ),
       ]),
       _Group('Personalization', [
@@ -174,6 +191,38 @@ class _SettingsBodyState extends State<_SettingsBody> {
           ),
         ),
       ]),
+      // SP-30: window features moved from the Saved page. Windows only —
+      // the mini player and lyrics overlay are desktop_multi_window
+      // windows and the video backdrop is the Windows canvas layer
+      // (hidden on mobile the same way the battery card is Android-only).
+      if (Platform.isWindows)
+        _Group('Desktop', [
+          _Entry(
+            icon: Icons.picture_in_picture_alt,
+            title: 'Mini player',
+            subtitle: 'Float the controls',
+            keywords: const ['mini', 'player', 'floating', 'window'],
+            chevron: false,
+            onTap: () => MiniPlayerBridge.instance.openMiniPlayer(),
+          ),
+          _Entry(
+            icon: Icons.lyrics,
+            title: 'Lyrics overlay',
+            subtitle: 'Floating sing-along',
+            keywords: const ['lyrics', 'overlay', 'floating', 'sing'],
+            chevron: false,
+            onTap: () => LyricsOverlayBridge.instance.openOverlay(),
+          ),
+          _Entry(
+            icon: Icons.smart_display,
+            title: 'Video backdrop',
+            subtitle: 'Song video behind the player',
+            keywords: const ['backdrop', 'video', 'blur', 'background'],
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BackdropPage()),
+            ),
+          ),
+        ]),
       _Group('Services', [
         _Entry(
           icon: ZenIcons.youtube,
@@ -186,6 +235,16 @@ class _SettingsBodyState extends State<_SettingsBody> {
           title: 'Spotify',
           keywords: ['spotify', 'login', 'account', 'cookie'],
           builder: _spotifyBuilder,
+        ),
+        // SP-30: moved from the Saved page (lastfm_page.dart).
+        _Entry(
+          icon: Icons.graphic_eq,
+          title: 'Last.fm',
+          subtitle: 'Scrobble your plays',
+          keywords: const ['lastfm', 'last.fm', 'scrobble', 'music'],
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const LastfmPage()),
+          ),
         ),
       ]),
       _Group('Storage and privacy', [
@@ -202,6 +261,16 @@ class _SettingsBodyState extends State<_SettingsBody> {
           subtitle: 'History and data controls',
           keywords: const ['history', 'data'],
           onTap: () => context.go('/settings/privacy'),
+        ),
+        // SP-30: moved from the Saved page (offline_cache_page.dart).
+        _Entry(
+          icon: Icons.offline_pin_outlined,
+          title: 'Offline cache',
+          subtitle: 'Auto-cached songs',
+          keywords: const ['offline', 'cache', 'download', 'space'],
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const OfflineCachePage()),
+          ),
         ),
       ]),
       _Group('About', [
@@ -346,6 +415,8 @@ class _NoResults extends StatelessWidget {
 // ── Spotify ──────────────────────────────────────────────────────────
 // Same logic as before: "Log in" opens the embedded login page
 // (/spotify-login); the cookie paste is the advanced fallback.
+// SP-30: while connected, tapping the row opens your Spotify library
+// (the card that used to sit on the Saved page).
 
 class _SpotifyTile extends StatefulWidget {
   const _SpotifyTile();
@@ -413,7 +484,12 @@ class _SpotifyTileState extends State<_SpotifyTile> {
             ZenRow(
               icon: loggedIn ? ZenIcons.connected : ZenIcons.disconnected,
               title: 'Spotify',
-              subtitle: loggedIn ? 'Connected' : 'Not connected',
+              subtitle: loggedIn
+                  ? 'Connected — tap to open your library'
+                  : 'Not connected',
+              onTap: loggedIn
+                  ? () => context.push('/saved/spotify_library')
+                  : null,
               trailing: loggedIn
                   ? OutlinedButton(
                 onPressed: () => SpotifyAuth.instance.logout(),

@@ -1,18 +1,3 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), screens/player/player_page.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-//
-// REDESIGN v4 (classic layout only; skins, canvas, quality, shortcuts intact):
-//  * Palette-tinted ambient glow behind the artwork + soft radial wash.
-//  * Artwork "breathes": full size while playing, gently shrinks on pause.
-//  * Coloured shadow under the artwork, matching the cover.
-//  * Seek bar + transport live in one frosted glass dock.
-//  * Play button glows with the cover colour.
-//  * Quality chip + lyrics pill row, wide layout keeps the glass lyrics panel.
-//  * Desktop keyboard: Space, Left/Right seek 5 s, Ctrl+Left/Right prev/next,
-//    L lyrics, Q queue, Esc close.
-//  * SP-5b transport via MediaPlayer, SP-8 skins, SP-9 Spotify Canvas kept.
-
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' show FontFeature, ImageFilter;
@@ -29,6 +14,7 @@ import 'package:provider/provider.dart';
 import 'package:text_scroll/text_scroll.dart';
 import 'package:palette_generator/palette_generator.dart';
 
+import 'package:zenmusic/desktop/backdrop/windows_backdrop.dart';
 import 'package:zenmusic/desktop/core/widgets/square_artwork.dart';
 import 'package:zenmusic/desktop/core/widgets/video_backdrop.dart';
 import 'package:zenmusic/desktop/screens/player/widgets/animated_gradient_bg.dart';
@@ -348,7 +334,13 @@ class _PlayerPageState extends State<PlayerPage> {
 
               return Scaffold(
                 backgroundColor: Colors.black,
-                body: PlayerSkinView(skin: skin, ctx: ctx),
+                body: Stack(
+                  children: [
+                    // SP-33: video backdrop under custom skins too
+                    if (Platform.isWindows) const WindowsVideoBackdrop(),
+                    PlayerSkinView(skin: skin, ctx: ctx),
+                  ],
+                ),
               );
             }
 
@@ -374,6 +366,9 @@ class _PlayerPageState extends State<PlayerPage> {
                       ],
                     ),
                   ),
+
+                  // SP-33: Windows video backdrop (muted, 16:9, blurred)
+                  const WindowsVideoBackdrop(),
 
                   // Synchronized video backdrop (reacts to play/pause)
                   if (_videoBackdropUrl != null)

@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
+  desktop_multi_window
   desktop_webview_window
   dynamic_color
   flutter_inappwebview_windows_fx
@@ -17,8 +18,10 @@ list(APPEND FLUTTER_PLUGIN_LIST
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
+  flutter_discord_rpc
   jni
   media_kit_native_event_loop
+  smtc_windows
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

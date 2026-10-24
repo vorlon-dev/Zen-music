@@ -11,7 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  crypto: ^3.0.3
+  crypto: ^3.0.7
   # ─────────────────────────────────────────────
   # 🎵 YouTube Extraction & Audio Playback
   # ─────────────────────────────────────────────
@@ -61,7 +61,7 @@ dependencies:
   file_picker: ^13.1.0
   palette_generator: ^0.3.3+7
   package_info_plus: ^10.2.1
-  url_launcher: ^6.3.2
+  url_launcher: ^6.3.3
   device_info_plus: ^13.2.0
   stream_transform: ^2.1.2
   google_fonts: ^9.0.0
@@ -102,6 +102,10 @@ dependencies:
   flutter_markdown_plus: ^1.0.4
   media_kit_video: ^1.2.5
   media_kit_libs_android_video: ^1.3.6
+  smtc_windows: ^1.1.0
+  flutter_discord_rpc: ^1.1.0
+  flutter_rust_bridge: 2.11.1
+  desktop_multi_window: 0.2.1
 # ▼▼▼ MUST BE AT THE ROOT LEVEL (No indentation) ▼▼▼
 dependency_overrides:
   flutter_inappwebview_windows_fx:

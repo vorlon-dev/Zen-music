@@ -1,16 +1,30 @@
-﻿// ZenMusic Desktop — ported from Echo Music (GPL-3.0), settings/appearance/appearance_page.dart.
+// ZenMusic Desktop — ported from Echo Music (GPL-3.0), settings/appearance/appearance_page.dart.
 // Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
 // remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
 //
 // REDESIGN v2: same design language as the settings home (zen_settings_kit).
 // Same cubit, same AppearancePrefs / PlayerSkinPrefs wiring as before.
+//
+// SP-33: this page is now the ONE place for the player extras —
+//  • "Song backdrop" (formerly "Animated background") is the UNIVERSAL
+//    backdrop switch: mobile drives the 9:16 canvas/video flow, Windows
+//    additionally masters the 16:9 blurred video backdrop service.
+//  • Crossfade row (opens crossfade_page.dart) — every platform.
+//  • Desktop section (Windows only): Mini player + Lyrics overlay
+//    floating windows (same calls as the settings home Desktop group).
+
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:zenmusic/desktop/backdrop/windows_backdrop_service.dart';
+import 'package:zenmusic/desktop/screens/library/crossfade_page.dart';
 import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/screens/settings/appearance/cubit/appearance_cubit.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
+import 'package:zenmusic/desktop/services/lyrics_overlay_bridge.dart';
+import 'package:zenmusic/desktop/services/mini_player_bridge.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:zenmusic/desktop/utils/modals_extra.dart';
 import 'package:zenmusic/desktop/utils/zen_icons.dart';
@@ -144,14 +158,36 @@ class AppearancePage extends StatelessWidget {
                           );
                         },
                       ),
+                      // SP-33: crossfade entry (full slider + explainer
+                      // cards live in crossfade_page.dart, same as the
+                      // Settings → General row).
+                      ZenRow(
+                        icon: Icons.compare_arrows,
+                        title: 'Crossfade',
+                        subtitle: 'Smooth volume fade between tracks',
+                        chevron: true,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const CrossfadePage()),
+                        ),
+                      ),
                       ValueListenableBuilder<bool>(
                         valueListenable: AppearancePrefs.canvasEnabled,
                         builder: (context, on, _) => ZenSwitchRow(
                           icon: ZenIcons.animatedBg,
-                          title: 'Animated background',
-                          subtitle: 'Moving backdrop on the player screen',
+                          title: 'Song backdrop',
+                          subtitle:
+                              'Video behind the player · 9:16 mobile · 16:9 desktop',
                           value: on,
-                          onChanged: AppearancePrefs.setCanvasEnabled,
+                          onChanged: (v) {
+                            AppearancePrefs.setCanvasEnabled(v);
+                            // SP-33: on Windows this is also the video
+                            // backdrop service's master power, so both
+                            // togglers stay in sync.
+                            if (Platform.isWindows) {
+                              WindowsBackdropService.instance.setEnabled(v);
+                            }
+                          },
                         ),
                       ),
                       ValueListenableBuilder<bool>(
@@ -164,6 +200,27 @@ class AppearancePage extends StatelessWidget {
                         ),
                       ),
                     ]),
+
+                    // ── Desktop (Windows only) — SP-33 ──
+                    if (Platform.isWindows)
+                      ZenSection(title: 'Desktop', children: [
+                        ZenRow(
+                          icon: Icons.picture_in_picture_alt,
+                          title: 'Mini player',
+                          subtitle: 'Float the controls in a small window',
+                          chevron: false,
+                          onTap: () =>
+                              MiniPlayerBridge.instance.openMiniPlayer(),
+                        ),
+                        ZenRow(
+                          icon: Icons.lyrics,
+                          title: 'Lyrics overlay',
+                          subtitle: 'Pinned always-on-top sing-along window',
+                          chevron: false,
+                          onTap: () =>
+                              LyricsOverlayBridge.instance.openOverlay(),
+                        ),
+                      ]),
 
                     // ── Lyrics ──
                     ZenSection(title: 'Lyrics', children: [

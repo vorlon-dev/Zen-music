@@ -1,6 +1,9 @@
-// ZenMusic — Saved (Library) page. SP-6: adds a "Spotify" card when the
-// user is logged in (routes to the Spotify library screen). Non-Spotify
-// users see the page unchanged.
+// ZenMusic — Saved (Library) page.
+// SP-30: the feature/setup cards that used to live here (Spotify,
+// Offline cache, Last.fm, Mini player, Crossfade, Lyrics overlay and
+// Video backdrop) all moved to the Settings page. This page is back to
+// pure library content: Favourites, Downloads, History and your
+// playlists.
 
 import 'dart:collection';
 
@@ -13,7 +16,6 @@ import 'package:get_it/get_it.dart';
 
 import 'package:zenmusic/desktop/screens/library/cubit/library_cubit.dart';
 import 'package:zenmusic/desktop/services/library.dart';
-import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/themes/colors.dart';
 import 'package:zenmusic/desktop/themes/text_styles.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
@@ -95,103 +97,88 @@ class _LibraryBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: SpotifyAuth.instance.loggedIn,
-      builder: (context, spotifyLoggedIn, _) {
-        final List<Map<String, dynamic>> gridItems = [];
+    final List<Map<String, dynamic>> gridItems = [];
 
-        gridItems.add({
-          'title': 'Favourites',
-          'subtitle': '$favouritesCount songs',
-          'icon': AdaptiveIcons.heart_fill,
-          'onTap': () => context.push('/saved/favourites_page'),
-        });
+    gridItems.add({
+      'title': 'Favourites',
+      'subtitle': '$favouritesCount songs',
+      'icon': AdaptiveIcons.heart_fill,
+      'onTap': () => context.push('/saved/favourites_page'),
+    });
 
-        gridItems.add({
-          'title': 'Downloads',
-          'subtitle': '$downloadsCount songs',
-          'icon': AdaptiveIcons.download,
-          'onTap': () => context.push('/saved/downloads_page'),
-        });
+    gridItems.add({
+      'title': 'Downloads',
+      'subtitle': '$downloadsCount songs',
+      'icon': AdaptiveIcons.download,
+      'onTap': () => context.push('/saved/downloads_page'),
+    });
 
-        gridItems.add({
-          'title': 'History',
-          'subtitle': '$historyCount songs',
-          'icon': Icons.history,
-          'onTap': () => context.push('/saved/history_page'),
-        });
+    gridItems.add({
+      'title': 'History',
+      'subtitle': '$historyCount songs',
+      'icon': Icons.history,
+      'onTap': () => context.push('/saved/history_page'),
+    });
 
-        // SP-6: Spotify account entry, only when logged in.
-        if (spotifyLoggedIn) {
-          gridItems.add({
-            'title': 'Spotify',
-            'subtitle': 'Your account',
-            'icon': Icons.library_music,
-            'onTap': () => context.push('/saved/spotify_library'),
-          });
-        }
+    final sortedPlaylists = SplayTreeMap.from(playlists);
+    for (var entry in sortedPlaylists.entries) {
+      if (entry.value == null) continue;
+      final key = entry.key;
+      final item = entry.value;
 
-        final sortedPlaylists = SplayTreeMap.from(playlists);
-        for (var entry in sortedPlaylists.entries) {
-          if (entry.value == null) continue;
-          final key = entry.key;
-          final item = entry.value;
-
-          gridItems.add({
-            'title': item['title'],
-            'subtitle': (item['songs'] != null || item['isPredefined'])
-                ? (item['isPredefined'] == true
-                ? item['subtitle']
-                : '${item['songs'].length} songs')
-                : '',
-            'playlist_item': item,
-            'playlist_key': key,
-            'onTap': () {
-              if (item['isPredefined'] == true) {
-                context.push(
-                  '/browse',
-                  extra: {
-                    'endpoint': item['endpoint'].cast<String, dynamic>(),
-                  },
-                );
-              } else {
-                context.push(
-                  '/saved/playlist_details',
-                  extra: {
-                    'playlistkey': key,
-                  },
-                );
-              }
-            },
-            'onSecondaryTap': () {
-              if (item['videoId'] == null && item['playlistId'] != null) {
-                Modals.showPlaylistBottomModal(context, item);
-              } else if (item['isPredefined'] == false) {
-                Modals.showPlaylistBottomModal(
-                  context,
-                  {...item, 'playlistId': key},
-                );
-              }
-            }
-          });
-        }
-
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            return GridView.builder(
-              padding: const EdgeInsets.all(16),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 200,
-                childAspectRatio: 0.8,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-              ),
-              itemCount: gridItems.length,
-              itemBuilder: (context, index) {
-                final item = gridItems[index];
-                return _LibraryGridCard(item: item);
+      gridItems.add({
+        'title': item['title'],
+        'subtitle': (item['songs'] != null || item['isPredefined'])
+            ? (item['isPredefined'] == true
+            ? item['subtitle']
+            : '${item['songs'].length} songs')
+            : '',
+        'playlist_item': item,
+        'playlist_key': key,
+        'onTap': () {
+          if (item['isPredefined'] == true) {
+            context.push(
+              '/browse',
+              extra: {
+                'endpoint': item['endpoint'].cast<String, dynamic>(),
               },
             );
+          } else {
+            context.push(
+              '/saved/playlist_details',
+              extra: {
+                'playlistkey': key,
+              },
+            );
+          }
+        },
+        'onSecondaryTap': () {
+          if (item['videoId'] == null && item['playlistId'] != null) {
+            Modals.showPlaylistBottomModal(context, item);
+          } else if (item['isPredefined'] == false) {
+            Modals.showPlaylistBottomModal(
+              context,
+              {...item, 'playlistId': key},
+            );
+          }
+        }
+      });
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GridView.builder(
+          padding: const EdgeInsets.all(16),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 200,
+            childAspectRatio: 0.8,
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 16,
+          ),
+          itemCount: gridItems.length,
+          itemBuilder: (context, index) {
+            final item = gridItems[index];
+            return _LibraryGridCard(item: item);
           },
         );
       },

@@ -1,17 +1,15 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), services/media_player.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
+// ZenMusic Desktop — services/media_player.dart (GPL-3.0).
 //
-// PORT DEVIATIONS:
-//  1. Android audio pipeline: restored for ANDROID ONLY at the EQ round —
-//     AudioPipeline(AndroidEqualizer) gives device-band EQ on phones.
-//     Desktop (Windows/Linux/macOS): plain player — EQ arrives via the mpv
-//     arc. All EQ methods no-op safely off-Android.
+// FEATURES:
+//  1. Android audio pipeline: AudioPipeline(AndroidEqualizer) gives
+//     device-band EQ on phones. Desktop (Windows/Linux/macOS): plain
+//     player — EQ arrives via the mpv arc. All EQ methods no-op safely
+//     off-Android.
 //  2. just_audio_background imported for the MediaItem tag class ONLY — never
 //     initialized on desktop (its init is the recorded Windows crash); the
 //     MOBILE entry (lib/main.dart) initializes it.
-//  3. YTMusic-dependent paths restored verbatim (stats timer, autofetch,
-//     startRelated, startPlaylistSongs, online-playlist branches).
+//  3. YT Music paths: stats timer, autofetch, startRelated,
+//     startPlaylistSongs, online-playlist branches.
 //  4. JioSaavn: direct 320kbps branch (jiosaavnStreamUrl in the song map).
 //  5. Thumbnails upgraded via getEnhancedImage (regex size normalization).
 //  6. playAll is chart-aware: isChart rows resolve via the search-and-play
@@ -33,6 +31,46 @@
 //  10. SP-11 Local Cache: Automatically saves and restores the last played
 //      queue, index, and position using Hive so the app opens exactly where
 //      the user left off.
+//  11. Offline song cache: every YouTube song that becomes current is
+//      silently downloaded in the background (SongCache) and every later
+//      play comes straight from disk — no proxy, no headers, works with
+//      zero internet. See song_cache_service.dart.
+//  12. SP-22 Windows SMTC: system media keys (play/pause/next/previous),
+//      the Windows volume-flyout card (title, artist, artwork, live
+//      position) and overlay buttons — wired via smtc_bridge.dart and
+//      driven by the existing notifiers, so every source (YT, JioSaavn,
+//      Spotify engine, offline files, restored sessions) shows up in the
+//      OS media overlay with zero per-path wiring.
+//  13. SP-23 Discord Rich Presence: song, artist, artwork and a live
+//      elapsed timer on the user's Discord profile — same notifier-driven
+//      pattern, via discord_presence_bridge.dart. Disabled until a Discord
+//      application id is set (see that file's header).
+//  14. SP-25 Last.fm scrobbling: now-playing + scrobbles to the user's
+//      Last.fm library (LastfmService) — same notifier-driven pattern.
+//      Disabled until the API credentials are set in lastfm_service.dart
+//      and the user connects their account from the Saved page.
+//  15. SP-26 Mini player window: a floating bar in its own desktop window
+//      (desktop_multi_window 0.2.1) mirroring the current track, play
+//      state and live position, with transport buttons — wired via
+//      mini_player_bridge.dart, same notifier-driven pattern. The mini
+//      window is a second Flutter engine; the bridge is the only link.
+//  16. SP-27 Crossfade: smooth volume fade between tracks — the current
+//      track fades out over its last N seconds and the next track fades
+//      in over its first N seconds (Hive 'CROSSFADE_SECS', 0 = off; the
+//      Saved page's Crossfade card is the control). Volume-only — queue
+//      routing, playback logic and the Spotify engine path are untouched,
+//      every ramp self-cancels on pause/seek/skip/stop.
+//  17. SP-28 Lyrics overlay: a floating always-on-top window (the SP-26
+//      mini-window tech + a Win32 topmost helper) mirroring the current
+//      track's synced lyrics and following the position live — wired via
+//      lyrics_overlay_bridge.dart, same notifier-driven pattern. Lyrics
+//      are fetched by the same chain the in-player LyricsBox uses.
+//  18. SP-29 Windows video backdrop: the current track's YouTube video
+//      plays muted as a blurred 16:9 canvas layer behind the player
+//      screen (Windows only) — wired via backdrop/windows_backdrop_service
+//      .dart, same notifier-driven pattern. The audio path is untouched;
+//      the backdrop widget (backdrop/windows_backdrop.dart) goes in as
+//      the first child of the player screen's Stack.
 
 import 'dart:async';
 import 'dart:convert';
@@ -49,6 +87,13 @@ import '../utils/enhanced_image.dart';
 import 'eq_models.dart';
 import 'settings_manager.dart';
 import 'yt_audio_stream.dart';
+import 'song_cache_service.dart';
+import 'smtc_bridge.dart';
+import 'discord_presence_bridge.dart';
+import 'lastfm_service.dart';
+import 'mini_player_bridge.dart';
+import 'lyrics_overlay_bridge.dart';
+import '../backdrop/windows_backdrop_service.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/spotify/spotify_player.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
@@ -57,8 +102,8 @@ import 'package:zenmusic/desktop/spotify/spotify_desktop_engine.dart';
 import 'package:zenmusic/hive/zen_duration_adapter.dart';
 
 
-// From Stopify's SpotifyAudioPlayer (MIT) — Widevine license endpoint for
-// web-player CENC audio. Consumed by the patched just_audio Android host.
+// Widevine license endpoint for web-player CENC audio. Consumed by the
+// patched just_audio Android host.
 const _kSpotifyWidevineLicenseUrl =
     'https://gae2-spclient.spotify.com/widevine-license/v1/audio/license';
 
@@ -104,6 +149,9 @@ class MediaPlayer extends ChangeNotifier {
       engineOwnsNotifier.value = v;
     }
   }
+
+  // ── SP-22 Windows SMTC ──
+  StreamSubscription<SmtcButton>? _smtcSub;
 
   MediaPlayer() {
     if (Platform.isAndroid) {
@@ -181,7 +229,7 @@ class MediaPlayer extends ChangeNotifier {
     if (rawQueue == null || rawQueue.isEmpty) return;
 
     final queue = rawQueue.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    final index = (box.get('CACHE_INDEX') as int? ?? 0).clamp(0, queue.length - 1);
+    final int index = (box.get('CACHE_INDEX') as int? ?? 0).clamp(0, queue.length - 1).toInt();
     final posMs = box.get('CACHE_POSITION') as int? ?? 0;
 
     queueSnapshot.value = queue;
@@ -211,12 +259,39 @@ class MediaPlayer extends ChangeNotifier {
   @override
   void dispose() {
     _saveCurrentState();
+    _disposeSmtc();
+    _disposeDiscord();
+    _disposeLastfm();
+    _disposeMiniPlayer();
+    _disposeCrossfade();
+    _disposeLyricsOverlay();
+    _disposeBackdrop();
     super.dispose();
   }
 
   // ═══════════════════════════════════════════════════════════════════
   // SP-5b / SP-6 / SP-7 — SpotifyDesktopEngine bridge
   // ═══════════════════════════════════════════════════════════════════
+
+  // Engine transport wrappers. Future<void>.sync() accepts BOTH a void and
+  // a Future<void> return from the engine, so these compile and correctly
+  // await the engine no matter how its methods are declared — and they can
+  // never trip "this expression has a type of 'void'" again.
+  Future<void> _engineStop() async {
+    await Future<void>.sync(() => SpotifyDesktopEngine.instance.stop());
+  }
+
+  Future<void> _enginePause() async {
+    await Future<void>.sync(() => SpotifyDesktopEngine.instance.pause());
+  }
+
+  Future<void> _engineResume() async {
+    await Future<void>.sync(() => SpotifyDesktopEngine.instance.resume());
+  }
+
+  Future<void> _engineSeek(Duration d) async {
+    await Future<void>.sync(() => SpotifyDesktopEngine.instance.seek(d));
+  }
 
   void _attachEngineListeners() {
     if (_engineListenersAttached) return;
@@ -254,8 +329,8 @@ class MediaPlayer extends ChangeNotifier {
     engine.ended.addListener(() {
       if (!_engineOwnsPlayback) return;
       if (engine.ended.value) {
-        unawaited(engine.seek(Duration.zero));
-        unawaited(engine.pause());
+        unawaited(_engineSeek(Duration.zero));
+        unawaited(_enginePause());
         _buttonState.value = ButtonState.paused;
       }
     });
@@ -264,11 +339,11 @@ class MediaPlayer extends ChangeNotifier {
   Future<bool> _tryEnginePlay(Map<String, dynamic> song) async {
     if (!Platform.isWindows) return false;
     if (_engineOwnsPlayback) {
-      await SpotifyDesktopEngine.instance.stop();
+      await _engineStop();
       _setEngineOwns(false);
     }
     try {
-      await _player.pause();
+      _player.pause();
       await _player.stop();
       await _player.clearAudioSources();
     } catch (_) {}
@@ -324,7 +399,7 @@ class MediaPlayer extends ChangeNotifier {
   Future<void> _releaseEngine() async {
     if (!_engineOwnsPlayback) return;
     _setEngineOwns(false);
-    await SpotifyDesktopEngine.instance.stop();
+    await _engineStop();
     _currentSongNotifier.value = null;
     _buttonState.value = ButtonState.paused;
     _progressBarState.value = ProgressBarState();
@@ -343,7 +418,14 @@ class MediaPlayer extends ChangeNotifier {
     _listenToShuffle();
     _listenToAutofetch();
     _listenToPlayerErrors();
+    _listenToCrossfade();
     unawaited(_restoreEq());
+    unawaited(_initSmtc());
+    unawaited(_initDiscord());
+    unawaited(_initLastfm());
+    unawaited(_initMiniPlayer());
+    unawaited(_initLyricsOverlay());
+    unawaited(_initBackdrop());
 
     Timer.periodic(const Duration(seconds: 10), (timer) {
       if (currentSongNotifier.value != null && _player.playing) {
@@ -353,11 +435,534 @@ class MediaPlayer extends ChangeNotifier {
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // SP-22 WINDOWS SMTC (media keys + volume-flyout card)
+  // ═══════════════════════════════════════════════════════════════
+  // Driven entirely by the existing notifiers: currentSongNotifier gives
+  // the OS the track metadata, progressBarState feeds the flyout progress
+  // bar (throttled inside the bridge), buttonState maps to playing/paused.
+  // Engine and just_audio paths both update these, so nothing per-path.
+
+  Future<void> _initSmtc() async {
+    if (!Platform.isWindows) return;
+    await SmtcBridge.instance.init();
+    _smtcSub = SmtcBridge.instance.buttonPresses.listen(_onSmtcButton);
+    currentSongNotifier.addListener(_smtcPushMetadata);
+    progressBarState.addListener(_smtcPushTimeline);
+    buttonState.addListener(_smtcPushStatus);
+    _smtcPushMetadata();
+    _smtcPushStatus();
+  }
+
+  void _onSmtcButton(SmtcButton b) {
+    switch (b) {
+      case SmtcButton.play:
+        if (_buttonState.value != ButtonState.playing) {
+          unawaited(togglePlayPause());
+        }
+        break;
+      case SmtcButton.pause:
+        if (_buttonState.value == ButtonState.playing) {
+          unawaited(togglePlayPause());
+        }
+        break;
+      case SmtcButton.next:
+        unawaited(skipNext());
+        break;
+      case SmtcButton.previous:
+        unawaited(skipPrevious());
+        break;
+      case SmtcButton.stop:
+      // Gentle stop: the media-key stop behaves like pause so the queue
+      // stays intact (real stop() wipes the session queue).
+        if (_buttonState.value == ButtonState.playing) {
+          unawaited(togglePlayPause());
+        }
+        break;
+    }
+  }
+
+  void _smtcPushMetadata() {
+    final MediaItem? item = currentSongNotifier.value;
+    if (item == null) {
+      SmtcBridge.instance.stopped();
+      return;
+    }
+    final String? thumb = item.artUri?.toString();
+    SmtcBridge.instance.updateTrack(SmtcTrack(
+      title: item.title,
+      artist: item.artist ?? '',
+      album: item.album ?? '',
+      thumbnailUrl: (thumb != null &&
+          (thumb.startsWith('http://') || thumb.startsWith('https://')))
+          ? thumb
+          : null,
+      duration: progressBarState.value.total,
+    ));
+    _smtcPushTimeline(force: true);
+  }
+
+  void _smtcPushStatus() {
+    switch (_buttonState.value) {
+      case ButtonState.playing:
+        SmtcBridge.instance.playing();
+        break;
+      case ButtonState.paused:
+        SmtcBridge.instance.paused();
+        break;
+      case ButtonState.loading:
+        break; // transient — resolves to playing/paused within a tick
+    }
+  }
+
+  void _smtcPushTimeline({bool force = false}) {
+    final ProgressBarState p = progressBarState.value;
+    SmtcBridge.instance.position(p.current, p.total, force: force);
+  }
+
+  void _disposeSmtc() {
+    _smtcSub?.cancel();
+    _smtcSub = null;
+    currentSongNotifier.removeListener(_smtcPushMetadata);
+    progressBarState.removeListener(_smtcPushTimeline);
+    buttonState.removeListener(_smtcPushStatus);
+    unawaited(SmtcBridge.instance.dispose());
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SP-23 DISCORD RICH PRESENCE
+  // ═══════════════════════════════════════════════════════════════
+  // Same notifier-driven pattern as SP-22: currentSongNotifier carries the
+  // track, buttonState carries play/pause. The bridge dedupes and only
+  // talks to Discord on real changes, never per position tick. Self-noops
+  // without an application id and off Windows/Linux.
+
+  Future<void> _initDiscord() async {
+    await DiscordPresenceBridge.instance.init();
+    currentSongNotifier.addListener(_discordPushTrack);
+    buttonState.addListener(_discordPushStatus);
+    _discordPushTrack();
+    _discordPushStatus();
+  }
+
+  void _discordPushTrack() {
+    final MediaItem? item = currentSongNotifier.value;
+    if (item == null) {
+      DiscordPresenceBridge.instance.stopped();
+      return;
+    }
+    final String? thumb = item.artUri?.toString();
+    DiscordPresenceBridge.instance.updateTrack(
+      title: item.title,
+      artist: item.artist ?? '',
+      artUrl: (thumb != null &&
+          (thumb.startsWith('http://') || thumb.startsWith('https://')))
+          ? thumb
+          : null,
+      trackKey: item.id,
+    );
+  }
+
+  void _discordPushStatus() {
+    switch (_buttonState.value) {
+      case ButtonState.playing:
+        DiscordPresenceBridge.instance.playing(
+          position: _progressBarState.value.current,
+        );
+        break;
+      case ButtonState.paused:
+        DiscordPresenceBridge.instance.paused();
+        break;
+      case ButtonState.loading:
+        break; // transient — resolves to playing/paused within a tick
+    }
+  }
+
+  void _disposeDiscord() {
+    currentSongNotifier.removeListener(_discordPushTrack);
+    buttonState.removeListener(_discordPushStatus);
+    DiscordPresenceBridge.instance.stopped();
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SP-25 LAST.FM SCROBBLING
+  // ═══════════════════════════════════════════════════════════════
+  // Same notifier-driven pattern as SP-22/SP-23: track metadata comes from
+  // currentSongNotifier, positions from progressBarState. The service
+  // applies the Last.fm client rules itself (≥ half the track or ≥ 4 min,
+  // > 30 s tracks), sends "now playing" at track start and queues offline
+  // scrobbles in Hive. No-ops on every platform until the user connects
+  // Last.fm from the Saved page — calls are safe in any state.
+
+  Future<void> _initLastfm() async {
+    await LastfmService.instance.init();
+    currentSongNotifier.addListener(_lastfmPushTrack);
+    progressBarState.addListener(_lastfmPushProgress);
+  }
+
+  void _lastfmPushTrack() {
+    final MediaItem? item = currentSongNotifier.value;
+    if (item == null) return;
+    LastfmService.instance.trackChanged(
+      title: item.title,
+      artist: item.artist ?? '',
+      album: item.album,
+    );
+  }
+
+  void _lastfmPushProgress() {
+    final ProgressBarState p = progressBarState.value;
+    LastfmService.instance.progress(p.current, p.total);
+  }
+
+  void _disposeLastfm() {
+    currentSongNotifier.removeListener(_lastfmPushTrack);
+    progressBarState.removeListener(_lastfmPushProgress);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SP-26 MINI PLAYER WINDOW (floating desktop_multi_window bar)
+  // ═══════════════════════════════════════════════════════════════
+  // Same notifier-driven pattern as SP-22/23/25: track metadata, play
+  // state and position are mirrored into the mini window and its
+  // transport buttons come back as commands. The mini window is a second
+  // Flutter engine sharing nothing with this isolate — the bridge is the
+  // only link, every push is fire-and-swallow, and a missing/dead mini
+  // window can never affect playback.
+
+  Future<void> _initMiniPlayer() async {
+    await MiniPlayerBridge.instance.init();
+    MiniPlayerBridge.instance.onCommand = _onMiniCommand;
+    currentSongNotifier.addListener(_miniPushTrack);
+    buttonState.addListener(_miniPushPlaying);
+    progressBarState.addListener(_miniPushProgress);
+    // Seed the bridge so a window opened later is never blank.
+    _miniPushTrack();
+    _miniPushPlaying();
+  }
+
+  void _onMiniCommand(String cmd) {
+    switch (cmd) {
+      case 'toggle':
+        unawaited(togglePlayPause());
+        break;
+      case 'next':
+        unawaited(skipNext());
+        break;
+      case 'previous':
+        unawaited(skipPrevious());
+        break;
+    }
+  }
+
+  void _miniPushTrack() {
+    final MediaItem? item = currentSongNotifier.value;
+    MiniPlayerBridge.instance.pushTrack(item == null
+        ? null
+        : MiniTrack(
+      title: item.title,
+      artist: item.artist ?? '',
+      artUri: item.artUri?.toString(),
+    ));
+  }
+
+  void _miniPushPlaying() {
+    MiniPlayerBridge.instance
+        .pushPlaying(_buttonState.value == ButtonState.playing);
+  }
+
+  void _miniPushProgress() {
+    final ProgressBarState p = progressBarState.value;
+    MiniPlayerBridge.instance.pushProgress(p.current, p.total);
+  }
+
+  void _disposeMiniPlayer() {
+    currentSongNotifier.removeListener(_miniPushTrack);
+    buttonState.removeListener(_miniPushPlaying);
+    progressBarState.removeListener(_miniPushProgress);
+    MiniPlayerBridge.instance.onCommand = null;
+    unawaited(MiniPlayerBridge.instance.shutdown());
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SP-27 CROSSFADE (smooth volume fade between tracks)
+  // ═══════════════════════════════════════════════════════════════
+  // Volume-only transition: the last N seconds of a track fade out, the
+  // next track fades in. No second player, no queue surgery — every ramp
+  // is token-guarded and re-checks its preconditions on every tick, so it
+  // self-cancels (and restores the volume) on pause, seek, skip, stop or
+  // the Spotify engine taking over. The volume can never stay stuck.
+  // Control surface: crossfade_page.dart (Saved → Crossfade).
+
+  static const String _crossfadeKey = 'CROSSFADE_SECS';
+  int _crossfadeSeconds = 0;
+  Timer? _fadeTimer;
+  int _fadeToken = 0;
+  bool _fadedOut = false;
+
+  int get crossfadeSeconds => _crossfadeSeconds;
+
+  Future<void> setCrossfadeSeconds(int seconds) async {
+    final int v = seconds.clamp(0, 12).toInt();
+    _crossfadeSeconds = v;
+    try {
+      await Hive.box('SETTINGS').put(_crossfadeKey, v);
+    } catch (_) {}
+    // Changing the setting mid-fade returns to a clean state.
+    _cancelFade(restore: true);
+  }
+
+  void _listenToCrossfade() {
+    try {
+      _crossfadeSeconds =
+          (Hive.box('SETTINGS').get(_crossfadeKey, defaultValue: 0) as num?)
+              ?.toInt() ??
+              0;
+    } catch (_) {}
+    _player.positionStream.listen((_) {
+      if (_engineOwnsPlayback) return;
+      _maybeStartFadeOut();
+    });
+    _player.currentIndexStream.listen((int? index) {
+      if (_engineOwnsPlayback) return;
+      if (index == null) {
+        // Queue cleared (stop / fresh play) — never leave a ramp running.
+        _cancelFade(restore: true);
+        return;
+      }
+      // Every track boundary (auto-advance or manual skip) starts a fresh
+      // fade-in when crossfade is on. Registered AFTER
+      // _listenToChangesInSong, so _currentSongNotifier is already the new
+      // track by the time this runs.
+      _maybeStartFadeIn();
+    });
+  }
+
+  void _maybeStartFadeOut() {
+    final int window = _crossfadeSeconds;
+    if (window <= 0 || _fadedOut) return;
+    if (_buttonState.value != ButtonState.playing) return;
+    final ProgressBarState p = _progressBarState.value;
+    final Duration total = p.total;
+    if (total <= Duration.zero || total <= Duration(seconds: window * 2)) {
+      return;
+    }
+    final Duration remaining = total - p.current;
+    if (remaining <= Duration.zero ||
+        remaining > Duration(seconds: window)) {
+      return;
+    }
+    final String? trackId = _currentSongNotifier.value?.id;
+    if (trackId == null) return;
+    _startFadeOut(trackId, Duration(seconds: window));
+  }
+
+  void _startFadeOut(String trackId, Duration window) {
+    ++_fadeToken;
+    _fadeTimer?.cancel();
+    final int token = _fadeToken;
+    final DateTime start = DateTime.now();
+    _fadeTimer = Timer.periodic(const Duration(milliseconds: 80), (Timer t) {
+      final ProgressBarState p = _progressBarState.value;
+      final bool invalid = token != _fadeToken ||
+          _engineOwnsPlayback ||
+          _crossfadeSeconds <= 0 ||
+          _currentSongNotifier.value?.id != trackId ||
+          _buttonState.value != ButtonState.playing ||
+          p.total <= Duration.zero ||
+          (p.total - p.current) > window + const Duration(milliseconds: 600);
+      if (invalid) {
+        t.cancel();
+        _restoreVolume();
+        return;
+      }
+      final double f = DateTime.now().difference(start).inMilliseconds /
+          window.inMilliseconds;
+      if (f >= 1.0) {
+        t.cancel();
+        try {
+          unawaited(_player.setVolume(0.0));
+        } catch (_) {}
+        _fadedOut = true;
+        // Queue end (or loop-one): nothing advances and the completed
+        // handler pauses at 0 — bring the volume back shortly after so
+        // replay is never silent. If a next track IS advancing, the
+        // fade-in below owns the volume anyway.
+        Future.delayed(const Duration(milliseconds: 2500), () {
+          if (token == _fadeToken &&
+              _currentSongNotifier.value?.id == trackId &&
+              !_engineOwnsPlayback) {
+            _fadedOut = false;
+            _restoreVolume();
+          }
+        });
+        return;
+      }
+      try {
+        unawaited(_player.setVolume((1.0 - f).clamp(0.0, 1.0)));
+      } catch (_) {}
+    });
+  }
+
+  void _maybeStartFadeIn() {
+    // Any boundary cancels whatever ramp was running.
+    ++_fadeToken;
+    _fadeTimer?.cancel();
+    _fadedOut = false;
+    final int window = _crossfadeSeconds;
+    final String? trackId = _currentSongNotifier.value?.id;
+    if (window <= 0 || trackId == null) {
+      _restoreVolume();
+      return;
+    }
+    _startFadeIn(trackId, Duration(seconds: window));
+  }
+
+  void _startFadeIn(String trackId, Duration window) {
+    final int token = _fadeToken;
+    final DateTime start = DateTime.now();
+    try {
+      unawaited(_player.setVolume(0.0));
+    } catch (_) {}
+    _fadeTimer = Timer.periodic(const Duration(milliseconds: 80), (Timer t) {
+      final bool invalid = token != _fadeToken ||
+          _engineOwnsPlayback ||
+          _crossfadeSeconds <= 0 ||
+          _currentSongNotifier.value?.id != trackId ||
+          _buttonState.value == ButtonState.paused;
+      if (invalid) {
+        t.cancel();
+        _restoreVolume();
+        return;
+      }
+      final double f = DateTime.now().difference(start).inMilliseconds /
+          window.inMilliseconds;
+      if (f >= 1.0) {
+        t.cancel();
+        _restoreVolume();
+        return;
+      }
+      try {
+        unawaited(_player.setVolume(f.clamp(0.0, 1.0)));
+      } catch (_) {}
+    });
+  }
+
+  void _restoreVolume() {
+    try {
+      unawaited(_player.setVolume(1.0));
+    } catch (_) {}
+  }
+
+  void _cancelFade({bool restore = true}) {
+    ++_fadeToken;
+    _fadeTimer?.cancel();
+    _fadeTimer = null;
+    _fadedOut = false;
+    if (restore) _restoreVolume();
+  }
+
+  void _disposeCrossfade() {
+    _cancelFade(restore: true);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SP-28 LYRICS OVERLAY WINDOW
+  // ═══════════════════════════════════════════════════════════════
+  // Same notifier-driven pattern as SP-22/23/25/26: the bridge mirrors
+  // track + position into the overlay engine and fetches lyrics for the
+  // current track (SP-10 Spotify Color Lyrics → SP-15 LRCLIB — the same
+  // chain the in-player LyricsBox uses). Fire-and-swallow everywhere; the
+  // overlay can never affect playback. Control surface: Saved →
+  // Lyrics overlay.
+
+  Future<void> _initLyricsOverlay() async {
+    await LyricsOverlayBridge.instance.init();
+    currentSongNotifier.addListener(_overlayPushTrack);
+    progressBarState.addListener(_overlayPushPosition);
+    _overlayPushTrack();
+  }
+
+  void _overlayPushTrack() {
+    final MediaItem? item = currentSongNotifier.value;
+    LyricsOverlayBridge.instance.pushTrack(item == null
+        ? null
+        : OverlayTrack(
+      title: item.title,
+      artist: item.artist ?? '',
+      artUri: item.artUri?.toString(),
+      album: item.album,
+      durationMs: item.duration?.inMilliseconds,
+      spotifyUri: item.extras?['spotifyUri'] as String?,
+    ));
+  }
+
+  void _overlayPushPosition() {
+    final ProgressBarState p = progressBarState.value;
+    LyricsOverlayBridge.instance.pushPosition(p.current, p.total);
+  }
+
+  void _disposeLyricsOverlay() {
+    currentSongNotifier.removeListener(_overlayPushTrack);
+    progressBarState.removeListener(_overlayPushPosition);
+    unawaited(LyricsOverlayBridge.instance.shutdown());
+  }
+
+  // ═════════════════════════════════════════════════════════════
+  // SP-29 WINDOWS VIDEO BACKDROP
+  // ═════════════════════════════════════════════════════════════
+  // Same notifier-driven pattern as SP-22/23/25/26/28: the service
+  // mirrors track + play state + seeks into a dedicated MUTED media_kit
+  // video player (lib/desktop/backdrop/) whose texture the player screen
+  // renders as the blurred 16:9 backdrop (windows_backdrop.dart, first
+  // child of the screen's Stack). Windows-only; fire-and-swallow — the
+  // backdrop can never affect playback. Control surface: Saved → Video
+  // backdrop.
+
+  Future<void> _initBackdrop() async {
+    await WindowsBackdropService.instance.init();
+    currentSongNotifier.addListener(_backdropPushTrack);
+    buttonState.addListener(_backdropPushState);
+    _backdropPushTrack();
+  }
+
+  void _backdropPushTrack() {
+    final MediaItem? item = currentSongNotifier.value;
+    // Spotify-engine tracks: MediaItem.id carries the YT *fallback* videoId
+    // (not the spotify URI), so the service's 'spotify:' filter never sees
+    // them — guard here instead, or the backdrop would show the wrong
+    // song's video behind Spotify audio. Audio owns the canvas: none.
+    final String? sp = item?.extras?['spotifyUri'] as String?;
+    if (sp != null && sp.isNotEmpty) {
+      WindowsBackdropService.instance.trackChanged(videoId: null);
+      return;
+    }
+    WindowsBackdropService.instance.trackChanged(videoId: item?.id);
+  }
+
+  void _backdropPushState() {
+    switch (buttonState.value) {
+      case ButtonState.playing:
+        WindowsBackdropService.instance.playing();
+        break;
+      case ButtonState.paused:
+      case ButtonState.loading:
+        WindowsBackdropService.instance.paused();
+        break;
+    }
+  }
+
+  void _disposeBackdrop() {
+    currentSongNotifier.removeListener(_backdropPushTrack);
+    buttonState.removeListener(_backdropPushState);
+    unawaited(WindowsBackdropService.instance.shutdown());
+  }
+
   void _listenToChangesInPlaylist() {
     _player.sequenceStream.listen((playlist) {
       if (_engineOwnsPlayback) return;
       final List<IndexedAudioSource> newList =
-      (playlist).cast<IndexedAudioSource>();
+      (playlist ?? const <IndexedAudioSource>[]).cast<IndexedAudioSource>();
 
       if (listEquals(newList, _songList)) return;
 
@@ -479,11 +1084,27 @@ class MediaPlayer extends ChangeNotifier {
         if (_songList.isNotEmpty && _currentIndex.value != null) {
           final MediaItem item = _songList[_currentIndex.value!].tag;
           addHistory(item.extras!);
+          _kickCache(item.extras!);
         }
         notifyListeners();
         _saveCurrentState();
       }
     });
+  }
+
+  // ── Offline cache: silent background download ──
+  // Single funnel for every "song became current" path (playSong,
+  // playFromSection, playAll, skipNext, radio/related, playlists). Only
+  // videoId songs are cached; Spotify, JioSaavn and DOWNLOADED files are
+  // skipped. First play streams instantly; the file fills in the
+  // background and every later play replays from disk.
+  void _kickCache(Map<String, dynamic> song) {
+    final videoId = song['videoId'] as String?;
+    if (videoId == null || videoId.isEmpty) return;
+    if ((song['spotifyUri'] as String?)?.isNotEmpty == true) return;
+    if ((song['jiosaavnStreamUrl'] as String?)?.isNotEmpty == true) return;
+    if (song['status'] == 'DOWNLOADED') return;
+    unawaited(SongCache.ensureCached(videoId));
   }
 
   void changeLoopMode() {
@@ -546,7 +1167,7 @@ class MediaPlayer extends ChangeNotifier {
                     'client-token': clientToken,
                     'app-platform': SpotifyConfig.appPlatform,
                     'spotify-app-version': SpotifyConfig.spotifyAppVersion,
-                    'origin': 'https://open.spotify.com',
+                    'origin': 'https://open.spotify.com/',
                     'referer': 'https://open.spotify.com/',
                     'user-agent': SpotifyConfig.userAgent,
                   },
@@ -563,6 +1184,12 @@ class MediaPlayer extends ChangeNotifier {
       final saavnUrl = song['jiosaavnStreamUrl'] as String?;
       if (saavnUrl != null && saavnUrl.isNotEmpty) {
         return AudioSource.uri(Uri.parse(saavnUrl), tag: tag);
+      }
+      // Offline cache: a YouTube song already on disk replays from the
+      // file instead of the network.
+      final cached = await SongCache.lookup(song['videoId'] ?? '');
+      if (cached != null && await File(cached.filePath).exists()) {
+        return AudioSource.file(cached.filePath, tag: tag);
       }
       if (Platform.isMacOS) {
         final quality =
@@ -636,7 +1263,7 @@ class MediaPlayer extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await _player.pause();
+      _player.pause();
       await _player.stop();
       if (_lastPlayRequestId != requestId) return;
       await _player.clearAudioSources();
@@ -709,7 +1336,7 @@ class MediaPlayer extends ChangeNotifier {
 
       final currentIndex = _player.currentIndex ?? -1;
       final sequenceLength = _player.sequence.length;
-      final insertIndex = (currentIndex + 1).clamp(0, sequenceLength);
+      final int insertIndex = (currentIndex + 1).clamp(0, sequenceLength).toInt();
 
       if (sequenceLength > 0) {
         await _player.insertAudioSource(insertIndex, audioSource);
@@ -770,7 +1397,7 @@ class MediaPlayer extends ChangeNotifier {
           return;
         }
         songs = resolved;
-        index = index.clamp(0, resolved.length - 1);
+        index = index.clamp(0, resolved.length - 1).toInt();
       }
 
       final selectedSong2 = Map<String, dynamic>.from(songs[index]);
@@ -875,15 +1502,15 @@ class MediaPlayer extends ChangeNotifier {
     if (_engineOwnsPlayback) {
       final engine = SpotifyDesktopEngine.instance;
       if (engine.playing.value) {
-        await engine.pause();
+        await _enginePause();
       } else {
-        await engine.resume();
+        await _engineResume();
       }
       _saveCurrentState();
       return;
     }
     if (_player.playing) {
-      await _player.pause();
+      _player.pause();
       _saveCurrentState();
     } else {
       await _player.play();
@@ -891,8 +1518,10 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   Future<void> seekTo(Duration d) async {
+    WindowsBackdropService.instance
+        .seekTo(d); // SP-29: realign the backdrop layer
     if (_engineOwnsPlayback) {
-      await SpotifyDesktopEngine.instance.seek(d);
+      await _engineSeek(d);
       _saveCurrentState();
       return;
     }
@@ -915,7 +1544,7 @@ class MediaPlayer extends ChangeNotifier {
           if (await _tryEnginePlay(next)) return;
         }
         _setEngineOwns(false);
-        await SpotifyDesktopEngine.instance.stop();
+        await _engineStop();
         try {
           await _player.stop();
           await _player.clearAudioSources();
@@ -946,7 +1575,7 @@ class MediaPlayer extends ChangeNotifier {
           if (await _tryEnginePlay(prev)) return;
         }
         _setEngineOwns(false);
-        await SpotifyDesktopEngine.instance.stop();
+        await _engineStop();
         try {
           await _player.stop();
           await _player.clearAudioSources();
@@ -977,7 +1606,7 @@ class MediaPlayer extends ChangeNotifier {
 
     if (isNext) {
       final currentIndex = _player.currentIndex ?? -1;
-      int insertIndex = (currentIndex + 1).clamp(0, queueLength);
+      int insertIndex = (currentIndex + 1).clamp(0, queueLength).toInt();
       await _player.insertAudioSources(insertIndex, newSources);
     } else {
       await _player.addAudioSources(newSources);

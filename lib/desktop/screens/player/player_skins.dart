@@ -1,34 +1,35 @@
 // ZenMusic Desktop — full-screen player layouts ("skins").
 //
 // Classic is the app's default player page (this file draws nothing for it).
-// The seven skins below are complete screens: each has its own header,
-// controls, seek control and gestures. All of them drive the same engine
-// (MediaPlayer via GetIt) and the callbacks in PlayerCtx, so every button
-// and gesture does the real thing:
+// Each skin below is a COMPLETE, separate screen modelled on a popular app.
+// Every skin has its own phone layout and its own wide (desktop) layout:
 //
-//   vinyl       Turntable. Record spins while playing, tonearm follows the
-//               song. Tap record = play/pause, swipe = previous/next,
-//               long-press = lyrics.
-//   editorial   Big type, plain text controls. Swipe the artwork to skip.
-//   lyricsFirst Lyrics fill the screen; compact controls below.
-//   polaroid    Artwork as a printed photo. Swipe the photo to skip.
-//   radio       Tuning dial = seek bar. Knobs set volume and speed
-//               (drag or scroll wheel, double-tap resets).
-//   studio      Fader seek bar, volume fader, speed presets.
-//   ring        Drag around the artwork to seek. Tap = play/pause,
-//               double-tap = favourite, swipe = previous/next.
+//   spotify     Colour fade, white play button. Desktop: art + lyrics on top,
+//               the classic bottom player bar underneath.
+//   appleMusic  Drag handle, art shrinks on pause, thick bar, volume.
+//               Desktop: the same player centred on the blurred colour.
+//   ytMusic     Song/Lyrics switch, pill actions, tab strip. Desktop: seek
+//               line on the top edge of the bottom bar, tabs on the right.
+//   amazon      Centred titles, ring play button, Like/Lyrics/Queue pills.
+//               Desktop: artwork on the RIGHT, text + lyrics on the left.
+//   tidal       Edge-to-edge artwork, thin line, bare icons.
+//               Desktop: artwork flush left, full height.
+//   deezer      Rounded art, purple accent, lyrics drawer at the bottom.
+//               Desktop: lyrics on the LEFT, player on the right.
+//   soundcloud  Waveform seek bar, orange play. Desktop: banner on top.
+//   pandora     Blue, bar under the art, five-button row, bottom tab strip.
+//               Desktop: now-playing card with lyrics underneath.
+//   material    Android Material-You: wavy progress, squircle buttons.
+//               Desktop: art card + lyrics card + control card.
+//   winamp      Classic Winamp windows with a green LCD.
 //
-// Every skin is drawn on a fixed design canvas and scaled with FittedBox, so
-// it looks the same on phones and desktop windows.
-//
-// Icons follow the platform: Cupertino on iOS/macOS, Material elsewhere.
+// All buttons drive the real engine (MediaPlayer via GetIt) and PlayerCtx.
 
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:ui' show FontFeature;
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
-import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:get_it/get_it.dart';
@@ -48,28 +49,32 @@ import 'package:zenmusic/desktop/utils/zen_settings_kit.dart';
 
 enum PlayerSkin {
   classic('Classic', 'The standard Zen layout', Icons.music_note_outlined),
-  vinyl('Turntable', 'Spinning record with a tonearm that follows the song',
-      Icons.album_outlined),
-  editorial('Editorial', 'Large type with plain text controls',
-      Icons.article_outlined),
-  lyricsFirst('Lyrics', 'Lyrics fill the screen, compact controls below',
-      Icons.lyrics_outlined),
-  polaroid('Polaroid', 'Artwork as a printed photo, swipe to change song',
-      Icons.photo_outlined),
-  radio('Tabletop radio',
-      'Tuning dial for seeking, knobs for volume and speed',
+  spotify('Spotify style', 'Colour fade, white play button, bottom bar on desktop',
+      Icons.graphic_eq),
+  appleMusic('Apple Music style',
+      'Artwork shrinks on pause, thick bar, volume slider',
+      Icons.queue_music),
+  ytMusic('YouTube Music style', 'Song / Lyrics switch, pills and tabs',
+      Icons.smart_display_outlined),
+  amazon('Amazon Music style', 'Centred titles, ring play button, pills',
+      Icons.headphones_outlined),
+  tidal('Tidal style', 'Edge-to-edge artwork, thin line, black',
+      Icons.waves),
+  deezer('Deezer style', 'Rounded artwork, purple, lyrics drawer',
+      Icons.equalizer),
+  soundcloud('SoundCloud style', 'Waveform seek bar, orange play button',
+      Icons.cloud_outlined),
+  pandora('Pandora style', 'Blue, bar under the artwork, tab strip',
       Icons.radio_outlined),
-  studio('Studio', 'Fader seek bar, volume fader and speed presets',
-      Icons.tune),
-  ring('Ring', 'Drag around the artwork to seek',
-      Icons.radio_button_unchecked);
+  material('Material You style', 'Wavy progress, squircle buttons',
+      Icons.bubble_chart_outlined),
+  winamp('Winamp style', 'Retro windows with a green LCD',
+      Icons.settings_input_component);
 
   const PlayerSkin(this.label, this.desc, this.icon);
   final String label, desc;
   final IconData icon;
 
-  /// Safe restore from a saved `skin.name` (unknown or removed skins fall
-  /// back to classic).
   static PlayerSkin fromName(String? n) =>
       values.firstWhere((s) => s.name == n, orElse: () => classic);
 }
@@ -113,7 +118,6 @@ class PlayerSkinPrefs {
   static final ValueNotifier<String> _n = ValueNotifier<String>('classic');
   static bool _started = false;
 
-  /// Listen to this (ValueListenableBuilder). First access starts the load.
   static ValueNotifier<String> get skin {
     if (!_started) {
       _started = true;
@@ -125,7 +129,7 @@ class PlayerSkinPrefs {
   }
 
   static Future<void> set(String name) async {
-    skin; // make sure loading has started
+    skin;
     _n.value = name;
     final b = await Hive.openBox(_box);
     await b.put('skin', name);
@@ -139,19 +143,22 @@ class PlayerSkinView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (skin) {
-    PlayerSkin.vinyl => _Vinyl(ctx),
-    PlayerSkin.editorial => _Editorial(ctx),
-    PlayerSkin.lyricsFirst => _LyricsFirst(ctx),
-    PlayerSkin.polaroid => _Polaroid(ctx),
-    PlayerSkin.radio => _Radio(ctx),
-    PlayerSkin.studio => _Studio(ctx),
-    PlayerSkin.ring => _Ring(ctx),
+    PlayerSkin.spotify => _Spotify(ctx),
+    PlayerSkin.appleMusic => _Apple(ctx),
+    PlayerSkin.ytMusic => _Yt(ctx),
+    PlayerSkin.amazon => _Amazon(ctx),
+    PlayerSkin.tidal => _Tidal(ctx),
+    PlayerSkin.deezer => _Deezer(ctx),
+    PlayerSkin.soundcloud => _Sc(ctx),
+    PlayerSkin.pandora => _Pandora(ctx),
+    PlayerSkin.material => _Material(ctx),
+    PlayerSkin.winamp => _Winamp(ctx),
     PlayerSkin.classic => const SizedBox.shrink(),
   };
 }
 
 // ════════════════════════════════════════════════════════════════════
-// SHARED: icons
+// SHARED: icons + engine hooks
 // ════════════════════════════════════════════════════════════════════
 
 class _Ic {
@@ -188,13 +195,7 @@ class _Ic {
       _a ? CupertinoIcons.speaker_1 : Icons.volume_up_outlined;
   static IconData get quality =>
       _a ? CupertinoIcons.waveform : Icons.graphic_eq_rounded;
-  static IconData get photo =>
-      _a ? CupertinoIcons.photo : Icons.image_outlined;
 }
-
-// ════════════════════════════════════════════════════════════════════
-// SHARED: engine hooks
-// ════════════════════════════════════════════════════════════════════
 
 MediaPlayer get _mp => GetIt.I<MediaPlayer>();
 
@@ -211,7 +212,6 @@ String _fmt(Duration d) {
 
 TextStyle _s(double size, Color c,
     {FontWeight w = FontWeight.w600,
-      FontStyle? st,
       double ls = 0,
       double h = 1.2,
       bool tab = false}) =>
@@ -219,7 +219,6 @@ TextStyle _s(double size, Color c,
       fontSize: size,
       color: c,
       fontWeight: w,
-      fontStyle: st,
       letterSpacing: ls,
       height: h,
       decoration: TextDecoration.none,
@@ -284,7 +283,6 @@ void _more(BuildContext c, MediaItem song) {
   );
 }
 
-/// Progress feed: fraction, position, total, playing, seek(fraction).
 Widget _progress(
     Widget Function(double f, Duration pos, Duration total, bool playing,
         ValueChanged<double> seek)
@@ -303,42 +301,188 @@ Widget _progress(
       },
     );
 
-/// Artwork slot that swaps to lyrics. The lyrics box stays mounted (so
-/// lyrics keep being discovered) and is only measured when visible.
-/// [invert] shows lyrics by default and artwork when toggled.
+/// Artwork slot that swaps to lyrics. The lyrics box stays mounted so lyrics
+/// keep being discovered, and is only measured when visible.
 Widget _media(PlayerCtx x, Size size,
-    {required Widget art,
-      Color bg = Colors.black,
-      double radius = 0,
-      bool invert = false}) {
-  final on = x.hasLyrics && (invert ? !x.showLyrics : x.showLyrics);
+    {required Widget art, Color bg = Colors.black, double radius = 0}) {
+  final on = x.hasLyrics && x.showLyrics;
   return SizedBox.fromSize(
     size: size,
-    child: Stack(
-      children: [
-        Positioned.fill(child: Offstage(offstage: on, child: art)),
-        Positioned.fill(
-          child: Offstage(
-            offstage: !on,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(radius),
-              child: ColoredBox(
-                color: bg,
-                child: x.lyrics(on ? size : Size.zero),
-              ),
+    child: Stack(children: [
+      Positioned.fill(child: Offstage(offstage: on, child: art)),
+      Positioned.fill(
+        child: Offstage(
+          offstage: !on,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(radius),
+            child: ColoredBox(
+              color: bg,
+              child: x.lyrics(on ? size : Size.zero),
             ),
           ),
         ),
-      ],
-    ),
+      ),
+    ]),
   );
 }
+
+// ════════════════════════════════════════════════════════════════════
+// SHARED: layout + colour helpers
+// ════════════════════════════════════════════════════════════════════
+
+bool _isWide(BoxConstraints c) =>
+    c.maxWidth >= 820 && c.maxWidth > c.maxHeight * 1.15;
+
+Color _t(PlayerCtx x, [Color d = const Color(0xFF3A4A6B)]) => x.tint ?? d;
+Color _dark(Color c, double k) => Color.lerp(const Color(0xFF0B0B0D), c, k)!;
+
+List<BoxShadow> _shadow(double blur, double dy, double a) => [
+  BoxShadow(
+      color: Colors.black.withValues(alpha: a),
+      blurRadius: blur,
+      offset: Offset(0, dy)),
+];
+
+Widget _grad(List<Color> cs, [List<double>? st]) => DecoratedBox(
+  decoration: BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: cs,
+      stops: st,
+    ),
+  ),
+);
+
+Widget _shell(Widget bg, Widget child) => Material(
+  type: MaterialType.transparency,
+  child: Stack(fit: StackFit.expand, children: [
+    bg,
+    SafeArea(child: child),
+  ]),
+);
+
+/// Lyrics panel that fills its parent.
+Widget _lyr(PlayerCtx x,
+    {double r = 24, Color bg = const Color(0x14FFFFFF)}) =>
+    ClipRRect(
+      borderRadius: BorderRadius.circular(r),
+      child: ColoredBox(
+        color: bg,
+        child: LayoutBuilder(
+            builder: (_, b) => x.lyrics(Size(b.maxWidth, b.maxHeight))),
+      ),
+    );
+
+/// Square artwork that fills the free space of its parent.
+/// [swap] lets the lyrics button swap the artwork for lyrics (phones).
+Widget _art(PlayerCtx x,
+    {double r = 8,
+      bool swap = true,
+      bool shadow = true,
+      Color lbg = Colors.black54,
+      Alignment al = Alignment.center}) =>
+    LayoutBuilder(builder: (_, c) {
+      final s = math.max(60.0, math.min(c.maxWidth, c.maxHeight));
+      final img = ClipRRect(
+          borderRadius: BorderRadius.circular(r), child: x.swipeArt);
+      Widget a = swap
+          ? _media(x, Size.square(s), radius: r, bg: lbg, art: img)
+          : SizedBox.square(dimension: s, child: img);
+      if (shadow) {
+        a = DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(r),
+            boxShadow: _shadow(30, 14, .45),
+          ),
+          child: a,
+        );
+      }
+      return Align(alignment: al, child: a);
+    });
+
+Widget _mini(PlayerCtx x, double size, double r) => SizedBox(
+  width: size,
+  height: size,
+  child: ClipRRect(borderRadius: BorderRadius.circular(r), child: x.art(r)),
+);
+
+Widget _hdr(PlayerCtx x, Color ink, {Widget? mid, Widget? right}) =>
+    Row(children: [
+      _ibtn(_Ic.down, x.close, 'Close', c: ink),
+      Expanded(child: Center(child: mid ?? const SizedBox.shrink())),
+      right ?? _moreBtn(x, ink),
+    ]);
+
+Widget _caption(String a, String b, Color dim, Color ink) =>
+    Column(mainAxisSize: MainAxisSize.min, children: [
+      Text(a, style: _s(10, dim, w: FontWeight.w700, ls: 1.6)),
+      Text(b,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: _s(13, ink, w: FontWeight.w700)),
+    ]);
+
+Widget _titles(PlayerCtx x, Color ink, Color dim,
+    {double size = 22, bool center = false, FontWeight w = FontWeight.w800}) =>
+    Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment:
+      center ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+      children: [
+        Text(x.song.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: center ? TextAlign.center : TextAlign.start,
+            style: _s(size, ink, w: w, ls: -0.3)),
+        Text(x.song.artist ?? x.song.album ?? '',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: center ? TextAlign.center : TextAlign.start,
+            style: _s(size * 0.68, dim, w: FontWeight.w500)),
+      ],
+    );
+
+Widget _times(Color c,
+    {bool rem = false, double fs = 12, Widget? mid}) =>
+    _progress((f, p, tot, pl, s) {
+      final st = _s(fs, c, w: FontWeight.w500, tab: true);
+      return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Text(_fmt(p), style: st),
+        if (mid != null) mid,
+        Text(rem ? '-${_fmt(tot > p ? tot - p : Duration.zero)}' : _fmt(tot),
+            style: st),
+      ]);
+    });
+
+/// `00:00 ━━━━●━━━ 03:37` in one row.
+Widget _seekRow(Color ink, Color on, Color off,
+    {double h = 20,
+      double t = 3,
+      _Thumb th = _Thumb.dot,
+      double fs = 11}) =>
+    _progress((f, p, tot, pl, seek) {
+      final st = _s(fs, ink, w: FontWeight.w500, tab: true);
+      return Row(children: [
+        Text(_fmt(p), style: st),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _Seeker(
+            f: f,
+            onSeek: seek,
+            height: h,
+            paint: (v) => _LinePainter(v, on, off, t, th),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(_fmt(tot), style: st),
+      ]);
+    });
 
 // ════════════════════════════════════════════════════════════════════
 // SHARED: small widgets
 // ════════════════════════════════════════════════════════════════════
 
-/// Press-scale + pointer cursor + optional tooltip.
 class _Tap extends StatefulWidget {
   const _Tap({required this.child, required this.onTap, this.tip});
   final Widget child;
@@ -375,38 +519,6 @@ class _TapState extends State<_Tap> {
   }
 }
 
-/// Fixed design canvas scaled to fit; `back` fills the whole window.
-class _Stage extends StatelessWidget {
-  const _Stage(
-      {required this.w,
-        required this.h,
-        required this.back,
-        required this.child});
-  final double w, h;
-  final Widget back, child;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    type: MaterialType.transparency,
-    child: Stack(
-      fit: StackFit.expand,
-      children: [
-        back,
-        SafeArea(
-          child: Center(
-            child: FittedBox(
-              fit: BoxFit.contain,
-              child: SizedBox(width: w, height: h, child: child),
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-/// Icon button. [mark] (when not null) reserves and shows a small dot under
-/// the icon, used for on/off toggles.
 Widget _ibtn(IconData i, VoidCallback? t, String tip,
     {double size = 24,
       Color c = Colors.white,
@@ -429,7 +541,7 @@ Widget _ibtn(IconData i, VoidCallback? t, String tip,
     ),
   ]);
   return Opacity(
-    opacity: t == null ? 0.35 : (on ? 1 : 0.55),
+    opacity: t == null ? 0.35 : (on ? 1 : 0.6),
     child: _Tap(
       onTap: t,
       tip: tip,
@@ -438,36 +550,37 @@ Widget _ibtn(IconData i, VoidCallback? t, String tip,
   );
 }
 
-Widget _favBtn(PlayerCtx x, Color c, Color onC, {double size = 24}) =>
-    _fav(
-      x.song,
-          (l, t) => _ibtn(l ? _Ic.heartFill : _Ic.heart, t,
-          l ? 'Remove from favourites' : 'Add to favourites',
-          size: size, c: l ? onC : c),
-    );
+Widget _favBtn(PlayerCtx x, Color c, Color onC, {double size = 24}) => _fav(
+  x.song,
+      (l, t) => _ibtn(l ? _Ic.heartFill : _Ic.heart, t,
+      l ? 'Remove from favourites' : 'Add to favourites',
+      size: size, c: l ? onC : c),
+);
 
-Widget _shufBtn(Color c, {double size = 22}) => _shuffle((on, t) => _ibtn(
-    _Ic.shuffle, t, on ? 'Shuffle: on' : 'Shuffle: off',
-    size: size, c: c, on: on, mark: on));
+Widget _shufBtn(Color c, {Color? onC, double size = 22}) =>
+    _shuffle((on, t) => _ibtn(
+        _Ic.shuffle, t, on ? 'Shuffle: on' : 'Shuffle: off',
+        size: size, c: on ? (onC ?? c) : c, on: on, mark: on));
 
-Widget _repBtn(Color c, {double size = 22}) => _repeat((m, t) => _ibtn(
-    m == LoopMode.one ? _Ic.repeatOne : _Ic.repeat,
-    t,
-    m == LoopMode.off
-        ? 'Repeat: off'
-        : m == LoopMode.one
-        ? 'Repeat: one'
-        : 'Repeat: all',
-    size: size,
-    c: c,
-    on: m != LoopMode.off,
-    mark: m != LoopMode.off));
+Widget _repBtn(Color c, {Color? onC, double size = 22}) =>
+    _repeat((m, t) => _ibtn(
+        m == LoopMode.one ? _Ic.repeatOne : _Ic.repeat,
+        t,
+        m == LoopMode.off
+            ? 'Repeat: off'
+            : m == LoopMode.one
+            ? 'Repeat: one'
+            : 'Repeat: all',
+        size: size,
+        c: m != LoopMode.off ? (onC ?? c) : c,
+        on: m != LoopMode.off,
+        mark: m != LoopMode.off));
 
-Widget _lyrBtn(PlayerCtx x, Color c, {double size = 22}) {
+Widget _lyrBtn(PlayerCtx x, Color c, {Color? onC, double size = 22}) {
   final on = x.showLyrics && x.hasLyrics;
   return _ibtn(_Ic.lyrics, x.hasLyrics ? x.toggleLyrics : null,
       on ? 'Hide lyrics' : 'Show lyrics',
-      size: size, c: c, on: on, mark: on);
+      size: size, c: on ? (onC ?? c) : c, on: on, mark: on);
 }
 
 Widget _moreBtn(PlayerCtx x, Color c) => Builder(
@@ -475,7 +588,6 @@ Widget _moreBtn(PlayerCtx x, Color c) => Builder(
       _ibtn(_Ic.more, () => _more(ctx, x.song), 'More', c: c),
 );
 
-/// Round play/pause button with a loading spinner state.
 Widget _playBtn({required double size, required Color bg, required Color fg}) =>
     _playing((s) => _Tap(
       onTap: _toggle,
@@ -494,27 +606,101 @@ Widget _playBtn({required double size, required Color bg, required Color fg}) =>
       ),
     ));
 
-/// Swipe left = next, right = previous, optional tap / long-press / double-tap.
-Widget _swipe(PlayerCtx x, Widget child,
-    {VoidCallback? onTap, VoidCallback? onLong, VoidCallback? onDouble}) =>
-    GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      onDoubleTap: onDouble,
-      onLongPress: onLong,
-      onHorizontalDragEnd: (d) {
-        final v = d.primaryVelocity ?? 0;
-        if (v < -300) {
-          x.next();
-        } else if (v > 300) {
-          x.prev();
-        }
-      },
-      child: child,
+/// Play/pause drawn as a bare icon (Apple Music, Tidal).
+Widget _bare(Color ink, double size) => _playing((s) => _Tap(
+  onTap: _toggle,
+  tip: s == ButtonState.playing ? 'Pause' : 'Play',
+  child: SizedBox(
+    width: size + 12,
+    height: size + 12,
+    child: s == ButtonState.loading
+        ? Padding(
+      padding: EdgeInsets.all(size * 0.3),
+      child: CircularProgressIndicator(strokeWidth: 3, color: ink),
+    )
+        : Icon(s == ButtonState.playing ? _Ic.pause : _Ic.play,
+        size: size, color: ink),
+  ),
+));
+
+/// Play/pause drawn as an outlined ring (Amazon).
+Widget _ringPlay(Color c, double size) => _playing((s) => _Tap(
+  onTap: _toggle,
+  tip: s == ButtonState.playing ? 'Pause' : 'Play',
+  child: Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      border: Border.all(color: c, width: 2.5),
+    ),
+    child: s == ButtonState.loading
+        ? Padding(
+      padding: EdgeInsets.all(size * 0.3),
+      child: CircularProgressIndicator(strokeWidth: 3, color: c),
+    )
+        : Icon(s == ButtonState.playing ? _Ic.pause : _Ic.play,
+        size: size * 0.48, color: c),
+  ),
+));
+
+/// Pill button with an icon and a label.
+Widget _pill(IconData i, String label, VoidCallback? t, Color ink,
+    {bool on = false, double h = 44, Color? onC, Color? bg}) =>
+    Opacity(
+      opacity: t == null ? .4 : 1,
+      child: _Tap(
+        onTap: t,
+        child: Container(
+          height: h,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: bg ?? ink.withValues(alpha: on ? .2 : .1),
+            borderRadius: BorderRadius.circular(h / 2),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(i, size: 18, color: on ? (onC ?? ink) : ink),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _s(13, ink, w: FontWeight.w700)),
+            ),
+          ]),
+        ),
+      ),
     );
 
-/// Horizontal drag / tap seeker. While dragging it previews locally and
-/// commits on release (or continuously when [live], e.g. for volume).
+Widget _favPill(PlayerCtx x, Color ink, Color onC) => _fav(
+  x.song,
+      (l, t) => _pill(l ? _Ic.heartFill : _Ic.heart, l ? 'Liked' : 'Like', t,
+      ink, on: l, onC: onC),
+);
+
+Widget _tab(String label, VoidCallback? t, bool on, Color ink, Color dim,
+    Color accent) =>
+    Opacity(
+      opacity: t == null ? .4 : 1,
+      child: _Tap(
+        onTap: t,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(label,
+                style:
+                _s(13, on ? ink : dim, w: FontWeight.w700, ls: 1.2)),
+            const SizedBox(height: 4),
+            Container(
+                width: 28,
+                height: 2,
+                color: on ? accent : Colors.transparent),
+          ]),
+        ),
+      ),
+    );
+
 class _Seeker extends StatefulWidget {
   const _Seeker({
     required this.f,
@@ -586,13 +772,12 @@ class _SeekerState extends State<_Seeker> {
   }
 }
 
-enum _Thumb { dot, tick, cap, none }
+enum _Thumb { dot, none }
 
 class _LinePainter extends CustomPainter {
-  const _LinePainter(
-      this.f, this.active, this.inactive, this.t, this.thumb, this.thumbColor);
+  const _LinePainter(this.f, this.active, this.inactive, this.t, this.thumb);
   final double f, t;
-  final Color active, inactive, thumbColor;
+  final Color active, inactive;
   final _Thumb thumb;
 
   @override
@@ -603,24 +788,8 @@ class _LinePainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     c.drawLine(Offset(0, y), Offset(s.width, y), p..color = inactive);
     c.drawLine(Offset(0, y), Offset(x, y), p..color = active);
-    final tp = Paint()..color = thumbColor;
-    switch (thumb) {
-      case _Thumb.dot:
-        c.drawCircle(Offset(x, y), t * 2.2, tp);
-      case _Thumb.tick:
-        c.drawRect(
-            Rect.fromCenter(
-                center: Offset(x, y), width: 3, height: s.height * 0.7),
-            tp);
-      case _Thumb.cap:
-        final r = RRect.fromRectAndRadius(
-            Rect.fromCenter(center: Offset(x, y), width: 16, height: 28),
-            const Radius.circular(4));
-        c.drawRRect(r, tp);
-        c.drawLine(Offset(x, y - 8), Offset(x, y + 8),
-            Paint()..color = Colors.black38..strokeWidth = 2);
-      case _Thumb.none:
-        break;
+    if (thumb == _Thumb.dot) {
+      c.drawCircle(Offset(x, y), t * 2.2, Paint()..color = active);
     }
   }
 
@@ -628,1613 +797,1653 @@ class _LinePainter extends CustomPainter {
   bool shouldRepaint(_LinePainter o) => true;
 }
 
-/// Seek bar wired to the engine.
 Widget _bar(Color a, Color i,
-    {double h = 28,
-      double t = 3,
-      _Thumb th = _Thumb.dot,
-      Color? thumb}) =>
+    {double h = 24, double t = 3, _Thumb th = _Thumb.dot}) =>
     _progress((f, p, tot, pl, seek) => _Seeker(
       f: f,
       onSeek: seek,
       height: h,
-      paint: (v) => _LinePainter(v, a, i, t, th, thumb ?? a),
+      paint: (v) => _LinePainter(v, a, i, t, th),
     ));
 
-Widget _times(TextStyle st, {bool remaining = false}) =>
-    _progress((f, p, tot, pl, s) => Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(_fmt(p), style: st),
-        Text(
-            remaining
-                ? '-${_fmt(tot > p ? tot - p : Duration.zero)}'
-                : _fmt(tot),
-            style: st),
-      ],
-    ));
+Widget _vol(Color a, Color i) => StreamBuilder<double>(
+  stream: _mp.player.volumeStream,
+  initialData: _mp.player.volume,
+  builder: (_, s) {
+    final v = (s.data ?? 1.0).clamp(0.0, 1.0).toDouble();
+    return Row(children: [
+      Icon(_Ic.volume, size: 16, color: a.withValues(alpha: 0.7)),
+      const SizedBox(width: 8),
+      Expanded(
+        child: _Seeker(
+          f: v,
+          live: true,
+          height: 24,
+          onSeek: (n) => _mp.player.setVolume(n),
+          paint: (n) => _LinePainter(n, a, i, 4, _Thumb.none),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Icon(_Ic.volume, size: 22, color: a.withValues(alpha: 0.7)),
+    ]);
+  },
+);
 
-// ════════════════════════════════════════════════════════════════════
-// 1. TURNTABLE
-// ════════════════════════════════════════════════════════════════════
-
-class _Vinyl extends StatefulWidget {
-  const _Vinyl(this.x);
-  final PlayerCtx x;
-
-  @override
-  State<_Vinyl> createState() => _VinylState();
+/// SoundCloud-style waveform (deterministic from the song id).
+List<double> _waveFor(String seed) {
+  final r = math.Random(seed.hashCode);
+  var v = .55;
+  return List.generate(72, (i) {
+    v = (v + (r.nextDouble() - .5) * .9).clamp(.2, 1.0).toDouble();
+    return v;
+  });
 }
 
-class _VinylState extends State<_Vinyl> with SingleTickerProviderStateMixin {
-  late final AnimationController _c;
-
-  static const _bg = Color(0xFF1B1C1E);
-  static const _plinth = Color(0xFF26282B);
-  static const _ink = Color(0xFFECEAE6);
-  static const _dim = Color(0xFF9A9893);
+class _WavePainter extends CustomPainter {
+  const _WavePainter(this.f, this.bars, this.on, this.off);
+  final double f;
+  final List<double> bars;
+  final Color on, off;
 
   @override
-  void initState() {
-    super.initState();
-    _c = AnimationController(vsync: this, duration: const Duration(seconds: 6));
-    _mp.buttonState.addListener(_sync);
-    _sync();
-  }
-
-  void _sync() {
-    if (!mounted) return;
-    if (_mp.buttonState.value == ButtonState.playing) {
-      if (!_c.isAnimating) _c.repeat();
-    } else {
-      _c.stop();
+  void paint(Canvas c, Size s) {
+    final n = bars.length, w = s.width / n;
+    for (var i = 0; i < n; i++) {
+      final h = math.max(4.0, bars[i] * s.height);
+      c.drawRRect(
+          RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                  center: Offset(w * i + w / 2, s.height / 2),
+                  width: w * 0.62,
+                  height: h),
+              const Radius.circular(2)),
+          Paint()..color = (i + .5) / n <= f ? on : off);
     }
   }
 
   @override
-  void dispose() {
-    _mp.buttonState.removeListener(_sync);
-    _c.dispose();
-    super.dispose();
+  bool shouldRepaint(_WavePainter o) => true;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 1. SPOTIFY
+// ════════════════════════════════════════════════════════════════════
+
+class _Spotify extends StatelessWidget {
+  const _Spotify(this.x);
+  final PlayerCtx x;
+
+  static const _g = Color(0xFF1ED760);
+  static const _dim = Color(0xFFB3B3B3);
+  static const _w = Colors.white;
+
+  Widget _ctl(double play, double side) =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        _shufBtn(_w, onC: _g),
+        _ibtn(_Ic.prev, x.prev, 'Previous', size: side, c: _w),
+        _playBtn(size: play, bg: _w, fg: Colors.black),
+        _ibtn(_Ic.next, x.next, 'Next', size: side, c: _w),
+        _repBtn(_w, onC: _g),
+      ]);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _t(x);
+    return _shell(
+      _grad([_dark(t, .75), const Color(0xFF121212)], const [0, .65]),
+      LayoutBuilder(builder: (_, c) => _isWide(c) ? _wide(t) : _mobile()),
+    );
   }
 
-  Widget _deck(PlayerCtx x) => SizedBox(
-    width: 360,
-    height: 360,
-    child: Stack(children: [
-      Positioned(
-        left: 20,
-        top: 40,
-        width: 300,
-        height: 300,
-        child: _swipe(
-          x,
-          AnimatedBuilder(
-            animation: _c,
-            builder: (_, __) => Transform.rotate(
-              angle: _c.value * 2 * math.pi,
-              child: Stack(children: [
-                const Positioned.fill(
-                    child: CustomPaint(painter: _Grooves())),
-                Center(
-                  child: ClipOval(
-                    child: SizedBox(width: 108, height: 108, child: x.art(0)),
-                  ),
-                ),
-              ]),
-            ),
-          ),
-          onTap: _toggle,
-          onLong: x.hasLyrics ? x.toggleLyrics : null,
-        ),
-      ),
-      const Positioned(
-        left: 20,
-        top: 40,
-        width: 300,
-        height: 300,
-        child: IgnorePointer(child: CustomPaint(painter: _Sheen())),
-      ),
-      Positioned(
-        left: 166,
-        top: 186,
-        child: IgnorePointer(
-          child: Container(
-            width: 8,
-            height: 8,
-            decoration: const BoxDecoration(
-                shape: BoxShape.circle, color: _plinth),
-          ),
-        ),
-      ),
-      Positioned.fill(
-        child: IgnorePointer(
-          child: _playing((s) => _progress(
-                (f, p, t, pl, seek) => TweenAnimationBuilder<double>(
-              tween: Tween<double>(
-                  end: s == ButtonState.playing ? 0.12 + 0.34 * f : -0.08),
-              duration: const Duration(milliseconds: 350),
-              builder: (_, v, __) =>
-                  CustomPaint(painter: _Arm(v)),
-            ),
-          )),
-        ),
-      ),
+  Widget _mobile() => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
+    child: Column(children: [
+      _hdr(x, _w,
+          mid: _caption('PLAYING FROM ALBUM', x.song.album ?? 'Now playing',
+              Colors.white70, _w)),
+      const SizedBox(height: 10),
+      Expanded(child: _art(x, r: 8)),
+      const SizedBox(height: 18),
+      Row(children: [
+        Expanded(child: _titles(x, _w, _dim, size: 22)),
+        _favBtn(x, _dim, _g, size: 28),
+      ]),
+      const SizedBox(height: 4),
+      _bar(_w, Colors.white24, h: 22, t: 3),
+      _times(_dim, fs: 11),
+      const SizedBox(height: 6),
+      _ctl(72, 36),
+      const SizedBox(height: 6),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        _ibtn(_Ic.quality, x.openQuality, 'Audio quality', c: _dim),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          _lyrBtn(x, _dim, onC: _g),
+          _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _dim),
+        ]),
+      ]),
     ]),
   );
 
-  @override
-  Widget build(BuildContext context) {
-    final x = widget.x;
-    return _Stage(
-      w: 400,
-      h: 780,
-      back: const ColoredBox(color: _bg),
+  Widget _wide(Color t) => Column(children: [
+    Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: _hdr(x, _w,
+          mid: Text('PLAYING FROM ALBUM · ${x.song.album ?? ''}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _s(11, Colors.white70, ls: 1.4)),
+          right: _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _w)),
+    ),
+    Expanded(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(children: [
-          Row(children: [
-            _ibtn(_Ic.down, x.close, 'Close', c: _ink),
-            Expanded(
-              child: Center(
-                child: _Tap(
-                  onTap: x.openQuality,
-                  tip: 'Audio quality',
-                  child: Text(x.quality,
-                      style: _s(13, _dim, w: FontWeight.w500)),
-                ),
+        padding: const EdgeInsets.fromLTRB(32, 8, 32, 16),
+        child: Row(children: [
+          Expanded(
+            flex: 5,
+            child: Column(children: [
+              Expanded(child: _art(x, r: 8, swap: false)),
+              const SizedBox(height: 14),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _titles(x, _w, _dim, size: 28),
               ),
-            ),
-            _moreBtn(x, _ink),
-          ]),
-          const SizedBox(height: 10),
-          Container(
-            width: 360,
-            height: 360,
-            decoration: BoxDecoration(
-              color: _plinth,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: _media(x, const Size(360, 360),
-                bg: _plinth, radius: 24, art: _deck(x)),
+            ]),
           ),
-          const SizedBox(height: 20),
-          Row(children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(x.song.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _s(24, _ink, w: FontWeight.w700, ls: -0.3)),
-                  Text(x.song.artist ?? x.song.album ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _s(16, _dim, w: FontWeight.w500)),
-                ],
-              ),
-            ),
-            _favBtn(x, _dim, _ink, size: 26),
-          ]),
-          const SizedBox(height: 6),
-          _bar(_ink, Colors.white24),
-          _times(_s(12, _dim, w: FontWeight.w500, tab: true)),
-          const Spacer(),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            _shufBtn(_ink),
-            _ibtn(_Ic.prev, x.prev, 'Previous', size: 34, c: _ink),
-            _playBtn(size: 72, bg: _ink, fg: _bg),
-            _ibtn(_Ic.next, x.next, 'Next', size: 34, c: _ink),
-            _repBtn(_ink),
-          ]),
-          const SizedBox(height: 10),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            _lyrBtn(x, _ink),
-            const SizedBox(width: 28),
-            _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _ink, size: 22),
-          ]),
+          const SizedBox(width: 32),
+          Expanded(flex: 6, child: _lyr(x, r: 16, bg: _dark(t, .9))),
         ]),
       ),
-    );
-  }
-}
-
-class _Grooves extends CustomPainter {
-  const _Grooves();
-
-  @override
-  void paint(Canvas c, Size s) {
-    final o = s.center(Offset.zero), r = s.width / 2;
-    c.drawCircle(o, r, Paint()..color = const Color(0xFF0F0F10));
-    final p = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.6;
-    for (double g = 60; g < r - 3; g += 3.6) {
-      final k = (g / 3.6).floor() % 5 == 0;
-      p.color = Colors.white.withValues(alpha: k ? 0.07 : 0.035);
-      c.drawCircle(o, g, p);
-    }
-    c.drawCircle(
-        o,
-        r - 1,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = const Color(0xFF2A2A2C));
-    c.drawCircle(
-        o,
-        57,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
-          ..color = const Color(0xFFB9B5AB));
-  }
-
-  @override
-  bool shouldRepaint(_Grooves o) => false;
-}
-
-class _Sheen extends CustomPainter {
-  const _Sheen();
-
-  @override
-  void paint(Canvas c, Size s) {
-    final o = s.center(Offset.zero), r = s.width / 2;
-    c.drawCircle(
-      o,
-      r,
-      Paint()
-        ..shader = const SweepGradient(
-          colors: [
-            Color(0x00FFFFFF),
-            Color(0x14FFFFFF),
-            Color(0x00FFFFFF),
-            Color(0x00FFFFFF),
-            Color(0x0FFFFFFF),
-            Color(0x00FFFFFF),
-            Color(0x00FFFFFF),
-          ],
-          stops: [0, .07, .14, .5, .57, .64, 1],
-        ).createShader(Rect.fromCircle(center: o, radius: r)),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_Sheen o) => false;
-}
-
-/// Tonearm. [t] is the angle from straight down, towards the record.
-class _Arm extends CustomPainter {
-  const _Arm(this.t);
-  final double t;
-
-  @override
-  void paint(Canvas c, Size s) {
-    final p = const Offset(322, 34);
-    final dir = Offset(-math.sin(t), math.cos(t));
-    final tip = p + dir * 226;
-    final tail = p - dir * 40;
-    Paint line(Color col, double w) => Paint()
-      ..color = col
-      ..strokeWidth = w
-      ..strokeCap = StrokeCap.round;
-    c.drawLine(p + const Offset(3, 5), tip + const Offset(3, 5),
-        line(Colors.black.withValues(alpha: 0.25), 6));
-    c.drawLine(tail, p, line(const Color(0xFF7D7B77), 11));
-    c.drawLine(p, tip, line(const Color(0xFFC9C7C2), 5));
-    c.drawCircle(p, 17, Paint()..color = const Color(0xFF34363A));
-    c.drawCircle(
-        p,
-        17,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = const Color(0xFF55575B));
-    c.drawCircle(p, 6, Paint()..color = const Color(0xFFC9C7C2));
-    c.drawCircle(tip, 6, Paint()..color = const Color(0xFFE8E6E1));
-    c.drawCircle(
-        tip,
-        6,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5
-          ..color = const Color(0xFF8D8B87));
-  }
-
-  @override
-  bool shouldRepaint(_Arm o) => o.t != t;
-}
-
-// ════════════════════════════════════════════════════════════════════
-// 2. EDITORIAL
-// ════════════════════════════════════════════════════════════════════
-
-class _Editorial extends StatelessWidget {
-  const _Editorial(this.x);
-  final PlayerCtx x;
-
-  static const _paper = Color(0xFFE8EAEB);
-  static const _ink = Color(0xFF141414);
-  static const _red = Color(0xFFD8352A);
-
-  Widget _link(String t, VoidCallback? tap, bool on) => _Tap(
-    onTap: tap,
-    child: Opacity(
-      opacity: tap == null ? 0.35 : 1,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text(
-          t,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: on ? FontWeight.w800 : FontWeight.w500,
-            color: on ? _ink : _ink.withValues(alpha: 0.6),
-            decoration: on ? TextDecoration.underline : TextDecoration.none,
-            decorationColor: _red,
-            decorationThickness: 2.5,
+    ),
+    Container(
+      height: 92,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      color: Colors.black.withValues(alpha: .4),
+      child: Row(children: [
+        SizedBox(
+          width: 280,
+          child: Row(children: [
+            _mini(x, 56, 4),
+            const SizedBox(width: 12),
+            Expanded(child: _titles(x, _w, _dim, size: 15)),
+            _favBtn(x, _dim, _g),
+          ]),
+        ),
+        Expanded(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  _shufBtn(_w, onC: _g),
+                  _ibtn(_Ic.prev, x.prev, 'Previous', size: 26, c: _w),
+                  _playBtn(size: 42, bg: _w, fg: Colors.black),
+                  _ibtn(_Ic.next, x.next, 'Next', size: 26, c: _w),
+                  _repBtn(_w, onC: _g),
+                ]),
+                _seekRow(_dim, _w, Colors.white24, h: 14, t: 3),
+              ]),
+            ),
           ),
         ),
-      ),
+        SizedBox(
+          width: 280,
+          child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            _ibtn(_Ic.quality, x.openQuality, 'Audio quality', c: _dim),
+            _moreBtn(x, _dim),
+            SizedBox(width: 130, child: _vol(_w, Colors.white24)),
+          ]),
+        ),
+      ]),
+    ),
+  ]);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 2. APPLE MUSIC
+// ════════════════════════════════════════════════════════════════════
+
+class _Apple extends StatelessWidget {
+  const _Apple(this.x);
+  final PlayerCtx x;
+
+  static const _w = Colors.white;
+
+  Widget _rb(Widget child, VoidCallback? t, String tip) => _Tap(
+    onTap: t,
+    tip: tip,
+    child: Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+          shape: BoxShape.circle, color: Colors.white.withValues(alpha: .18)),
+      child: child,
     ),
   );
 
-  Widget _box(Widget child, VoidCallback t, String tip, {bool filled = false}) =>
-      _Tap(
-        onTap: t,
-        tip: tip,
-        child: Container(
-          height: 64,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: filled ? _ink : Colors.transparent,
-            border: Border.all(color: _ink, width: 1.5),
+  Widget _col() {
+    final dim = Colors.white.withValues(alpha: .6);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 0, 28, 14),
+      child: Column(children: [
+        _Tap(
+          onTap: x.close,
+          tip: 'Close',
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 30),
+            child: Container(
+              width: 42,
+              height: 5,
+              decoration: BoxDecoration(
+                  color: Colors.white38,
+                  borderRadius: BorderRadius.circular(3)),
+            ),
           ),
-          child: child,
         ),
-      );
+        Expanded(
+          child: _playing((s) => AnimatedScale(
+            scale: s == ButtonState.playing ? 1 : 0.86,
+            duration: const Duration(milliseconds: 380),
+            curve: Curves.easeOutCubic,
+            child: _art(x, r: 14),
+          )),
+        ),
+        const SizedBox(height: 16),
+        Row(children: [
+          Expanded(child: _titles(x, _w, dim, size: 22, w: FontWeight.w700)),
+          _fav(
+            x.song,
+                (l, t) => _rb(
+                Icon(l ? _Ic.heartFill : _Ic.heart, size: 17, color: _w),
+                t,
+                'Favourite'),
+          ),
+          const SizedBox(width: 10),
+          Builder(
+            builder: (c) => _rb(Icon(_Ic.more, size: 17, color: _w),
+                    () => _more(c, x.song), 'More'),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        _bar(_w, Colors.white24, h: 18, t: 7, th: _Thumb.none),
+        _times(
+          dim,
+          rem: true,
+          mid: _Tap(
+            onTap: x.openQuality,
+            tip: 'Audio quality',
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                  border: Border.all(color: Colors.white38),
+                  borderRadius: BorderRadius.circular(4)),
+              child: Text(x.quality,
+                  style: _s(10, dim, w: FontWeight.w700, ls: .5)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          _ibtn(_Ic.prev, x.prev, 'Previous', size: 46, c: _w),
+          _bare(_w, 70),
+          _ibtn(_Ic.next, x.next, 'Next', size: 46, c: _w),
+        ]),
+        const SizedBox(height: 4),
+        _vol(_w, Colors.white24),
+        const SizedBox(height: 6),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          _shufBtn(_w),
+          _lyrBtn(x, _w),
+          _ibtn(_Ic.quality, x.openQuality, 'Audio quality', c: _w),
+          _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _w),
+          _repBtn(_w),
+        ]),
+      ]),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return _Stage(
-      w: 400,
-      h: 780,
-      back: const ColoredBox(color: _paper),
+    final t = _t(x);
+    return _shell(
+      _grad([_dark(t, .9), _dark(t, .55), _dark(t, .3)]),
+      LayoutBuilder(
+        builder: (_, c) => _isWide(c)
+            ? Center(
+            child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: _col()))
+            : _col(),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 3. YOUTUBE MUSIC
+// ════════════════════════════════════════════════════════════════════
+
+class _Yt extends StatelessWidget {
+  const _Yt(this.x);
+  final PlayerCtx x;
+
+  static const _red = Color(0xFFFF2D4B);
+  static const _dim = Color(0xFFAAAAAA);
+  static const _w = Colors.white;
+
+  Widget _seg() {
+    final ly = x.showLyrics && x.hasLyrics;
+    Widget o(String l, bool on, VoidCallback? t) => Opacity(
+      opacity: t == null && !on ? .4 : 1,
+      child: _Tap(
+        onTap: t,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          decoration: BoxDecoration(
+            color: on ? Colors.white24 : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(l, style: _s(14, on ? _w : _dim, w: FontWeight.w700)),
+        ),
+      ),
+    );
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+          color: Colors.white10, borderRadius: BorderRadius.circular(22)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        o('Song', !ly, ly ? x.toggleLyrics : null),
+        o('Lyrics', ly, !ly && x.hasLyrics ? x.toggleLyrics : null),
+      ]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _t(x);
+    return _shell(
+      _grad([_dark(t, .22), const Color(0xFF030303)], const [0, .7]),
+      LayoutBuilder(builder: (_, c) => _isWide(c) ? _wide() : _mobile()),
+    );
+  }
+
+  Widget _mobile() => Column(children: [
+    Expanded(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 6, 24, 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              _link('Close', x.close, false),
-              const Spacer(),
-              Builder(
-                builder: (c) => _link('More', () => _more(c, x.song), false),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+        child: Column(children: [
+          _hdr(x, _w, mid: _seg()),
+          const SizedBox(height: 8),
+          Expanded(child: _art(x, r: 8)),
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _titles(x, _w, _dim, size: 21),
+          ),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: _favPill(x, _w, _red)),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _pill(_Ic.queue, 'Queue', x.openQueue, _w)),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _pill(_Ic.quality, 'Quality', x.openQuality, _w)),
+          ]),
+          const SizedBox(height: 6),
+          _bar(_red, Colors.white24, h: 22, t: 3),
+          _times(_dim, fs: 11),
+          const SizedBox(height: 4),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            _shufBtn(_w, onC: _red),
+            _ibtn(_Ic.prev, x.prev, 'Previous', size: 36, c: _w),
+            _playBtn(size: 66, bg: _w, fg: Colors.black),
+            _ibtn(_Ic.next, x.next, 'Next', size: 36, c: _w),
+            _repBtn(_w, onC: _red),
+          ]),
+          const SizedBox(height: 4),
+        ]),
+      ),
+    ),
+    Container(
+      decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: Colors.white12))),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+        _tab('UP NEXT', x.openQueue, false, _w, _dim, _w),
+        _tab('LYRICS', x.hasLyrics ? x.toggleLyrics : null,
+            x.showLyrics && x.hasLyrics, _w, _dim, _w),
+        _tab('QUALITY', x.openQuality, false, _w, _dim, _w),
+      ]),
+    ),
+  ]);
+
+  Widget _wide() => Column(children: [
+    Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: _hdr(x, _w, mid: _seg(), right: _moreBtn(x, _w)),
+    ),
+    Expanded(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(32, 8, 32, 16),
+        child: Row(children: [
+          Expanded(flex: 6, child: _art(x, r: 8, swap: false)),
+          const SizedBox(width: 40),
+          Expanded(
+            flex: 5,
+            child: Column(children: [
+              Row(children: [
+                _tab('UP NEXT', x.openQueue, false, _w, _dim, _w),
+                _tab('LYRICS', null, true, _w, _dim, _w),
+              ]),
+              Container(height: 1, color: Colors.white12),
+              const SizedBox(height: 10),
+              Expanded(child: _lyr(x, r: 8, bg: Colors.white10)),
+            ]),
+          ),
+        ]),
+      ),
+    ),
+    Container(
+      color: const Color(0xFF111111),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        _bar(_red, Colors.white24, h: 12, t: 3, th: _Thumb.none),
+        SizedBox(
+          height: 80,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(children: [
+              SizedBox(
+                width: 300,
+                child: Row(children: [
+                  _mini(x, 50, 4),
+                  const SizedBox(width: 12),
+                  Expanded(child: _titles(x, _w, _dim, size: 15)),
+                ]),
+              ),
+              Expanded(
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  _shufBtn(_w, onC: _red),
+                  _ibtn(_Ic.prev, x.prev, 'Previous', size: 28, c: _w),
+                  _playBtn(size: 46, bg: _w, fg: Colors.black),
+                  _ibtn(_Ic.next, x.next, 'Next', size: 28, c: _w),
+                  _repBtn(_w, onC: _red),
+                  const SizedBox(width: 12),
+                  _progress((f, p, tot, pl, s) => Text(
+                      '${_fmt(p)} / ${_fmt(tot)}',
+                      style: _s(12, _dim, w: FontWeight.w500, tab: true))),
+                ]),
+              ),
+              SizedBox(
+                width: 300,
+                child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  _favBtn(x, _dim, _red),
+                  _ibtn(_Ic.quality, x.openQuality, 'Audio quality', c: _dim),
+                  SizedBox(width: 110, child: _vol(_w, Colors.white24)),
+                ]),
               ),
             ]),
-            Container(height: 2, color: _ink),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 260,
-              child: Row(children: [
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                      border: Border.all(color: _ink, width: 1.5)),
-                  child: _media(x, const Size(257, 257),
-                      bg: _ink, art: x.swipeArt),
-                ),
-                const SizedBox(width: 18),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('${x.index}'.padLeft(2, '0'),
-                          style: _s(46, _ink, w: FontWeight.w800, h: 1)),
-                      Text('of ${x.total}',
-                          style: _s(14, _ink.withValues(alpha: 0.6),
-                              w: FontWeight.w500)),
-                      const Spacer(),
-                      _Tap(
-                        onTap: x.openQuality,
-                        tip: 'Audio quality',
-                        child: Text(x.quality,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: _ink.withValues(alpha: 0.7),
-                              decoration: TextDecoration.underline,
-                              decorationColor: _ink.withValues(alpha: 0.4),
-                            )),
-                      ),
-                    ],
-                  ),
-                ),
-              ]),
+          ),
+        ),
+      ]),
+    ),
+  ]);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 4. AMAZON MUSIC
+// ════════════════════════════════════════════════════════════════════
+
+class _Amazon extends StatelessWidget {
+  const _Amazon(this.x);
+  final PlayerCtx x;
+
+  static const _c = Color(0xFF25D1DA);
+  static const _dim = Color(0xFF9AA7B8);
+  static const _w = Colors.white;
+
+  Widget _ctl() =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        _shufBtn(_w, onC: _c),
+        _ibtn(_Ic.prev, x.prev, 'Previous', size: 34, c: _w),
+        _ringPlay(_c, 72),
+        _ibtn(_Ic.next, x.next, 'Next', size: 34, c: _w),
+        _repBtn(_w, onC: _c),
+      ]);
+
+  Widget _quality() => _Tap(
+    onTap: x.openQuality,
+    tip: 'Audio quality',
+    child: Text(x.quality, style: _s(12, _dim, w: FontWeight.w600)),
+  );
+
+  @override
+  Widget build(BuildContext context) => _shell(
+    _grad(const [Color(0xFF14243A), Color(0xFF070B12)]),
+    LayoutBuilder(builder: (_, c) => _isWide(c) ? _wide() : _mobile()),
+  );
+
+  Widget _mobile() => Padding(
+    padding: const EdgeInsets.fromLTRB(22, 4, 22, 16),
+    child: Column(children: [
+      _hdr(x, _w, mid: _quality()),
+      const SizedBox(height: 8),
+      Expanded(child: _art(x, r: 6)),
+      const SizedBox(height: 18),
+      Text(x.song.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: _s(23, _w, w: FontWeight.w800)),
+      const SizedBox(height: 2),
+      Text(x.song.artist ?? x.song.album ?? '',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: _s(16, _c, w: FontWeight.w600)),
+      const SizedBox(height: 10),
+      _bar(_c, Colors.white24, h: 22, t: 5, th: _Thumb.none),
+      _times(_dim, fs: 12),
+      const SizedBox(height: 6),
+      _ctl(),
+      const SizedBox(height: 12),
+      Row(children: [
+        Expanded(child: _favPill(x, _w, _c)),
+        const SizedBox(width: 8),
+        Expanded(
+            child: _pill(_Ic.lyrics, 'Lyrics',
+                x.hasLyrics ? x.toggleLyrics : null, _w,
+                on: x.showLyrics && x.hasLyrics, onC: _c)),
+        const SizedBox(width: 8),
+        Expanded(child: _pill(_Ic.queue, 'Queue', x.openQueue, _w)),
+      ]),
+    ]),
+  );
+
+  Widget _wide() => Padding(
+    padding: const EdgeInsets.fromLTRB(36, 8, 36, 24),
+    child: Row(children: [
+      Expanded(
+        flex: 6,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _hdr(x, _w, mid: _quality()),
+          const SizedBox(height: 4),
+          Text(x.song.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: _s(36, _w, w: FontWeight.w800, h: 1.1)),
+          const SizedBox(height: 4),
+          Text(x.song.artist ?? x.song.album ?? '',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _s(20, _c, w: FontWeight.w600)),
+          const SizedBox(height: 14),
+          Expanded(child: _lyr(x, r: 14, bg: Colors.white.withValues(alpha: .06))),
+          const SizedBox(height: 14),
+          _bar(_c, Colors.white24, h: 22, t: 5, th: _Thumb.none),
+          _times(_dim),
+          const SizedBox(height: 6),
+          ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480), child: _ctl()),
+          const SizedBox(height: 12),
+          Row(children: [
+            _favPill(x, _w, _c),
+            const SizedBox(width: 8),
+            _pill(_Ic.queue, 'Queue', x.openQueue, _w),
+            const SizedBox(width: 8),
+            _pill(_Ic.more, 'More', null, _w),
+          ]),
+        ]),
+      ),
+      const SizedBox(width: 40),
+      Expanded(flex: 4, child: _art(x, r: 6, swap: false)),
+    ]),
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 5. TIDAL
+// ════════════════════════════════════════════════════════════════════
+
+class _Tidal extends StatelessWidget {
+  const _Tidal(this.x);
+  final PlayerCtx x;
+
+  static const _c = Color(0xFF00FFFF);
+  static const _dim = Color(0xFF8E8E93);
+  static const _w = Colors.white;
+
+  Widget _q() => _Tap(
+    onTap: x.openQuality,
+    tip: 'Audio quality',
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+          border: Border.all(color: _c), borderRadius: BorderRadius.circular(4)),
+      child: Text(x.quality.toUpperCase(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: _s(10, _c, w: FontWeight.w800, ls: 1)),
+    ),
+  );
+
+  Widget _ctl() =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        _shufBtn(_w, onC: _c),
+        _ibtn(_Ic.prev, x.prev, 'Previous', size: 38, c: _w),
+        _bare(_w, 66),
+        _ibtn(_Ic.next, x.next, 'Next', size: 38, c: _w),
+        _repBtn(_w, onC: _c),
+      ]);
+
+  @override
+  Widget build(BuildContext context) => _shell(
+    const ColoredBox(color: Colors.black),
+    LayoutBuilder(builder: (_, c) => _isWide(c) ? _wide(c) : _mobile()),
+  );
+
+  Widget _mobile() => Column(children: [
+    Expanded(
+      child: Stack(children: [
+        Positioned.fill(
+            child: _art(x,
+                r: 0, shadow: false, al: Alignment.topCenter, lbg: Colors.black)),
+        IgnorePointer(
+          child: Container(
+            height: 90,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.black.withValues(alpha: .6), Colors.transparent],
+              ),
             ),
-            const SizedBox(height: 18),
+          ),
+        ),
+        Positioned(top: 4, left: 8, right: 8, child: _hdr(x, _w)),
+      ]),
+    ),
+    Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(x.song.title,
-                maxLines: 2,
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: _s(40, _ink, w: FontWeight.w800, ls: -1.2, h: 1.0)),
-            const SizedBox(height: 6),
+                style: _s(21, _w, w: FontWeight.w800)),
+            const SizedBox(height: 2),
             Text(x.song.artist ?? x.song.album ?? '',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: _s(20, _ink.withValues(alpha: 0.7), w: FontWeight.w500)),
-            const SizedBox(height: 12),
-            _bar(_ink, _ink.withValues(alpha: 0.18),
-                h: 24, t: 2, th: _Thumb.tick),
-            _times(_s(12, _ink.withValues(alpha: 0.65),
-                w: FontWeight.w500, tab: true)),
-            const Spacer(),
-            Row(children: [
-              Expanded(
-                child: _box(Icon(_Ic.prev, size: 28, color: _ink), x.prev,
-                    'Previous'),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
-                child: _playing((s) {
-                  final p = s == ButtonState.playing;
-                  return _box(
-                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      s == ButtonState.loading
-                          ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2.5, color: _paper))
-                          : Icon(p ? _Ic.pause : _Ic.play,
-                          size: 26, color: _paper),
-                      const SizedBox(width: 10),
-                      Text(p ? 'Pause' : 'Play',
-                          style: _s(18, _paper, w: FontWeight.w700)),
-                    ]),
-                    _toggle,
-                    p ? 'Pause' : 'Play',
-                    filled: true,
-                  );
-                }),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _box(
-                    Icon(_Ic.next, size: 28, color: _ink), x.next, 'Next'),
-              ),
-            ]),
-            const SizedBox(height: 12),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              _fav(x.song, (l, t) => _link(l ? 'Liked' : 'Like', t, l)),
-              _link('Lyrics', x.hasLyrics ? x.toggleLyrics : null,
-                  x.showLyrics && x.hasLyrics),
-              _shuffle((on, t) => _link('Shuffle', t, on)),
-              _repeat((m, t) => _link(
-                  m == LoopMode.off
-                      ? 'Repeat'
-                      : m == LoopMode.one
-                      ? 'Repeat one'
-                      : 'Repeat all',
-                  t,
-                  m != LoopMode.off)),
-              _link('Queue', x.openQueue, false),
-            ]),
-          ],
+                style: _s(15, _c, w: FontWeight.w600)),
+            const SizedBox(height: 8),
+            _q(),
+          ]),
         ),
+        _favBtn(x, _w, _c, size: 28),
+      ]),
+    ),
+    const SizedBox(height: 6),
+    _bar(_c, Colors.white24, h: 16, t: 2, th: _Thumb.none),
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(children: [
+        _times(_dim, fs: 11),
+        const SizedBox(height: 2),
+        _ctl(),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          _lyrBtn(x, _dim, onC: _c),
+          _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _dim),
+        ]),
+        const SizedBox(height: 6),
+      ]),
+    ),
+  ]);
+
+  Widget _wide(BoxConstraints c) {
+    final side = math.min(c.maxHeight, c.maxWidth * .46);
+    return Row(children: [
+      SizedBox(width: side, height: side, child: x.swipeArt),
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(36, 8, 24, 24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _hdr(x, _w, right: _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _w)),
+            const SizedBox(height: 8),
+            Text(x.song.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: _s(36, _w, w: FontWeight.w800, h: 1.08)),
+            const SizedBox(height: 4),
+            Text(x.song.artist ?? x.song.album ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _s(20, _c, w: FontWeight.w600)),
+            const SizedBox(height: 10),
+            Row(children: [_q(), const Spacer(), _favBtn(x, _w, _c, size: 28)]),
+            const SizedBox(height: 12),
+            Expanded(child: _lyr(x, r: 0, bg: Colors.transparent)),
+            _seekRow(_dim, _c, Colors.white24, h: 18, t: 2, th: _Thumb.none),
+            _ctl(),
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 6. DEEZER
+// ════════════════════════════════════════════════════════════════════
+
+class _Deezer extends StatelessWidget {
+  const _Deezer(this.x);
+  final PlayerCtx x;
+
+  static const _p = Color(0xFFA238FF);
+  static const _w = Colors.white;
+
+  Widget _main(bool wide) {
+    final dim = Colors.white70;
+    return Column(children: [
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(children: [
+            _hdr(x, _w,
+                mid: _caption('PLAYING FROM', x.song.album ?? 'Now playing',
+                    dim, _w)),
+            const SizedBox(height: 6),
+            Expanded(child: _art(x, r: 24, swap: !wide)),
+            const SizedBox(height: 16),
+            _titles(x, _w, dim, size: 23, center: true),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              _favBtn(x, dim, _p, size: 26),
+              const SizedBox(width: 12),
+              _ibtn(_Ic.quality, x.openQuality, 'Audio quality', c: dim),
+            ]),
+            _bar(_p, Colors.white24, h: 22, t: 4),
+            _times(dim),
+            const SizedBox(height: 6),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              _shufBtn(_w, onC: _p),
+              _ibtn(_Ic.prev, x.prev, 'Previous', size: 36, c: _w),
+              _playBtn(size: 72, bg: _p, fg: _w),
+              _ibtn(_Ic.next, x.next, 'Next', size: 36, c: _w),
+              _repBtn(_w, onC: _p),
+            ]),
+            const SizedBox(height: 14),
+          ]),
+        ),
+      ),
+      if (!wide)
+        _Tap(
+          onTap: x.hasLyrics ? x.toggleLyrics : null,
+          child: Container(
+            height: 58,
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: .12),
+              borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Row(children: [
+              Icon(_Ic.lyrics, size: 20, color: _w),
+              const SizedBox(width: 10),
+              Text(x.showLyrics && x.hasLyrics ? 'Hide lyrics' : 'Lyrics',
+                  style: _s(15, _w, w: FontWeight.w700)),
+              const SizedBox(width: 6),
+              Icon(
+                  x.showLyrics && x.hasLyrics
+                      ? Icons.keyboard_arrow_down
+                      : Icons.keyboard_arrow_up,
+                  size: 22,
+                  color: dim),
+              const Spacer(),
+              _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _w),
+            ]),
+          ),
+        ),
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _t(x, const Color(0xFF6A2BC0));
+    return _shell(
+      _grad([_dark(t, .5), const Color(0xFF0E0E14)], const [0, .8]),
+      LayoutBuilder(
+        builder: (_, c) => _isWide(c)
+            ? Padding(
+          padding: const EdgeInsets.fromLTRB(28, 12, 28, 12),
+          child: Row(children: [
+            Expanded(
+                flex: 6,
+                child: _lyr(x, r: 28, bg: Colors.white.withValues(alpha: .08))),
+            const SizedBox(width: 24),
+            Expanded(
+              flex: 5,
+              child: Center(
+                  child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: _main(true))),
+            ),
+          ]),
+        )
+            : _main(false),
       ),
     );
   }
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 3. LYRICS
-//    Lyrics are the screen. The artwork button swaps to the cover.
+// 7. SOUNDCLOUD
 // ════════════════════════════════════════════════════════════════════
 
-class _LyricsFirst extends StatelessWidget {
-  const _LyricsFirst(this.x);
+class _Sc extends StatelessWidget {
+  const _Sc(this.x);
   final PlayerCtx x;
 
-  static const _ink = Color(0xFFF1F1F2);
+  static const _or = Color(0xFFFF5500);
+  static const _dim = Color(0xFF999999);
+  static const _w = Colors.white;
+
+  Widget _wave({double h = 64}) => _progress((f, p, t, pl, seek) {
+    final bars = _waveFor(x.song.id);
+    return _Seeker(
+      f: f,
+      onSeek: seek,
+      height: h,
+      paint: (v) => _WavePainter(v, bars, _or, Colors.white30),
+    );
+  });
+
+  Widget _chip(String s, double fs, FontWeight w) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    color: Colors.black.withValues(alpha: .85),
+    child: Text(s,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: _s(fs, _w, w: w)),
+  );
+
+  Widget _ctl(double play) =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        _shufBtn(_w, onC: _or),
+        _ibtn(_Ic.prev, x.prev, 'Previous', size: 34, c: _w),
+        _playBtn(size: play, bg: _or, fg: _w),
+        _ibtn(_Ic.next, x.next, 'Next', size: 34, c: _w),
+        _repBtn(_w, onC: _or),
+      ]);
 
   @override
-  Widget build(BuildContext context) {
-    final bg = Color.lerp(
-        const Color(0xFF101112), x.tint ?? const Color(0xFF2A2D34), 0.4)!;
-    final dim = _ink.withValues(alpha: 0.65);
-    final art = x.showLyrics && x.hasLyrics;
-    return _Stage(
-      w: 400,
-      h: 780,
-      back: ColoredBox(color: bg),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(children: [
-          Row(children: [
-            _ibtn(_Ic.down, x.close, 'Close', c: _ink),
-            const SizedBox(width: 4),
-            SizedBox(
-              width: 44,
-              height: 44,
-              child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8), child: x.art(8)),
+  Widget build(BuildContext context) => _shell(
+    const ColoredBox(color: Color(0xFF121212)),
+    LayoutBuilder(builder: (_, c) => _isWide(c) ? _wide() : _mobile()),
+  );
+
+  Widget _mobile() => Column(children: [
+    Expanded(
+      child: Stack(children: [
+        Positioned.fill(
+            child: _art(x,
+                r: 0, shadow: false, al: Alignment.topCenter, lbg: Colors.black)),
+        IgnorePointer(
+          child: Container(
+            height: 90,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.black.withValues(alpha: .6), Colors.transparent],
+              ),
             ),
-            const SizedBox(width: 12),
+          ),
+        ),
+        Positioned(top: 4, left: 8, right: 8, child: _hdr(x, _w)),
+      ]),
+    ),
+    Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(x.song.artist ?? x.song.album ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _s(13, _dim, w: FontWeight.w500)),
+              Text(x.song.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _s(20, _w, w: FontWeight.w700)),
+            ]),
+          ),
+          _favBtn(x, _dim, _or, size: 26),
+        ]),
+        const SizedBox(height: 6),
+        _wave(),
+        _times(_or, fs: 11),
+        const SizedBox(height: 6),
+        _ctl(66),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          _lyrBtn(x, _dim, onC: _or),
+          _ibtn(_Ic.quality, x.openQuality, 'Audio quality', c: _dim),
+          _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _dim),
+        ]),
+      ]),
+    ),
+  ]);
+
+  Widget _wide() {
+    final t = _t(x);
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+        child: _hdr(x, _w, right: _moreBtn(x, _w)),
+      ),
+      SizedBox(
+        height: 300,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [_dark(t, .85), _dark(t, .35)],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    _playBtn(size: 72, bg: _or, fg: _w),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _chip(x.song.artist ?? x.song.album ?? '', 14,
+                              FontWeight.w500),
+                          const SizedBox(height: 6),
+                          _chip(x.song.title, 26, FontWeight.w700),
+                        ],
+                      ),
+                    ),
+                  ]),
+                  const Spacer(),
+                  _wave(h: 72),
+                  _times(_w, fs: 11),
+                ]),
+              ),
+              const SizedBox(width: 20),
+              SizedBox.square(dimension: 260, child: x.swipeArt),
+            ]),
+          ),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+        child: Row(children: [
+          _shufBtn(_w, onC: _or),
+          _ibtn(_Ic.prev, x.prev, 'Previous', c: _w),
+          _ibtn(_Ic.next, x.next, 'Next', c: _w),
+          _repBtn(_w, onC: _or),
+          const Spacer(),
+          _favPill(x, _w, _or),
+          const SizedBox(width: 8),
+          _pill(_Ic.queue, 'Queue', x.openQueue, _w),
+          const SizedBox(width: 8),
+          _pill(_Ic.quality, 'Quality', x.openQuality, _w),
+        ]),
+      ),
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: _lyr(x, r: 6, bg: Colors.white.withValues(alpha: .05)),
+        ),
+      ),
+    ]);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 8. PANDORA
+// ════════════════════════════════════════════════════════════════════
+
+class _Pandora extends StatelessWidget {
+  const _Pandora(this.x);
+  final PlayerCtx x;
+
+  static const _blue = Color(0xFF2C4BD9);
+  static const _w = Colors.white;
+  static const _dim = Color(0xCCFFFFFF);
+
+  Widget _ctl() =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        _repBtn(_w),
+        _ibtn(_Ic.prev, x.prev, 'Previous', size: 34, c: _w),
+        _playBtn(size: 78, bg: _w, fg: _blue),
+        _ibtn(_Ic.next, x.next, 'Next', size: 34, c: _w),
+        _favBtn(x, _w, _w, size: 28),
+      ]);
+
+  Widget _lab(IconData i, String l, VoidCallback? t, {bool on = false}) =>
+      Opacity(
+        opacity: t == null ? .4 : 1,
+        child: _Tap(
+          onTap: t,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(i, size: 22, color: on ? _w : _dim),
+              const SizedBox(height: 3),
+              Text(l, style: _s(11, on ? _w : _dim, w: FontWeight.w700)),
+            ]),
+          ),
+        ),
+      );
+
+  Widget _pillCap() => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+    decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .18),
+        borderRadius: BorderRadius.circular(14)),
+    child: Text('NOW PLAYING', style: _s(11, _w, w: FontWeight.w800, ls: 1.4)),
+  );
+
+  @override
+  Widget build(BuildContext context) => _shell(
+    _grad(const [Color(0xFF3A5BFF), Color(0xFF14226E)]),
+    LayoutBuilder(builder: (_, c) => _isWide(c) ? _wide(c) : _mobile()),
+  );
+
+  Widget _mobile() => Column(children: [
+    Expanded(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+        child: Column(children: [
+          _hdr(x, _w, mid: _pillCap()),
+          const SizedBox(height: 6),
+          Expanded(child: _art(x, r: 4)),
+          const SizedBox(height: 8),
+          _bar(_w, Colors.white30, h: 16, t: 3, th: _Thumb.none),
+          _times(_dim, fs: 11),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _titles(x, _w, _dim, size: 22),
+          ),
+          const SizedBox(height: 12),
+          _ctl(),
+          const SizedBox(height: 10),
+        ]),
+      ),
+    ),
+    Container(
+      color: Colors.black.withValues(alpha: .25),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+        _lab(_Ic.lyrics, 'Lyrics', x.hasLyrics ? x.toggleLyrics : null,
+            on: x.showLyrics && x.hasLyrics),
+        _lab(_Ic.queue, 'Queue', x.openQueue),
+        _lab(_Ic.quality, 'Quality', x.openQuality),
+      ]),
+    ),
+  ]);
+
+  Widget _wide(BoxConstraints c) {
+    final side = math.min(c.maxHeight * .5, 360.0);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 4, 32, 24),
+      child: Column(children: [
+        _hdr(x, _w, mid: _pillCap(), right: _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _w)),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: side,
+          child: Row(children: [
+            SizedBox.square(
+              dimension: side,
+              child: DecoratedBox(
+                decoration: BoxDecoration(boxShadow: _shadow(30, 14, .4)),
+                child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: x.swipeArt),
+              ),
+            ),
+            const SizedBox(width: 32),
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(x.song.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _s(16, _ink, w: FontWeight.w700)),
-                  Text(x.song.artist ?? x.song.album ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _s(13, dim, w: FontWeight.w500)),
+                  _titles(x, _w, _dim, size: 32),
+                  const SizedBox(height: 18),
+                  _bar(_w, Colors.white30, h: 18, t: 4, th: _Thumb.none),
+                  _times(_dim),
+                  const SizedBox(height: 8),
+                  ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: _ctl()),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    _lab(_Ic.quality, 'Quality', x.openQuality),
+                    _lab(_Ic.more, 'More', null),
+                  ]),
                 ],
               ),
             ),
-            _moreBtn(x, _ink),
           ]),
-          const SizedBox(height: 8),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (c, b) => _media(
-                x,
-                Size(b.maxWidth, b.maxHeight),
-                bg: Colors.transparent,
-                invert: true,
-                art: Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    SizedBox.square(
-                      dimension: 300,
-                      child: ClipRRect(
-                          borderRadius: BorderRadius.circular(18),
-                          child: x.art(18)),
-                    ),
-                    if (!x.hasLyrics) ...[
-                      const SizedBox(height: 16),
-                      Text('No lyrics for this song',
-                          style: _s(14, dim, w: FontWeight.w500)),
-                    ],
-                  ]),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _bar(_ink, Colors.white24, h: 24),
-          _times(_s(12, dim, w: FontWeight.w500, tab: true)),
-          const SizedBox(height: 6),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            _shufBtn(_ink),
-            _ibtn(_Ic.prev, x.prev, 'Previous', size: 32, c: _ink),
-            _playBtn(size: 64, bg: _ink, fg: bg),
-            _ibtn(_Ic.next, x.next, 'Next', size: 32, c: _ink),
-            _repBtn(_ink),
-          ]),
-          const SizedBox(height: 4),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-            _favBtn(x, dim, _ink),
-            _ibtn(_Ic.photo, x.hasLyrics ? x.toggleLyrics : null,
-                art ? 'Show lyrics' : 'Show artwork',
-                c: _ink, size: 22, on: art, mark: art),
-            _ibtn(_Ic.quality, x.openQuality, 'Audio quality',
-                c: _ink, size: 22),
-            _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _ink, size: 22),
-          ]),
-        ]),
-      ),
+        ),
+        const SizedBox(height: 16),
+        Expanded(child: _lyr(x, r: 12, bg: Colors.black.withValues(alpha: .22))),
+      ]),
     );
   }
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 4. POLAROID
+// 9. MATERIAL YOU
 // ════════════════════════════════════════════════════════════════════
 
-class _Polaroid extends StatelessWidget {
-  const _Polaroid(this.x);
-  final PlayerCtx x;
+class _Pal {
+  const _Pal(this.prim, this.onPrim, this.surf, this.tonal);
+  factory _Pal.of(Color t) {
+    final h = HSLColor.fromColor(t);
+    final prim = h.withLightness(.8).withSaturation(.55).toColor();
+    final surf = Color.lerp(const Color(0xFF121316), t, .18)!;
+    return _Pal(prim, _dark(t, .25), surf, Color.lerp(surf, prim, .22)!);
+  }
+  final Color prim, onPrim, surf, tonal;
+}
 
-  static const _bg = Color(0xFF384047);
-  static const _paper = Color(0xFFF7F7F5);
-  static const _ink = Color(0xFF222222);
-  static const _red = Color(0xFFC8372D);
-  static const _light = Color(0xFFF1F1EE);
+class _WavyPainter extends CustomPainter {
+  const _WavyPainter(this.f, this.on, this.off);
+  final double f;
+  final Color on, off;
 
   @override
-  Widget build(BuildContext context) {
-    return _Stage(
-      w: 400,
-      h: 780,
-      back: const ColoredBox(color: _bg),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(children: [
-          Row(children: [
-            _ibtn(_Ic.down, x.close, 'Close', c: _light),
-            Expanded(
-              child: Center(
-                child: _Tap(
-                  onTap: x.openQuality,
-                  tip: 'Audio quality',
-                  child: Text(x.quality,
-                      style: _s(13, _light.withValues(alpha: 0.75),
-                          w: FontWeight.w500)),
-                ),
-              ),
-            ),
-            _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _light),
-          ]),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: 340,
-            height: 414,
-            child: Stack(
-              alignment: Alignment.center,
-              clipBehavior: Clip.none,
-              children: [
-                Transform.rotate(
-                  angle: 0.05,
-                  child: Container(
-                    width: 312,
-                    height: 388,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFDCDAD5),
-                      borderRadius: BorderRadius.circular(3),
-                      boxShadow: const [
-                        BoxShadow(
-                            color: Color(0x44000000),
-                            blurRadius: 14,
-                            offset: Offset(0, 6))
-                      ],
-                    ),
-                  ),
-                ),
-                Transform.rotate(
-                  angle: -0.025,
-                  child: Container(
-                    width: 318,
-                    height: 392,
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
-                    decoration: BoxDecoration(
-                      color: _paper,
-                      borderRadius: BorderRadius.circular(3),
-                      boxShadow: const [
-                        BoxShadow(
-                            color: Color(0x55000000),
-                            blurRadius: 20,
-                            offset: Offset(0, 10))
-                      ],
-                    ),
-                    child: Column(children: [
-                      _media(x, const Size(290, 290),
-                          bg: const Color(0xFF111111), art: x.swipeArt),
-                      Expanded(
-                        child: Row(children: [
-                          Expanded(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(x.song.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: _s(20, _ink, w: FontWeight.w700)),
-                                Text(x.song.artist ?? x.song.album ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: _s(14, _ink.withValues(alpha: 0.6),
-                                        w: FontWeight.w500)),
-                              ],
-                            ),
-                          ),
-                          _favBtn(x, _ink.withValues(alpha: 0.5), _red,
-                              size: 26),
-                        ]),
-                      ),
-                    ]),
-                  ),
-                ),
-                Positioned(
-                  top: -4,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Transform.rotate(
-                      angle: 0.06,
-                      child: Container(
-                        width: 92,
-                        height: 26,
-                        color: const Color(0xCCD8D1B8),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          _bar(_light, Colors.white24),
-          _times(_s(12, _light.withValues(alpha: 0.7),
-              w: FontWeight.w500, tab: true)),
-          const Spacer(),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            _shufBtn(_light),
-            _ibtn(_Ic.prev, x.prev, 'Previous', size: 34, c: _light),
-            _playBtn(size: 72, bg: _paper, fg: _ink),
-            _ibtn(_Ic.next, x.next, 'Next', size: 34, c: _light),
-            _repBtn(_light),
-          ]),
-          const SizedBox(height: 8),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            _lyrBtn(x, _light),
-            const SizedBox(width: 28),
-            _moreBtn(x, _light),
-          ]),
-        ]),
-      ),
-    );
+  void paint(Canvas c, Size s) {
+    final y = s.height / 2, x = f * s.width;
+    c.drawLine(
+        Offset(x, y),
+        Offset(s.width, y),
+        Paint()
+          ..color = off
+          ..strokeWidth = 4
+          ..strokeCap = StrokeCap.round);
+    final path = Path()..moveTo(0, y);
+    for (double i = 0; i <= x; i += 2) {
+      path.lineTo(i, y + 3.5 * math.sin(i / 6.5));
+    }
+    c.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..color = on
+          ..strokeWidth = 5
+          ..strokeCap = StrokeCap.round);
+    c.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromCenter(center: Offset(x, y), width: 5, height: 24),
+            const Radius.circular(3)),
+        Paint()..color = on);
   }
+
+  @override
+  bool shouldRepaint(_WavyPainter o) => true;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 5. TABLETOP RADIO
-//    Dial = seek bar (drag or tap). Left knob = volume, right knob =
-//    playback speed. Drag a knob up/down or scroll over it; double-tap
-//    resets. The grille area turns into the lyrics panel.
-// ════════════════════════════════════════════════════════════════════
-
-class _Radio extends StatelessWidget {
-  const _Radio(this.x);
+class _Material extends StatelessWidget {
+  const _Material(this.x);
   final PlayerCtx x;
 
-  static const _body = Color(0xFFD7D9D6);
-  static const _ink = Color(0xFF212223);
-  static const _red = Color(0xFFC8372D);
-  static const _win = Color(0xFF151617);
-  static const _light = Color(0xFFE9E9E5);
-  static const _key = Color(0xFF3A3C3E);
+  static const _w = Colors.white;
 
-  /// Small rubber key with an indicator bar.
-  Widget _k(IconData i, VoidCallback? t, String tip,
-      {bool on = false, double w = 48}) =>
+  Widget _tb(Widget child, VoidCallback? t, String tip, _Pal p,
+      {double w = 48, double h = 48, double r = 24}) =>
       Opacity(
-        opacity: t == null ? 0.4 : 1,
+        opacity: t == null ? .4 : 1,
         child: _Tap(
           onTap: t,
           tip: tip,
           child: Container(
             width: w,
-            height: 38,
+            height: h,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: _key,
-              borderRadius: BorderRadius.circular(7),
-            ),
-            child: Stack(alignment: Alignment.center, children: [
-              Icon(i, size: 20, color: _light),
-              Positioned(
-                top: 5,
-                child: Container(
-                    width: 14, height: 2.5, color: on ? _red : Colors.transparent),
-              ),
-            ]),
+                color: p.tonal, borderRadius: BorderRadius.circular(r)),
+            child: child,
           ),
         ),
       );
 
-  Widget _t(Widget child, VoidCallback t, String tip, {bool lit = false}) =>
-      _Tap(
-        onTap: t,
-        tip: tip,
-        child: Container(
-          width: double.infinity,
-          height: 56,
-          margin: const EdgeInsets.symmetric(horizontal: 5),
-          decoration: BoxDecoration(
-            color: _key,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Stack(alignment: Alignment.center, children: [
-            child,
-            Positioned(
-              top: 7,
-              child: Container(
-                width: 18,
-                height: 3,
-                decoration: BoxDecoration(
-                  color: lit ? _red : Colors.transparent,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
+  Widget _wavy(_Pal p) => _progress((f, pos, tot, pl, seek) => _Seeker(
+    f: f,
+    onSeek: seek,
+    height: 30,
+    paint: (v) => _WavyPainter(v, p.prim, Colors.white24),
+  ));
+
+  Widget _ctl(_Pal p) =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        _tb(Icon(_Ic.prev, size: 30, color: _w), x.prev, 'Previous', p,
+            w: 76, h: 66, r: 26),
+        _playing((s) => _Tap(
+          onTap: _toggle,
+          tip: s == ButtonState.playing ? 'Pause' : 'Play',
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            width: 108,
+            height: 76,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: p.prim,
+              borderRadius:
+              BorderRadius.circular(s == ButtonState.playing ? 24 : 38),
             ),
-          ]),
-        ),
-      );
+            child: s == ButtonState.loading
+                ? SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                    strokeWidth: 3, color: p.onPrim))
+                : Icon(s == ButtonState.playing ? _Ic.pause : _Ic.play,
+                size: 38, color: p.onPrim),
+          ),
+        )),
+        _tb(Icon(_Ic.next, size: 30, color: _w), x.next, 'Next', p,
+            w: 76, h: 66, r: 26),
+      ]);
 
-  Widget _volumeKnob() => StreamBuilder<double>(
-    stream: _mp.player.volumeStream,
-    initialData: _mp.player.volume,
-    builder: (_, s) {
-      final v = (s.data ?? 1.0).clamp(0.0, 1.0).toDouble();
-      return _Knob(
-        v: v,
-        label: 'Volume',
-        readout: '${(v * 100).round()}%',
-        onChanged: (n) => _mp.player.setVolume(n),
-        onReset: () => _mp.player.setVolume(1),
-      );
-    },
-  );
+  Widget _chips(_Pal p, bool wide) =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        _shuffle((on, t) => _tb(
+            Icon(_Ic.shuffle, size: 20, color: on ? p.prim : _w), t,
+            on ? 'Shuffle: on' : 'Shuffle: off', p)),
+        _repeat((m, t) => _tb(
+            Icon(m == LoopMode.one ? _Ic.repeatOne : _Ic.repeat,
+                size: 20, color: m == LoopMode.off ? _w : p.prim),
+            t,
+            m == LoopMode.off
+                ? 'Repeat: off'
+                : m == LoopMode.one
+                ? 'Repeat: one'
+                : 'Repeat: all',
+            p)),
+        if (!wide)
+          _tb(
+              Icon(_Ic.lyrics,
+                  size: 20,
+                  color: x.showLyrics && x.hasLyrics ? p.prim : _w),
+              x.hasLyrics ? x.toggleLyrics : null,
+              'Lyrics',
+              p),
+        _tb(Icon(_Ic.quality, size: 20, color: _w), x.openQuality,
+            'Audio quality', p),
+      ]);
 
-  Widget _speedKnob() => StreamBuilder<double>(
-    stream: _mp.player.speedStream,
-    initialData: _mp.player.speed,
-    builder: (_, s) {
-      final sp = (s.data ?? 1.0).clamp(0.5, 2.0).toDouble();
-      return _Knob(
-        v: (sp - 0.5) / 1.5,
-        label: 'Speed',
-        readout: '${(sp * 100).round() / 100}×',
-        onChanged: (n) =>
-            _mp.player.setSpeed(((0.5 + n * 1.5) * 20).round() / 20),
-        onReset: () => _mp.player.setSpeed(1),
-      );
-    },
+  Widget _heart(_Pal p) => _fav(
+    x.song,
+        (l, t) => _tb(
+        Icon(l ? _Ic.heartFill : _Ic.heart,
+            size: 22, color: l ? p.prim : _w),
+        t,
+        'Favourite',
+        p),
   );
 
   @override
   Widget build(BuildContext context) {
-    return _Stage(
-      w: 400,
-      h: 780,
-      back: const ColoredBox(color: Color(0xFF2B2D2F)),
-      child: Container(
-        margin: const EdgeInsets.all(10),
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: _body,
-          borderRadius: BorderRadius.circular(26),
-          boxShadow: const [
-            BoxShadow(
-                color: Color(0x66000000), blurRadius: 24, offset: Offset(0, 10))
-          ],
+    final p = _Pal.of(_t(x));
+    return _shell(
+      ColoredBox(color: p.surf),
+      LayoutBuilder(builder: (_, c) => _isWide(c) ? _wide(p) : _mobile(p)),
+    );
+  }
+
+  Widget _mobile(_Pal p) => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+    child: Column(children: [
+      Row(children: [
+        _tb(Icon(_Ic.down, size: 24, color: _w), x.close, 'Close', p),
+        const Spacer(),
+        _tb(Icon(_Ic.queue, size: 22, color: _w), x.openQueue, 'Queue', p),
+        const SizedBox(width: 8),
+        Builder(
+          builder: (c) => _tb(Icon(_Ic.more, size: 22, color: _w),
+                  () => _more(c, x.song), 'More', p),
         ),
-        child: Column(children: [
-          Row(children: [
-            _ibtn(_Ic.down, x.close, 'Close', c: _ink),
-            Expanded(
-              child: Center(
-                child: _Tap(
-                  onTap: x.openQuality,
-                  tip: 'Audio quality',
-                  child: Text(x.quality,
-                      style: _s(13, _ink.withValues(alpha: 0.7),
-                          w: FontWeight.w500)),
-                ),
-              ),
-            ),
-            _moreBtn(x, _ink),
-          ]),
-          const SizedBox(height: 8),
-          Container(
-            height: 92,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _win,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(children: [
-              SizedBox(
-                width: 68,
-                height: 68,
-                child: ClipRRect(
-                    borderRadius: BorderRadius.circular(6), child: x.art(6)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(x.song.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: _s(16, _light, w: FontWeight.w600)),
-                    Text(x.song.artist ?? x.song.album ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: _s(13, _light.withValues(alpha: 0.6),
-                            w: FontWeight.w500)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              _progress((f, p, t, pl, s) => Text(_fmt(p),
-                  style: _s(22, _light, w: FontWeight.w600, tab: true))),
-            ]),
-          ),
-          const SizedBox(height: 12),
-          Container(
-            height: 88,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: _light,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFF9A9C98)),
-            ),
-            child: _progress((f, p, tot, pl, seek) => _Seeker(
-              f: f,
-              onSeek: seek,
-              height: 88,
-              paint: (v) => _DialPainter(v, tot, _ink, _red),
-            )),
-          ),
-          const SizedBox(height: 12),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-            _volumeKnob(),
-            Column(mainAxisSize: MainAxisSize.min, children: [
-              _fav(
-                x.song,
-                    (l, t) => _k(l ? _Ic.heartFill : _Ic.heart, t,
-                    l ? 'Remove from favourites' : 'Add to favourites',
-                    on: l),
-              ),
-              const SizedBox(height: 10),
-              _k(_Ic.lyrics, x.hasLyrics ? x.toggleLyrics : null,
-                  x.showLyrics ? 'Hide lyrics' : 'Show lyrics',
-                  on: x.showLyrics && x.hasLyrics),
-            ]),
-            _speedKnob(),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(
-              child: _t(Icon(_Ic.prev, size: 26, color: _light), x.prev,
-                  'Previous'),
-            ),
-            Expanded(
-              child: _playing((s) => _t(
-                s == ButtonState.loading
-                    ? const SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.5, color: _light))
-                    : Icon(
-                    s == ButtonState.playing ? _Ic.pause : _Ic.play,
-                    size: 28,
-                    color: _light),
-                _toggle,
-                s == ButtonState.playing ? 'Pause' : 'Play',
-                lit: s == ButtonState.playing,
-              )),
-            ),
-            Expanded(
-              child: _t(Icon(_Ic.next, size: 26, color: _light), x.next, 'Next'),
-            ),
-          ]),
-          const SizedBox(height: 10),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            _shuffle((on, t) =>
-                _k(_Ic.shuffle, t, on ? 'Shuffle: on' : 'Shuffle: off',
-                    on: on, w: 100)),
-            _repeat((m, t) => _k(
-                m == LoopMode.one ? _Ic.repeatOne : _Ic.repeat,
-                t,
-                m == LoopMode.off
-                    ? 'Repeat: off'
-                    : m == LoopMode.one
-                    ? 'Repeat: one'
-                    : 'Repeat: all',
-                on: m != LoopMode.off,
-                w: 100)),
-            _k(_Ic.queue, x.openQueue, 'Queue', w: 100),
-          ]),
-          const SizedBox(height: 12),
+      ]),
+      const SizedBox(height: 12),
+      Expanded(child: _art(x, r: 36, shadow: false)),
+      const SizedBox(height: 16),
+      Row(children: [
+        Expanded(
+            child: _titles(x, _w, Colors.white70, size: 27, w: FontWeight.w600)),
+        _heart(p),
+      ]),
+      const SizedBox(height: 8),
+      _wavy(p),
+      _times(Colors.white70, fs: 12),
+      const SizedBox(height: 10),
+      _ctl(p),
+      const SizedBox(height: 14),
+      _chips(p, false),
+    ]),
+  );
+
+  Widget _wide(_Pal p) => Padding(
+    padding: const EdgeInsets.fromLTRB(28, 8, 28, 24),
+    child: Column(children: [
+      Row(children: [
+        _tb(Icon(_Ic.down, size: 24, color: _w), x.close, 'Close', p),
+        const Spacer(),
+        _tb(Icon(_Ic.queue, size: 22, color: _w), x.openQueue, 'Queue', p),
+        const SizedBox(width: 8),
+        Builder(
+          builder: (c) => _tb(Icon(_Ic.more, size: 22, color: _w),
+                  () => _more(c, x.song), 'More', p),
+        ),
+      ]),
+      const SizedBox(height: 14),
+      Expanded(
+        child: Row(children: [
           Expanded(
-            child: LayoutBuilder(
-              builder: (c, b) => _media(
-                x,
-                Size(b.maxWidth, b.maxHeight),
-                bg: _win,
-                radius: 10,
-                art: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    color: const Color(0xFFCDD0CC),
-                    child: CustomPaint(
-                        painter: const _Grille(), size: Size.infinite),
-                  ),
-                ),
-              ),
+            flex: 5,
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                  color: p.tonal, borderRadius: BorderRadius.circular(40)),
+              child: Column(children: [
+                Expanded(child: _art(x, r: 28, swap: false, shadow: false)),
+                const SizedBox(height: 14),
+                Row(children: [
+                  Expanded(
+                      child: _titles(x, _w, Colors.white70,
+                          size: 24, w: FontWeight.w600)),
+                  _heart(p),
+                ]),
+              ]),
             ),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            flex: 6,
+            child: Column(children: [
+              Expanded(child: _lyr(x, r: 32, bg: p.tonal)),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.fromLTRB(22, 14, 22, 18),
+                decoration: BoxDecoration(
+                    color: p.tonal, borderRadius: BorderRadius.circular(32)),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  _wavy(p),
+                  _times(Colors.white70),
+                  const SizedBox(height: 8),
+                  _ctl(p),
+                  const SizedBox(height: 12),
+                  _chips(p, true),
+                ]),
+              ),
+            ]),
           ),
         ]),
       ),
-    );
-  }
+    ]),
+  );
 }
 
-class _Knob extends StatelessWidget {
-  const _Knob({
-    required this.v,
-    required this.onChanged,
-    required this.label,
-    required this.readout,
-    this.onReset,
-  });
-  final double v;
-  final ValueChanged<double> onChanged;
-  final String label, readout;
-  final VoidCallback? onReset;
+// ════════════════════════════════════════════════════════════════════
+// 10. WINAMP
+// ════════════════════════════════════════════════════════════════════
 
-  @override
-  Widget build(BuildContext context) {
-    const ink = Color(0xFF212223);
-    return Column(children: [
-      Listener(
-        onPointerSignal: (e) {
-          if (e is PointerScrollEvent) {
-            onChanged((v - e.scrollDelta.dy / 600).clamp(0.0, 1.0).toDouble());
-          }
-        },
-        child: GestureDetector(
-          onPanUpdate: (d) => onChanged(
-              (v - (d.delta.dy - d.delta.dx) / 170).clamp(0.0, 1.0).toDouble()),
-          onDoubleTap: onReset,
-          child: MouseRegion(
-            cursor: SystemMouseCursors.resizeUpDown,
-            child: SizedBox(
-              width: 84,
-              height: 84,
-              child: CustomPaint(painter: _KnobPainter(v)),
-            ),
-          ),
-        ),
-      ),
-      Text(label, style: _s(12, ink, w: FontWeight.w700)),
-      Text(readout,
-          style: _s(12, ink.withValues(alpha: 0.65),
-              w: FontWeight.w500, tab: true)),
-    ]);
-  }
-}
-
-class _KnobPainter extends CustomPainter {
-  const _KnobPainter(this.v);
-  final double v;
-
-  Offset _dir(double t) => Offset(math.sin(t), -math.cos(t));
-
-  @override
-  void paint(Canvas c, Size s) {
-    final o = s.center(Offset.zero);
-    final mark = Paint()
-      ..color = const Color(0x88212223)
-      ..strokeWidth = 1.4
-      ..strokeCap = StrokeCap.round;
-    for (var i = 0; i <= 10; i++) {
-      final d = _dir(-2.356 + 4.712 * i / 10);
-      c.drawLine(o + d * 36, o + d * 40, mark);
-    }
-    c.drawCircle(
-        o + const Offset(0, 2), 31, Paint()..color = const Color(0x40000000));
-    c.drawCircle(o, 31, Paint()..color = const Color(0xFF3B3D3F));
-    final ridge = Paint()
-      ..color = const Color(0x1FFFFFFF)
-      ..strokeWidth = 1.2;
-    for (var k = 0; k < 36; k++) {
-      final d = _dir(k * 2 * math.pi / 36);
-      c.drawLine(o + d * 28, o + d * 31, ridge);
-    }
-    c.drawCircle(o, 25, Paint()..color = const Color(0xFF45484B));
-    final d = _dir(-2.356 + 4.712 * v);
-    c.drawLine(
-        o + d * 9,
-        o + d * 23,
-        Paint()
-          ..color = const Color(0xFFE9E9E5)
-          ..strokeWidth = 3
-          ..strokeCap = StrokeCap.round);
-  }
-
-  @override
-  bool shouldRepaint(_KnobPainter o) => o.v != v;
-}
-
-class _DialPainter extends CustomPainter {
-  const _DialPainter(this.f, this.total, this.ink, this.red);
+class _WinSlider extends CustomPainter {
+  const _WinSlider(this.f);
   final double f;
-  final Duration total;
-  final Color ink, red;
 
   @override
   void paint(Canvas c, Size s) {
-    final base = s.height - 12;
-    final tick = Paint()
-      ..color = ink.withValues(alpha: 0.75)
-      ..strokeWidth = 1.2;
-    for (var i = 0; i <= 60; i++) {
-      final x = s.width * i / 60;
-      final h = i % 10 == 0 ? 22.0 : (i % 5 == 0 ? 15.0 : 9.0);
-      c.drawLine(Offset(x, base), Offset(x, base - h), tick);
-    }
-    c.drawLine(Offset(0, base), Offset(s.width, base),
-        Paint()..color = ink..strokeWidth = 1.4);
-    for (final i in const [0, 15, 30, 45, 60]) {
-      final label = _fmt(Duration(
-          milliseconds: (total.inMilliseconds * i / 60).round()));
-      final tp = TextPainter(
-        text: TextSpan(
-            text: label,
-            style: TextStyle(
-                fontSize: 11,
-                color: ink,
-                fontWeight: FontWeight.w600,
-                fontFeatures: const [FontFeature.tabularFigures()])),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final x = s.width * i / 60;
-      final dx = i == 0 ? 0.0 : (i == 60 ? -tp.width : -tp.width / 2);
-      tp.paint(c, Offset(x + dx, 6));
-    }
-    final nx = f * s.width;
-    c.drawLine(Offset(nx, 24), Offset(nx, s.height - 4),
-        Paint()..color = red..strokeWidth = 2);
-    c.drawPath(
-        Path()
-          ..moveTo(nx - 5, 20)
-          ..lineTo(nx + 5, 20)
-          ..lineTo(nx, 28)
-          ..close(),
-        Paint()..color = red);
+    final g = Rect.fromLTWH(0, s.height / 2 - 4, s.width, 8);
+    c.drawRect(g, Paint()..color = const Color(0xFF050507));
+    c.drawRect(
+        g,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..color = const Color(0xFF55555F));
+    c.drawRect(Rect.fromLTWH(1, g.top + 1, math.max(0, f * s.width - 1), 6),
+        Paint()..color = const Color(0xFF1FA838));
+    final tx = (f * (s.width - 14)).clamp(0.0, s.width - 14).toDouble();
+    final th = Rect.fromLTWH(tx, 0, 14, s.height);
+    c.drawRect(
+        th,
+        Paint()
+          ..shader = const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFA0A0AC), Color(0xFF4A4A55)],
+          ).createShader(th));
+    c.drawRect(
+        th,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..color = const Color(0xFF14141A));
   }
 
   @override
-  bool shouldRepaint(_DialPainter o) => true;
+  bool shouldRepaint(_WinSlider o) => true;
 }
 
-class _Grille extends CustomPainter {
-  const _Grille();
-
-  @override
-  void paint(Canvas c, Size s) {
-    final p = Paint()..color = const Color(0x4D212223);
-    var r = 0;
-    for (double y = 9; y < s.height; y += 10, r++) {
-      for (double x = r.isEven ? 8 : 13; x < s.width; x += 10) {
-        c.drawCircle(Offset(x, y), 1.8, p);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_Grille o) => false;
-}
-
-// ════════════════════════════════════════════════════════════════════
-// 6. STUDIO
-//    Fader seek bar, transport keys, volume fader and speed presets.
-// ════════════════════════════════════════════════════════════════════
-
-class _Studio extends StatelessWidget {
-  const _Studio(this.x);
+class _Winamp extends StatelessWidget {
+  const _Winamp(this.x);
   final PlayerCtx x;
 
-  static const _bg = Color(0xFF1D1F22);
-  static const _panel = Color(0xFF272A2E);
-  static const _line = Color(0xFF3A3E43);
-  static const _ink = Color(0xFFE7E8EA);
-  static const _dim = Color(0xFF8C9096);
-  static const _acc = Color(0xFF9DB8D6);
+  static const _panel = Color(0xFF2B2B33);
+  static const _hi = Color(0xFF55555F);
+  static const _lo = Color(0xFF14141A);
+  static const _green = Color(0xFF3DFF5A);
 
-  Widget _key(Widget child, VoidCallback? t, String tip,
-      {bool hot = false, double h = 52}) =>
+  TextStyle _m(double sz, {Color c = _green}) => TextStyle(
+    fontFamily: 'monospace',
+    fontSize: sz,
+    color: c,
+    fontWeight: FontWeight.w700,
+    height: 1.1,
+    decoration: TextDecoration.none,
+  );
+
+  Widget _win(String title, Widget body,
+      {bool fill = false, VoidCallback? onClose}) =>
+      Container(
+        decoration: BoxDecoration(
+          color: _panel,
+          border: Border.all(color: _hi, width: 1.5),
+          boxShadow: _shadow(16, 6, .5),
+        ),
+        child: Column(mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min, children: [
+          Container(
+            height: 20,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                  colors: [Color(0xFF3B4A7A), Color(0xFF1B2440)]),
+            ),
+            child: Row(children: [
+              Text(title, style: _s(10, Colors.white, ls: 2)),
+              const Spacer(),
+              if (onClose != null)
+                _Tap(
+                  onTap: onClose,
+                  tip: 'Close',
+                  child: const Icon(Icons.close, size: 13, color: Colors.white),
+                ),
+            ]),
+          ),
+          if (fill) Expanded(child: body) else body,
+        ]),
+      );
+
+  Widget _mb(Widget child, VoidCallback? t, String tip,
+      {double w = 46, double h = 28, bool on = false}) =>
       Opacity(
-        opacity: t == null ? 0.4 : 1,
+        opacity: t == null ? .4 : 1,
         child: _Tap(
           onTap: t,
           tip: tip,
           child: Container(
+            width: w,
             height: h,
-            width: double.infinity,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: hot ? _acc : _line,
-              borderRadius: BorderRadius.circular(10),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: on
+                    ? const [Color(0xFF3A5A3A), Color(0xFF1E3A1E)]
+                    : const [Color(0xFF70707C), Color(0xFF3B3B45)],
+              ),
+              border: Border.all(color: _lo),
+              borderRadius: BorderRadius.circular(3),
             ),
             child: child,
           ),
         ),
       );
 
-  @override
-  Widget build(BuildContext context) {
-    return _Stage(
-      w: 400,
-      h: 780,
-      back: const ColoredBox(color: _bg),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(children: [
-          Row(children: [
-            _ibtn(_Ic.down, x.close, 'Close', c: _ink),
-            Expanded(
-              child: Center(
-                child: Text(x.song.album ?? 'Queue',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _s(13, _dim, w: FontWeight.w500)),
-              ),
-            ),
-            _moreBtn(x, _ink),
-          ]),
-          const SizedBox(height: 6),
-          _media(x, const Size(300, 300),
-              radius: 10,
-              bg: _panel,
-              art: ClipRRect(
-                  borderRadius: BorderRadius.circular(10), child: x.swipeArt)),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(x.song.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _s(22, _ink, w: FontWeight.w700)),
-                  Text(x.song.artist ?? x.song.album ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _s(15, _dim, w: FontWeight.w500)),
-                ],
-              ),
-            ),
-            _favBtn(x, _dim, _acc),
-          ]),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
+  Widget _main() => Padding(
+    padding: const EdgeInsets.all(8),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child: Container(
+            height: 84,
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _panel,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(children: [
-              _progress((f, p, tot, pl, s) => Row(children: [
-                Text(_fmt(p),
-                    style: _s(26, _ink, w: FontWeight.w600, tab: true)),
-                const Spacer(),
-                Text('-${_fmt(tot > p ? tot - p : Duration.zero)}',
-                    style: _s(16, _dim, w: FontWeight.w500, tab: true)),
-              ])),
-              const SizedBox(height: 2),
-              _bar(_acc, _line, h: 30, t: 6, th: _Thumb.cap, thumb: _ink),
-              const SizedBox(height: 8),
-              Row(children: [
-                SizedBox(width: 40, child: Center(child: _shufBtn(_ink, size: 20))),
-                Expanded(
-                  child: _key(Icon(_Ic.prev, size: 24, color: _ink), x.prev,
-                      'Previous'),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: _playing((s) => _key(
-                    s == ButtonState.loading
-                        ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.5, color: _bg))
-                        : Icon(
-                        s == ButtonState.playing ? _Ic.pause : _Ic.play,
-                        size: 28,
-                        color: _bg),
-                    _toggle,
-                    s == ButtonState.playing ? 'Pause' : 'Play',
-                    hot: true,
-                  )),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _key(
-                      Icon(_Ic.next, size: 24, color: _ink), x.next, 'Next'),
-                ),
-                SizedBox(width: 40, child: Center(child: _repBtn(_ink, size: 20))),
-              ]),
-              const SizedBox(height: 12),
-              StreamBuilder<double>(
-                stream: _mp.player.volumeStream,
-                initialData: _mp.player.volume,
-                builder: (_, s) {
-                  final v = (s.data ?? 1.0).clamp(0.0, 1.0).toDouble();
-                  return Row(children: [
-                    Icon(_Ic.volume, size: 20, color: _dim),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _Seeker(
-                        f: v,
-                        live: true,
-                        height: 28,
-                        onSeek: (n) => _mp.player.setVolume(n),
-                        paint: (n) =>
-                            _LinePainter(n, _ink, _line, 4, _Thumb.dot, _ink),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 40,
-                      child: Text('${(v * 100).round()}%',
-                          textAlign: TextAlign.right,
-                          style: _s(13, _dim, w: FontWeight.w500, tab: true)),
-                    ),
-                  ]);
-                },
-              ),
-              const SizedBox(height: 10),
-              StreamBuilder<double>(
-                stream: _mp.player.speedStream,
-                initialData: _mp.player.speed,
-                builder: (_, s) {
-                  final cur = s.data ?? 1.0;
-                  return Row(children: [
-                    for (final sp in const [0.75, 1.0, 1.25, 1.5])
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 3),
-                          child: _key(
-                            Text(sp == 1.0 ? '1×' : '$sp×',
-                                style: _s(13, (cur - sp).abs() < 0.01 ? _bg : _ink,
-                                    w: FontWeight.w700)),
-                                () => _mp.player.setSpeed(sp),
-                            'Playback speed',
-                            hot: (cur - sp).abs() < 0.01,
-                            h: 34,
-                          ),
-                        ),
-                      ),
-                  ]);
-                },
-              ),
+                color: Colors.black, border: Border.all(color: _lo)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _progress((f, p, t, pl, s) => Text(_fmt(p), style: _m(34))),
+              const Spacer(),
+              Text(x.song.title,
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: _m(12)),
+              Text('${x.quality}  ${x.index}/${x.total}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _m(10, c: const Color(0xFF1FA838))),
             ]),
           ),
-          const Spacer(),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-            _lyrBtn(x, _ink),
-            _ibtn(_Ic.quality, x.openQuality, 'Audio quality',
-                c: _ink, size: 22),
-            _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _ink, size: 22),
+        ),
+        const SizedBox(width: 6),
+        Container(
+          width: 84,
+          height: 84,
+          decoration: BoxDecoration(border: Border.all(color: _lo, width: 2)),
+          child: x.art(0),
+        ),
+      ]),
+      const SizedBox(height: 8),
+      _progress((f, p, t, pl, seek) => _Seeker(
+          f: f,
+          onSeek: seek,
+          height: 16,
+          paint: (v) => _WinSlider(v))),
+      const SizedBox(height: 6),
+      Row(children: [
+        Text('VOL', style: _m(10)),
+        const SizedBox(width: 6),
+        SizedBox(
+          width: 100,
+          child: StreamBuilder<double>(
+            stream: _mp.player.volumeStream,
+            initialData: _mp.player.volume,
+            builder: (_, s) => _Seeker(
+              f: (s.data ?? 1.0).clamp(0.0, 1.0).toDouble(),
+              live: true,
+              height: 14,
+              onSeek: (n) => _mp.player.setVolume(n),
+              paint: (v) => _WinSlider(v),
+            ),
+          ),
+        ),
+        const Spacer(),
+        _shuffle((on, t) => _mb(
+            Text('SHUF', style: _m(10, c: on ? _green : Colors.white70)), t,
+            on ? 'Shuffle: on' : 'Shuffle: off',
+            w: 44, h: 22, on: on)),
+        const SizedBox(width: 4),
+        _repeat((m, t) => _mb(
+            Text(m == LoopMode.one ? 'REP1' : 'REP',
+                style: _m(10,
+                    c: m != LoopMode.off ? _green : Colors.white70)),
+            t,
+            m == LoopMode.off
+                ? 'Repeat: off'
+                : m == LoopMode.one
+                ? 'Repeat: one'
+                : 'Repeat: all',
+            w: 44,
+            h: 22,
+            on: m != LoopMode.off)),
+      ]),
+      const SizedBox(height: 8),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        _mb(const Icon(Icons.skip_previous, size: 18, color: Colors.white),
+            x.prev, 'Previous'),
+        _playing((s) => _mb(
+            Icon(s == ButtonState.playing ? Icons.pause : Icons.play_arrow,
+                size: 20, color: _green),
+            _toggle,
+            s == ButtonState.playing ? 'Pause' : 'Play',
+            w: 62)),
+        _mb(const Icon(Icons.skip_next, size: 18, color: Colors.white),
+            x.next, 'Next'),
+        _fav(
+          x.song,
+              (l, t) => _mb(
+              Icon(l ? Icons.favorite : Icons.favorite_border,
+                  size: 15,
+                  color: l ? const Color(0xFFFF5470) : Colors.white70),
+              t,
+              'Favourite',
+              w: 38),
+        ),
+        _mb(Text('QUE', style: _m(10, c: Colors.white70)), x.openQueue,
+            'Queue',
+            w: 38),
+        _mb(Text('QLT', style: _m(10, c: Colors.white70)), x.openQuality,
+            'Audio quality',
+            w: 38),
+        _mb(Text('...', style: _m(12, c: Colors.white70)), null, 'More',
+            w: 0, h: 0),
+      ]),
+    ]),
+  );
+
+  @override
+  Widget build(BuildContext context) => _shell(
+    _grad(const [Color(0xFF0E0E14), Color(0xFF1A1A24)]),
+    LayoutBuilder(
+      builder: (_, c) {
+        final lyr = _win('LYRICS', _lyr(x, r: 0, bg: Colors.black), fill: true);
+        return _isWide(c)
+            ? Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(
+                width: 440,
+                child: _win('WINAMP', _main(), onClose: x.close)),
+            const SizedBox(width: 16),
+            Expanded(child: lyr),
           ]),
-        ]),
-      ),
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════
-// 7. RING
-//    Drag around the ring to seek. Tap the artwork = play/pause,
-//    double-tap = favourite, swipe = previous/next.
-// ════════════════════════════════════════════════════════════════════
-
-class _Ring extends StatelessWidget {
-  const _Ring(this.x);
-  final PlayerCtx x;
-
-  static const _ink = Color(0xFFF1F1F2);
-
-  Widget _ring() => _progress((f, p, tot, pl, seek) => _RingSeek(
-    f: f,
-    onSeek: seek,
-    center: _fav(
-      x.song,
-          (l, t) => _swipe(x, x.art(0), onTap: _toggle, onDouble: t),
+        )
+            : Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(children: [
+            _win('WINAMP', _main(), onClose: x.close),
+            const SizedBox(height: 8),
+            Expanded(child: lyr),
+          ]),
+        );
+      },
     ),
-  ));
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = Color.lerp(
-        const Color(0xFF0F1114), x.tint ?? const Color(0xFF2A2F3A), 0.3)!;
-    final dim = _ink.withValues(alpha: 0.65);
-    final lyricsOn = x.showLyrics && x.hasLyrics;
-    return _Stage(
-      w: 400,
-      h: 780,
-      back: ColoredBox(color: bg),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(children: [
-          Row(children: [
-            _ibtn(_Ic.down, x.close, 'Close', c: _ink),
-            Expanded(
-              child: Center(
-                child: _Tap(
-                  onTap: x.openQuality,
-                  tip: 'Audio quality',
-                  child: Text(x.quality, style: _s(13, dim, w: FontWeight.w500)),
-                ),
-              ),
-            ),
-            _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _ink),
-          ]),
-          const SizedBox(height: 10),
-          _media(x, const Size(340, 340),
-              bg: Colors.black26, radius: 28, art: _ring()),
-          SizedBox(
-            height: 24,
-            child: lyricsOn ? _bar(_ink, Colors.white24, h: 24) : null,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22),
-            child: _times(_s(13, dim, w: FontWeight.w500, tab: true),
-                remaining: true),
-          ),
-          const SizedBox(height: 10),
-          Text(x.song.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: _s(26, _ink, w: FontWeight.w700, ls: -0.3)),
-          Text(x.song.artist ?? x.song.album ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: _s(16, dim, w: FontWeight.w500)),
-          const SizedBox(height: 6),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            _favBtn(x, dim, _ink),
-            const SizedBox(width: 20),
-            _lyrBtn(x, _ink),
-            const SizedBox(width: 20),
-            _moreBtn(x, _ink),
-          ]),
-          const Spacer(),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            _shufBtn(_ink),
-            _ibtn(_Ic.prev, x.prev, 'Previous', size: 34, c: _ink),
-            _playBtn(size: 76, bg: _ink, fg: bg),
-            _ibtn(_Ic.next, x.next, 'Next', size: 34, c: _ink),
-            _repBtn(_ink),
-          ]),
-        ]),
-      ),
-    );
-  }
-}
-
-class _RingSeek extends StatefulWidget {
-  const _RingSeek(
-      {required this.f, required this.onSeek, required this.center});
-  final double f;
-  final ValueChanged<double> onSeek;
-  final Widget center;
-
-  @override
-  State<_RingSeek> createState() => _RingSeekState();
-}
-
-class _RingSeekState extends State<_RingSeek> {
-  static const _size = 340.0;
-  double? _d;
-  bool _drag = false, _band = false;
-
-  bool _inBand(Offset o) {
-    final d = (o - const Offset(_size / 2, _size / 2)).distance;
-    return d > 132 && d < 172;
-  }
-
-  double _at(Offset o) {
-    final dx = o.dx - _size / 2, dy = o.dy - _size / 2;
-    var a = math.atan2(dy, dx) + math.pi / 2;
-    if (a < 0) a += 2 * math.pi;
-    return (a / (2 * math.pi)).clamp(0.0, 1.0).toDouble();
-  }
-
-  void _commit(double v) {
-    widget.onSeek(v);
-    Future.delayed(const Duration(milliseconds: 450), () {
-      if (mounted && !_drag) setState(() => _d = null);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _size,
-      height: _size,
-      child: GestureDetector(
-        onTapUp: (d) {
-          if (_inBand(d.localPosition)) {
-            final v = _at(d.localPosition);
-            setState(() => _d = v);
-            _commit(v);
-          }
-        },
-        onPanStart: (d) {
-          _band = _inBand(d.localPosition);
-          if (_band) {
-            setState(() {
-              _drag = true;
-              _d = _at(d.localPosition);
-            });
-          }
-        },
-        onPanUpdate: (d) {
-          if (_band) setState(() => _d = _at(d.localPosition));
-        },
-        onPanEnd: (_) {
-          if (_band) {
-            _drag = false;
-            final v = _d;
-            if (v != null) _commit(v);
-          }
-          _band = false;
-        },
-        onPanCancel: () => setState(() {
-          _drag = false;
-          _band = false;
-          _d = null;
-        }),
-        child: Stack(children: [
-          Positioned.fill(
-            child: CustomPaint(painter: _RingPainter(_d ?? widget.f)),
-          ),
-          Center(
-            child: ClipOval(
-              child: SizedBox(width: 252, height: 252, child: widget.center),
-            ),
-          ),
-        ]),
-      ),
-    );
-  }
-}
-
-class _RingPainter extends CustomPainter {
-  const _RingPainter(this.f);
-  final double f;
-
-  @override
-  void paint(Canvas c, Size s) {
-    final o = s.center(Offset.zero);
-    const r = 150.0;
-    final rect = Rect.fromCircle(center: o, radius: r);
-    c.drawCircle(
-        o,
-        r,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 6
-          ..color = const Color(0x29FFFFFF));
-    c.drawArc(
-        rect,
-        -math.pi / 2,
-        2 * math.pi * f,
-        false,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 6
-          ..strokeCap = StrokeCap.round
-          ..color = const Color(0xFFF1F1F2));
-    final a = -math.pi / 2 + 2 * math.pi * f;
-    final t = o + Offset(math.cos(a), math.sin(a)) * r;
-    c.drawCircle(t + const Offset(0, 1.5), 10,
-        Paint()..color = const Color(0x55000000));
-    c.drawCircle(t, 9, Paint()..color = const Color(0xFFF1F1F2));
-  }
-
-  @override
-  bool shouldRepaint(_RingPainter o) => o.f != f;
+  );
 }
 
 // ════════════════════════════════════════════════════════════════════
