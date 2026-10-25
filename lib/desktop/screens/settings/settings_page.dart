@@ -1,12 +1,3 @@
-// ZenMusic — Settings page.
-//
-// SP-30: every feature/setup entry that used to be a card on the Saved
-// page now lives here — Crossfade (General), Mini player / Lyrics
-// overlay / Video backdrop (Desktop, Windows only), Last.fm (Services)
-// and Offline cache (Storage and privacy). Tapping the Spotify row while
-// connected opens your Spotify library. The Saved page is library
-// content only again.
-
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -18,6 +9,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:zenmusic/desktop/screens/library/backdrop_page.dart';
 import 'package:zenmusic/desktop/screens/library/crossfade_page.dart';
 import 'package:zenmusic/desktop/screens/library/lastfm_page.dart';
+import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
+import 'package:zenmusic/desktop/lossless/lossless_quality_page.dart';
 import 'package:zenmusic/desktop/screens/offline/offline_cache_page.dart';
 import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/screens/settings/cubit/settings_system_cubit.dart';
@@ -138,6 +131,42 @@ class _SettingsBodyState extends State<_SettingsBody> {
           keywords: const ['crossfade', 'fade', 'transition', 'gapless'],
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const CrossfadePage()),
+          ),
+        ),
+        // SP-40: the lossless song quality picker (own page in
+        // lib/desktop/lossless/). Applies to YTM + JioSaavn streams.
+        _Entry(
+          icon: Icons.high_quality,
+          title: 'Song quality',
+          subtitle: 'Lossless tier for YTM and JioSaavn',
+          keywords: const [
+            'quality',
+            'lossless',
+            'flac',
+            'hifi',
+            'hi-res',
+            '320kbps',
+            'bitrate',
+            'cd',
+          ],
+          builder: (ctx) => ValueListenableBuilder<int>(
+            valueListenable: LosslessPrefs.index,
+            builder: (ctx, i, _) {
+              final tiers = LosslessQuality.values;
+              final tier = tiers[(i < 0)
+                  ? 0
+                  : (i >= tiers.length ? tiers.length - 1 : i)];
+              return ZenRow(
+                icon: Icons.high_quality,
+                title: 'Song quality',
+                subtitle: tier.label,
+                chevron: true,
+                onTap: () => Navigator.of(ctx).push(
+                  MaterialPageRoute(
+                      builder: (_) => const LosslessQualityPage()),
+                ),
+              );
+            },
           ),
         ),
       ]),

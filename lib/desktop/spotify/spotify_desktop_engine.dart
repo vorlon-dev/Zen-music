@@ -32,6 +32,21 @@
 //   pipe-delimited scalars; ended surfaced via ValueNotifier; _pageHtml
 //   served via utf8.encode; JS-line drain via cursor closure.
 //
+// SP-48 — NATIVE MEDIA-SESSION METADATA. The WebView's own Chromium engine
+//   registers an OS media session (Windows SMTC / MPRIS / Android media card)
+//   for the <audio> element it plays. With no document title and no
+//   MediaSession metadata, every OS surface showed the raw page URL
+//   ("127.0.0.1:<port>/_spengine") instead of the song. The page now:
+//   • carries <title>ZenMusic</title> (pre-play fallback), and
+//   • exposes window.__zenTrackMeta({title,artist,album,artwork}) which sets
+//     document.title AND navigator.mediaSession.metadata so ANY session the
+//     webview registers shows the real track.
+//   play() pushes the song map's fields into the page right before
+//   __zenStart. (windows/runner/main.cpp additionally disables the Chromium
+//   MediaSessionService feature on Windows, so the app's own smtc_bridge
+//   session stays the only SMTC card; the in-page metadata remains as
+//   belt-and-suspenders for WebView builds where that flag does not apply.)
+//
 // DEPENDS: windows/runner/main.cpp sets WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS.
 // Stopify (MIT) is the protocol reference; ZenMusic remains GPL-3.0.
 
@@ -81,12 +96,36 @@ class SpotifyDesktopEngine {
   // ── Embedded page ──
   static const String _pageHtml = r'''
 <!DOCTYPE html>
-<html><body><audio id="a"></audio><script>
+<html><head><title>ZenMusic</title></head><body><audio id="a"></audio><script>
 window.__sp4 = { phase: 'boot', lines: [], challenge: null,
                 licenseResponse: null, startResult: null,
                 state: {pos: 0, dur: 0, playing: false, ended: false} };
 function rep(o) { window.__sp4.lines.push(JSON.stringify(o)); }
 const A = document.getElementById('a');
+
+// SP-48 — real track metadata for the webview's own OS media session.
+// document.title is the fallback Chromium uses; MediaSession.metadata is
+// the proper channel (title/artist/album/artwork on SMTC, MPRIS, Android).
+window.__zenTrackMeta = function(m) {
+  try {
+    var t  = (m && m.title)   ? String(m.title)   : 'ZenMusic';
+    var ar = (m && m.artist)  ? String(m.artist)  : '';
+    var al = (m && m.album)   ? String(m.album)   : '';
+    var aw = (m && m.artwork) ? String(m.artwork) : '';
+    try { document.title = ar ? (t + ' \u2014 ' + ar) : t; } catch (e2) {}
+    try {
+      if ('mediaSession' in navigator && window.MediaMetadata) {
+        navigator.mediaSession.metadata = new window.MediaMetadata({
+          title: t, artist: ar, album: al,
+          artwork: aw ? [{ src: aw, sizes: '640x640', type: 'image/jpeg' }] : []
+        });
+      }
+    } catch (e3) {}
+    rep({ type: 'meta', title: t });
+    return 'ok';
+  } catch (e) { rep({ type: 'meta-failed', error: String(e) }); return 'err'; }
+};
+
 let mediaKeys = null, session = null, ms = null;
 
 const cdmReady = (async () => {
@@ -475,6 +514,53 @@ setInterval(async () => {
 
   // ── Playback API ──
 
+  /// SP-48 — push the real track metadata into the engine page so the OS
+  /// media session the WebView's Chromium registers on its own shows the
+  /// song — never the 127.0.0.1:<port>/_spengine page URL. Reads the same
+  /// song-map fields the player's MediaItem tag uses (title / artists[] /
+  /// album.name / thumbnails[].url), JSON-encodes them and lets the page
+  /// set document.title + navigator.mediaSession.metadata.
+  Future<void> _pushMediaSessionMeta(
+      Webview wv, Map<String, dynamic> song) async {
+    try {
+      final String title = (song['title'] ?? 'ZenMusic').toString();
+      String artist = '';
+      final artists = song['artists'];
+      if (artists is List && artists.isNotEmpty) {
+        artist = artists
+            .map((a) => a is Map ? (a['name'] ?? '').toString() : '')
+            .where((s) => s.isNotEmpty)
+            .join(', ');
+      }
+      if (artist.isEmpty && song['artist'] != null) {
+        artist = song['artist'].toString();
+      }
+      String album = '';
+      if (song['album'] is Map) {
+        album = ((song['album'] as Map)['name'] ?? '').toString();
+      }
+      String? artwork;
+      final thumbs = song['thumbnails'];
+      if (thumbs is List && thumbs.isNotEmpty) {
+        final last = thumbs.last;
+        if (last is Map && last['url'] != null) {
+          artwork = last['url'].toString();
+        }
+      }
+      final payload = json.encode(<String, String?>{
+        'title': title,
+        'artist': artist,
+        'album': album,
+        'artwork': artwork,
+      });
+      final res = await wv.evaluateJavaScript(
+          'window.__zenTrackMeta ? window.__zenTrackMeta($payload) : "no-fn"');
+      _log('media session meta -> $res');
+    } catch (e) {
+      _log('media session meta push failed: $e');
+    }
+  }
+
   Future<bool> play(Map<String, dynamic> song) async {
     if (!Platform.isWindows) return false;
     final uri = song['spotifyUri'] as String?;
@@ -500,6 +586,11 @@ setInterval(async () => {
     duration.value = Duration.zero;
     playing.value = false;
     ended.value = false;
+
+    // SP-48 — the webview's Chromium registers its own OS media session;
+    // feed it the real track BEFORE playback starts so no OS surface ever
+    // falls back to the page URL.
+    unawaited(_pushMediaSessionMeta(wv, song));
 
     final mediaPath = '/media?u=${Uri.encodeQueryComponent(cdn)}';
     final start = await wv

@@ -1,3 +1,7 @@
+// SP-42: the body's wheel scrolling is smooth now — the SingleChildScrollView
+// content is wrapped in SmoothScroll (same controller), so wheel notches
+// glide instead of teleporting. See lib/desktop/utils/smooth_scroll.dart.
+
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -19,6 +23,7 @@ import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:zenmusic/desktop/utils/bottom_modals.dart';
 import 'package:zenmusic/desktop/utils/enhanced_image.dart';
 import 'package:zenmusic/desktop/utils/internet_guard.dart';
+import 'package:zenmusic/desktop/utils/smooth_scroll.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
 class BrowsePage extends StatelessWidget {
@@ -146,12 +151,16 @@ class _BrowsePageState extends State<_BrowsePage> {
               case BrowseSuccess():
                 return SingleChildScrollView(
                   controller: _scrollController,
-                  child: Center(
-                    child: Container(
-                      padding:
-                      const EdgeInsets.only(left: 8, right: 8, bottom: 8),
-                      constraints: const BoxConstraints(maxWidth: 1000),
-                      child: Column(
+                  // SP-42: SmoothScroll inside the viewport wins the wheel
+                  // and glides smoothly; pagination listener unchanged.
+                  child: SmoothScroll(
+                    controller: _scrollController,
+                    child: Center(
+                      child: Container(
+                        padding:
+                        const EdgeInsets.only(left: 8, right: 8, bottom: 8),
+                        constraints: const BoxConstraints(maxWidth: 1000),
+                        child: Column(
                         children: [
                           if (state.header['thumbnails'] != null)
                             HeaderWidget(
@@ -174,6 +183,7 @@ class _BrowsePageState extends State<_BrowsePage> {
                                   child: ExpressiveLoadingIndicator()),
                             ),
                         ],
+                        ),
                       ),
                     ),
                   ),

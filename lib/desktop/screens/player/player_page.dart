@@ -32,6 +32,9 @@ import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:zenmusic/desktop/utils/bottom_modals.dart';
 import 'package:zenmusic/desktop/utils/zen_slider.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
+import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
+// TODO: change this file name if your service file is named differently.
+import 'package:zenmusic/desktop/lossless/lossless_service.dart';
 
 // ════════════════════════════════════════════════════════════════════
 // ICON TABLE — every Fluent icon the page uses lives here.
@@ -868,12 +871,18 @@ class _PlayerPageState extends State<PlayerPage> {
   // ---------------------------------------------------------- quality row
 
   Widget _buildQualityRow(MediaItem song, {required bool swap}) {
-    final q = _AudioQuality.of(song);
     return SizedBox(
       height: 36,
       child: Row(
         children: [
-          _QualityChip(info: q, onTap: () => _openQuality(song)),
+          // Rebuilds when the lossless service reports a served tier.
+          ListenableBuilder(
+            listenable: LosslessService.servedRevision,
+            builder: (context, _) {
+              final q = _AudioQuality.of(song);
+              return _QualityChip(info: q, onTap: () => _openQuality(song));
+            },
+          ),
           const Spacer(),
           if (swap)
             _Pill(
@@ -1133,7 +1142,48 @@ class _AudioQuality {
     return null;
   }
 
+  /// The tier the lossless service actually served for this song.
+  static _AudioQuality _fromTier(LosslessQuality tier) {
+    switch (tier) {
+      case LosslessQuality.mp3_320:
+        return const _AudioQuality(
+          tier: _Tier.high,
+          codec: 'MP3',
+          bitrateKbps: 320,
+          source: 'Qobuz',
+        );
+      case LosslessQuality.flacCd:
+        return const _AudioQuality(
+          tier: _Tier.lossless,
+          codec: 'FLAC',
+          sampleRateHz: 44100,
+          bitDepth: 16,
+          source: 'Qobuz',
+        );
+      case LosslessQuality.flacHiRes96:
+        return const _AudioQuality(
+          tier: _Tier.hiRes,
+          codec: 'FLAC',
+          sampleRateHz: 96000,
+          bitDepth: 24,
+          source: 'Qobuz',
+        );
+      case LosslessQuality.flacHiResMax:
+        return const _AudioQuality(
+          tier: _Tier.hiRes,
+          codec: 'FLAC',
+          sampleRateHz: 192000,
+          bitDepth: 24,
+          source: 'Qobuz',
+        );
+    }
+  }
+
   static _AudioQuality of(MediaItem song) {
+    // Lossless service served this song -> exact tier it really got.
+    final served = LosslessService.instance.servedTierFor(song.id);
+    if (served != null) return _fromTier(served);
+
     final m = _flatten(song.extras);
 
     String? codec;

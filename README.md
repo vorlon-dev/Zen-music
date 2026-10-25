@@ -17,14 +17,12 @@
 > [!IMPORTANT]
 > ZenMusic is still in development. Features may change and you may run into bugs. Updates are delivered through GitHub Releases.
 >
-> The **Windows desktop version is available as an installer**: core playback, search, browsing, lyrics, the queue, and Spotify integration are working.
+> The **Windows desktop version is available as an installer**: core playback, search, browsing, lyrics, the queue, Spotify integration (login, playback, playlist import) and lossless quality streaming are working.
 
 > [!TIP]
 > **Future Updates** - Coming in the next update:
 > - **YouTube Music Login** support
-> - **Lossless Quality** streaming (FLAC / Hi-Res)
-> - Spotify Playlist import
-> - Liquid Glass and more themes
+> - More themes and skins
 > - And many more things, very soon. Stay tuned!
 
 > [!NOTE]
@@ -100,16 +98,15 @@ It runs on **Android** (phone and tablet) and **Windows** (a full desktop experi
 
 #### Playback
 - Multi-source streaming: JioSaavn (320 kbps AAC), YouTube Music, and Spotify
-- Source extensions
+- Spotify login with your own account
 - Offline downloads
-- Sleep timer with end-of-song option
 
 </td>
     <td width="50%" valign="top">
 
 #### Audio
+- Lossless streaming (FLAC / Hi-Res) for YouTube Music and JioSaavn songs
 - System equalizer
-- Bass and treble controls
 - Widevine DRM (Spotify)
 
 </td>
@@ -142,10 +139,8 @@ It runs on **Android** (phone and tablet) and **Windows** (a full desktop experi
     <td width="50%" valign="top">
 
 #### Interface
-- 6 custom player skins (Modern, Retro, CD, Cassette, Liquid Glass, Jungle)
-- Ambient mode: landscape player with animated glow from album art
-- Three progress slider styles
-- Thumbnail radius, haptics and more
+- 8 custom player skins: Classic, Turntable, Editorial, Lyrics, Polaroid, Tabletop Radio, Studio, Ring
+- 22 progress slider styles (Wavy, RGB Glow, Equalizer, Neon, Orbit, DNA Helix and more)
 - OTA update checks via GitHub Releases
 
 </td>
@@ -169,9 +164,13 @@ It runs on **Android** (phone and tablet) and **Windows** (a full desktop experi
 | --- | --- | --- |
 | JioSaavn | Up to 320 kbps AAC | May require a VPN/proxy outside supported regions |
 | YouTube Music | Stream-dependent | Stream extraction via Innertube; login support planned |
-| Spotify | Web Player protocol | Uses Widevine DRM; custom engine on Windows |
+| Spotify | Web Player protocol | Uses Widevine DRM; custom engine on Windows. Sign in with your Spotify account for playback and playlist import |
 
 Extra sources can be added through the **extension** system.
+
+#### Lossless streaming
+
+YouTube Music and JioSaavn songs can be upgraded to true lossless audio from **Settings → Song quality**: MP3 320, FLAC CD (16-bit / 44.1 kHz), Hi-Res Lossless (24-bit / 96 kHz) and Hi-Res Max (24-bit / 192 kHz). The tier ladder walks **down, never up** — the selected tier is the ceiling. If a song (or the service) can't provide the selected tier, playback silently continues through the lower tiers and then the normal stream, so it never breaks or stalls. YouTube videos keep their original audio, and the setting lives in its own page with live previews of each tier.
 
 #### Lyrics
 
@@ -196,7 +195,7 @@ Tap the recognition button to identify music playing around you. It uses a finge
 
 #### Player skins & appearance
 
-Choose between six skins: **Modern, Retro, CD, Cassette, Liquid Glass and Jungle**. Combine them with three progress-slider styles, adjustable thumbnail radius and optional haptics. **Ambient mode** switches to a landscape player with an animated glow derived from the album art.
+Pick between eight player skins: **Classic, Turntable, Editorial, Lyrics, Polaroid, Tabletop Radio, Studio and Ring** — from a spinning record with a tonearm that follows the song, to a tabletop radio with a tuning dial, to a studio console with faders. Combine them with **22 progress-slider styles** (Wavy, RGB Glow, Pill, Segments, Equalizer, Neon, Orbit, Heartbeat, DNA Helix, Comet and more), adjustable thumbnail radius and optional haptics. **Ambient mode** switches to a landscape player with an animated glow derived from the album art.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -296,7 +295,7 @@ Choose between six skins: **Modern, Retro, CD, Cassette, Liquid Glass and Jungle
 
 <div align="center">
 
-<a id="building-from-source"></a><img src="assets/banners/building-from-source.svg" alt="Building from Source" width="720" />
+<a id="building-from-source"></a><img src="assets/banners/building-from-source.svg" alt="Build ZenMusic from source" width="720" />
 
 <img src="assets/build-terminal.svg" alt="Build ZenMusic from source" width="720" />
 
@@ -400,9 +399,10 @@ Zen-music/
 ## Configuration & Data
 
 - **Updates:** the app checks GitHub Releases for new versions (OTA update checks).
+- **Song quality:** lossless tiers (MP3 320, FLAC CD, Hi-Res 96, Hi-Res Max) are selectable in Settings → Song quality; playback falls back automatically when a tier is unavailable.
 - **Downloads:** offline songs are stored locally on the device and can be managed from the Library.
 - **Lyrics:** fetched on demand from LRCLIB.
-- **Accounts:** Spotify uses the Web Player protocol with Widevine DRM; YouTube Music login is planned for an upcoming update.
+- **Accounts:** Spotify uses the Web Player protocol with Widevine DRM — sign in with your own account for playback and playlist import. YouTube Music login is planned for an upcoming update.
 - **Regional access:** some sources are region-locked. Use a VPN or proxy if a source is unavailable where you live.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
@@ -464,7 +464,7 @@ The source may be unavailable in your region. Connect through a VPN or proxy in 
 <details>
 <summary><b>Spotify tracks will not play</b></summary>
 
-Spotify playback relies on Widevine DRM. Make sure you are on a supported build (Android or the Windows installer) and that your network is not blocking DRM license requests.
+Spotify playback relies on Widevine DRM. Make sure you are signed in with your own Spotify account, are on a supported build (Android or the Windows installer), and that your network is not blocking DRM license requests.
 
 </details>
 
@@ -496,7 +496,7 @@ Not at the moment. Android and Windows are the supported targets.
 No. It acts as a client for publicly available APIs. All content is served by the respective platforms.
 
 **Do I need a Spotify account?**
-Spotify features require signing in with your own account. Other sources work without one.
+Spotify login, playback and playlist import require signing in with your own account. Other sources work without one.
 
 **How do I get updates?**
 The app checks GitHub Releases for updates. Android users can also use Obtainium.
@@ -509,9 +509,9 @@ Yes. ZenMusic supports source extensions.
 ## Roadmap
 
 - [ ] YouTube Music login
-- [ ] Lossless streaming (FLAC / Hi-Res)
-- [ ] Spotify playlist import
-- [ ] Liquid Glass and additional themes
+- [ ] More themes and skins
+- [x] Lossless streaming (FLAC / Hi-Res)
+- [x] Spotify login and playlist import
 - [x] Windows desktop app with installer
 - [x] Listen Together
 - [x] Time-synced lyrics
@@ -566,13 +566,8 @@ Yes. ZenMusic supports source extensions.
     </tr>
   </thead>
   <tbody>
-    <tr>
-      <td align="center"><strong>Echo nightly</strong></td>
-      <td>Extension implementation</td>
-    </tr>
-    <tr>
       <td align="center"><strong>Echo music</strong></td>
-      <td>UI design language, Listen Together client, recognition engine, Apple Music canvas and welcome dialog; basis of the Windows desktop shell</td>
+      <td>basis of the Windows desktop shell</td>
     </tr>
     <tr>
       <td align="center"><strong>Stopify</strong></td>
@@ -614,14 +609,6 @@ Yes. ZenMusic supports source extensions.
     <tr>
       <td align="center"><a href="https://lrclib.net/"><strong>LRCLIB</strong></a></td>
       <td>Synced lyrics provider</td>
-    </tr>
-    <tr>
-      <td align="center"><strong>Shazam discovery API / dejavu-fingerprinter</strong></td>
-      <td>Song recognition</td>
-    </tr>
-    <tr>
-      <td align="center"><strong>Music Recognizer</strong></td>
-      <td>Recognition flow reference</td>
     </tr>
   </tbody>
 </table>

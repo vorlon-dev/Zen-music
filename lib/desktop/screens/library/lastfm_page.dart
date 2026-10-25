@@ -1,10 +1,3 @@
-// ZenMusic — Last.fm scrobbling setup page (GPL-3.0).
-//
-// SP-25 — opened from the "Last.fm" card on the Saved page.
-// Shows the connection state, starts the browser login, and offers the
-// manual token paste as a fallback when the automatic return to the app
-// did not happen (busy port, strict browser, etc.).
-
 import 'package:flutter/material.dart';
 
 import 'package:zenmusic/desktop/services/lastfm_service.dart';
@@ -187,17 +180,6 @@ class _LastfmPageState extends State<LastfmPage> {
             '• Skipping early does not scrobble.\n'
             '• Offline plays are queued and sent automatically when the '
             'internet is back.',
-            style: TextStyle(fontSize: 13, height: 1.5),
-          ),
-          const SizedBox(height: 24),
-          Text('First time here?',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          const Text(
-            'Scrobbling needs two free strings from a Last.fm API account: '
-            'create one at last.fm/api/account/create, then paste its Key '
-            'and Shared secret into kLastfmApiKey / kLastfmApiSecret at the '
-            'top of lib/desktop/services/lastfm_service.dart.',
             style: TextStyle(fontSize: 13, height: 1.5),
           ),
         ],

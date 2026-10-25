@@ -2,6 +2,14 @@
 // driving ListenTogetherService — create/join a room, see users + current
 // track, host approvals (remove / transfer host), leave. Playback itself is
 // controlled by whatever the host/device plays; the service auto-broadcasts.
+//
+// SP-43: added the live sync-health row (Room view) — the service already
+// publishes LtSyncStats once per second (rtt, clock offset, drift, heartbeat
+// age); the old page ignored it, so a half-working room looked identical to
+// a healthy one ("listen together not working" had no on-screen signal).
+// NOTE: the reported mute came from the crossfade fade-in bug in
+// media_player.dart (SP-43 fix) — every guest load goes through playAll,
+// which the old crossfade code muted. One root cause, both symptoms.
 
 import 'dart:async';
 
@@ -289,6 +297,47 @@ class _RoomView extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: 16),
+
+          // SP-43: live sync health — the service refreshes this every
+          // second while in a room; a stalled/degraded link is now visible
+          // instead of a silent "not working".
+          ValueListenableBuilder<LtSyncStats>(
+            valueListenable: ListenTogetherService.instance.syncStats,
+            builder: (context, st, _) {
+              final String text;
+              if (st.isHost) {
+                text = 'Hosting — your playback is the room clock';
+              } else if (st.heartbeatAgeMs < 0) {
+                text = 'Waiting for the host…';
+              } else {
+                text = 'Synced · drift ${st.driftMs} ms · '
+                    'ping ${st.rttMs} ms';
+              }
+              return Card(
+                child: Padding(
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        st.isHost || st.inSync
+                            ? Icons.check_circle_rounded
+                            : Icons.sync_rounded,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(text,
+                            style: Theme.of(context).textTheme.bodySmall),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 16),
 

@@ -28,6 +28,14 @@
 //     resolved track plus the autoqueue neighbours from the same Dealer
 //     payload (SpotifyPlayer.lastResolvedSong / lastAutoqueueNeighbours).
 //     Non-Spotify paths keep the section snapshot from SP-6.
+//     SP-39d CORRECTION (field log): the replace fired even when the
+//     user tapped INSIDE a section — the drawer collapsed to 2 tiles
+//     and the playlist queue "vanished". The autoqueue is now a RADIO
+//     fallback only (single-track taps and the 2-tile radio pair); real
+//     section queues are kept and walked end-to-end.
+//  9b. SP-39d auto-advance: a Spotify track that finishes now walks the
+//      queue snapshot (skipNext) instead of rewinding + pausing — the
+//      engine queue plays through like Spotify's web player.
 //  10. SP-11 Local Cache: Automatically saves and restores the last played
 //      queue, index, and position using Hive so the app opens exactly where
 //      the user left off.
@@ -71,6 +79,11 @@
 //      .dart, same notifier-driven pattern. The audio path is untouched;
 //      the backdrop widget (backdrop/windows_backdrop.dart) goes in as
 //      the first child of the player screen's Stack.
+//  19. SP-40 Song quality: YTM and JioSaavn songs are streamed through the
+//      lossless resolver (lib/desktop/lossless/) at the tier picked in
+//      Settings > Song quality. YouTube videos, Spotify, downloads and the
+//      offline cache are untouched; any resolver failure falls through to
+//      the normal chain inside _getAudioSource.
 
 import 'dart:async';
 import 'dart:convert';
@@ -82,6 +95,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import '../lossless/lossless_service.dart';
 import '../utils/add_history.dart';
 import '../utils/enhanced_image.dart';
 import 'eq_models.dart';
@@ -259,6 +273,7 @@ class MediaPlayer extends ChangeNotifier {
   @override
   void dispose() {
     _saveCurrentState();
+    _disposeNotificationLike();
     _disposeSmtc();
     _disposeDiscord();
     _disposeLastfm();
@@ -329,9 +344,12 @@ class MediaPlayer extends ChangeNotifier {
     engine.ended.addListener(() {
       if (!_engineOwnsPlayback) return;
       if (engine.ended.value) {
-        unawaited(_engineSeek(Duration.zero));
-        unawaited(_enginePause());
-        _buttonState.value = ButtonState.paused;
+        // SP-39d: a finished Spotify track advances the queue — the web
+        // player never stalls on a rewound, paused tile. skipNext walks
+        // the snapshot; when it is exhausted it releases the engine,
+        // which is the old stop-at-end behavior. engine.play() re-arms
+        // `ended` (false), so this fires exactly once per track.
+        unawaited(skipNext());
       }
     });
   }
@@ -373,16 +391,27 @@ class MediaPlayer extends ChangeNotifier {
     }
     _setEngineOwns(true);
 
-    // ★ SP-7: Spotify owns the queue. Use the autoqueue neighbours Spotify
-    // pushed in the state-machine payload — those are the real "next"
-    // tracks, not the search-section list. Falls back to the caller's song
-    // if metadata capture missed (e.g. cached file_id path).
+    // ★ SP-7 + SP-39d: Spotify's autoqueue neighbours are a RADIO
+    // fallback, not the queue. Overwrite the snapshot only when the
+    // caller had no real queue: a single-track tap, or the 2-tile radio
+    // pair advancing onto its last entry (so the radio keeps renewing).
+    // A section snapshot (playlist / chart / shelf the user tapped
+    // into) IS the queue — keep it so the drawer shows every track and
+    // skipNext/skipPrevious walk it to the end, like Spotify.
     final sp = SpotifyPlayer.instance;
     final resolved = sp.lastResolvedSong;
     final neighbours = sp.lastAutoqueueNeighbours;
-    if (resolved != null) {
+    final snapshot = queueSnapshot.value;
+    final bool hasRealQueue = snapshot.length > 2 ||
+        (snapshot.length == 2 &&
+            snapshot.last['videoId'] != song['videoId']);
+    if (resolved != null && !hasRealQueue) {
       queueSnapshot.value = [resolved, ...neighbours];
-      print('[sp-engine] queue: resolved + ${neighbours.length} neighbours');
+      print('[sp-engine] queue: radio fallback — resolved + '
+          '${neighbours.length} neighbours');
+    } else {
+      print('[sp-engine] queue: kept caller queue '
+          '(${snapshot.length} tracks)');
     }
 
     _buttonState.value = ButtonState.playing;
@@ -426,6 +455,9 @@ class MediaPlayer extends ChangeNotifier {
     unawaited(_initMiniPlayer());
     unawaited(_initLyricsOverlay());
     unawaited(_initBackdrop());
+    // SP-48 — like button on the Android media notification (native Kotlin
+    // side via the just_audio_background fork). Inert on Windows.
+    _initNotificationLike();
 
     Timer.periodic(const Duration(seconds: 10), (timer) {
       if (currentSongNotifier.value != null && _player.playing) {
@@ -433,6 +465,81 @@ class MediaPlayer extends ChangeNotifier {
             .addPlayingStats(currentSongNotifier.value!.id, _player.position);
       }
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SP-48 — LIKE BUTTON ON THE ANDROID MEDIA NOTIFICATION
+  // ═══════════════════════════════════════════════════════════════
+  // The notification is rendered by audio_service's native Kotlin
+  // (AudioService) from the playback state broadcast by the
+  // just_audio_background fork. The fork exposes a custom 'like' action
+  // (MediaControl.custom → PlaybackStateCompat.CustomAction →
+  // MediaSessionCallback.onCustomAction → handler.customAction). Here we:
+  //   • listen for notification like taps → toggle the FAVOURITES Hive box
+  //     exactly like the heart button in the player page does, and
+  //   • push the like state so the icon flips (outline ↔ filled heart).
+  // Windows is untouched: likePresses never fires there and the SMTC
+  // surface has its own bridge (SP-22).
+  StreamSubscription<void>? _likePressSub;
+  StreamSubscription<dynamic>? _favWatchSub;
+  bool _likeWiringDone = false;
+
+  void _initNotificationLike() {
+    if (_likeWiringDone) return;
+    _likeWiringDone = true;
+    _likePressSub = JustAudioBackground.likePresses.listen((_) {
+      unawaited(_toggleNotificationLike());
+    });
+    // Keep the notification icon in sync when the like is toggled from the
+    // app UI (player page heart writes the same FAVOURITES box).
+    _favWatchSub = Hive.box('FAVOURITES').watch().listen((dynamic _) {
+      _pushLikeState();
+    });
+    currentSongNotifier.addListener(_pushLikeState);
+    _pushLikeState();
+  }
+
+  void _disposeNotificationLike() {
+    if (!_likeWiringDone) return;
+    _likeWiringDone = false;
+    _likePressSub?.cancel();
+    _likePressSub = null;
+    _favWatchSub?.cancel();
+    _favWatchSub = null;
+    currentSongNotifier.removeListener(_pushLikeState);
+    JustAudioBackground.updateLikeState(visible: false);
+  }
+
+  /// Notification heart tapped → same toggle the player page performs:
+  /// FAVOURITES box keyed by the track id (videoId), extras as the payload.
+  Future<void> _toggleNotificationLike() async {
+    final MediaItem? item = currentSongNotifier.value;
+    if (item == null || item.id.isEmpty) return;
+    final box = Hive.box('FAVOURITES');
+    if (box.get(item.id) != null) {
+      await box.delete(item.id);
+    } else {
+      final Map<String, dynamic>? extras = item.extras;
+      await box.put(item.id, <String, dynamic>{
+        ...?extras,
+        'createdAt': DateTime.now().millisecondsSinceEpoch,
+      });
+    }
+    _pushLikeState();
+  }
+
+  /// Tell the fork's broadcast which heart to draw (or hide the button
+  /// entirely when nothing is loaded).
+  void _pushLikeState() {
+    final MediaItem? item = currentSongNotifier.value;
+    if (item == null || item.id.isEmpty) {
+      JustAudioBackground.updateLikeState(visible: false);
+      return;
+    }
+    JustAudioBackground.updateLikeState(
+      visible: true,
+      liked: Hive.box('FAVOURITES').get(item.id) != null,
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -473,8 +580,8 @@ class MediaPlayer extends ChangeNotifier {
         unawaited(skipPrevious());
         break;
       case SmtcButton.stop:
-      // Gentle stop: the media-key stop behaves like pause so the queue
-      // stays intact (real stop() wipes the session queue).
+        // Gentle stop: the media-key stop behaves like pause so the queue
+        // stays intact (real stop() wipes the session queue).
         if (_buttonState.value == ButtonState.playing) {
           unawaited(togglePlayPause());
         }
@@ -494,7 +601,7 @@ class MediaPlayer extends ChangeNotifier {
       artist: item.artist ?? '',
       album: item.album ?? '',
       thumbnailUrl: (thumb != null &&
-          (thumb.startsWith('http://') || thumb.startsWith('https://')))
+              (thumb.startsWith('http://') || thumb.startsWith('https://')))
           ? thumb
           : null,
       duration: progressBarState.value.total,
@@ -556,7 +663,7 @@ class MediaPlayer extends ChangeNotifier {
       title: item.title,
       artist: item.artist ?? '',
       artUrl: (thumb != null &&
-          (thumb.startsWith('http://') || thumb.startsWith('https://')))
+              (thumb.startsWith('http://') || thumb.startsWith('https://')))
           ? thumb
           : null,
       trackKey: item.id,
@@ -584,9 +691,9 @@ class MediaPlayer extends ChangeNotifier {
     DiscordPresenceBridge.instance.stopped();
   }
 
-  // ═══════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════
   // SP-25 LAST.FM SCROBBLING
-  // ═══════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════
   // Same notifier-driven pattern as SP-22/SP-23: track metadata comes from
   // currentSongNotifier, positions from progressBarState. The service
   // applies the Last.fm client rules itself (≥ half the track or ≥ 4 min,
@@ -620,9 +727,9 @@ class MediaPlayer extends ChangeNotifier {
     progressBarState.removeListener(_lastfmPushProgress);
   }
 
-  // ═══════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════════
   // SP-26 MINI PLAYER WINDOW (floating desktop_multi_window bar)
-  // ═══════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════════
   // Same notifier-driven pattern as SP-22/23/25: track metadata, play
   // state and position are mirrored into the mini window and its
   // transport buttons come back as commands. The mini window is a second
@@ -660,10 +767,10 @@ class MediaPlayer extends ChangeNotifier {
     MiniPlayerBridge.instance.pushTrack(item == null
         ? null
         : MiniTrack(
-      title: item.title,
-      artist: item.artist ?? '',
-      artUri: item.artUri?.toString(),
-    ));
+            title: item.title,
+            artist: item.artist ?? '',
+            artUri: item.artUri?.toString(),
+          ));
   }
 
   void _miniPushPlaying() {
@@ -716,7 +823,7 @@ class MediaPlayer extends ChangeNotifier {
     try {
       _crossfadeSeconds =
           (Hive.box('SETTINGS').get(_crossfadeKey, defaultValue: 0) as num?)
-              ?.toInt() ??
+                  ?.toInt() ??
               0;
     } catch (_) {}
     _player.positionStream.listen((_) {
@@ -888,13 +995,13 @@ class MediaPlayer extends ChangeNotifier {
     LyricsOverlayBridge.instance.pushTrack(item == null
         ? null
         : OverlayTrack(
-      title: item.title,
-      artist: item.artist ?? '',
-      artUri: item.artUri?.toString(),
-      album: item.album,
-      durationMs: item.duration?.inMilliseconds,
-      spotifyUri: item.extras?['spotifyUri'] as String?,
-    ));
+            title: item.title,
+            artist: item.artist ?? '',
+            artUri: item.artUri?.toString(),
+            album: item.album,
+            durationMs: item.duration?.inMilliseconds,
+            spotifyUri: item.extras?['spotifyUri'] as String?,
+          ));
   }
 
   void _overlayPushPosition() {
@@ -962,7 +1069,7 @@ class MediaPlayer extends ChangeNotifier {
     _player.sequenceStream.listen((playlist) {
       if (_engineOwnsPlayback) return;
       final List<IndexedAudioSource> newList =
-      (playlist ?? const <IndexedAudioSource>[]).cast<IndexedAudioSource>();
+          (playlist ?? const <IndexedAudioSource>[]).cast<IndexedAudioSource>();
 
       if (listEquals(newList, _songList)) return;
 
@@ -1167,7 +1274,7 @@ class MediaPlayer extends ChangeNotifier {
                     'client-token': clientToken,
                     'app-platform': SpotifyConfig.appPlatform,
                     'spotify-app-version': SpotifyConfig.spotifyAppVersion,
-                    'origin': 'https://open.spotify.com/',
+                    'origin': 'https://open.spotify.com',
                     'referer': 'https://open.spotify.com/',
                     'user-agent': SpotifyConfig.userAgent,
                   },
@@ -1180,6 +1287,20 @@ class MediaPlayer extends ChangeNotifier {
           }
         }
         return _ytFallbackSource(song, tag);
+      }
+      // SP-40: Song quality (Settings > Song quality) — YouTube Music and
+      // JioSaavn songs are upgraded through the lossless resolver at the
+      // user's selected tier. YouTube *videos* (isYtVideo) keep their
+      // YouTube audio, and every failure falls through silently to the
+      // normal chain below (JioSaavn direct URL / offline cache / YT).
+      if (song['isYtVideo'] != true) {
+        try {
+          final lossless = await LosslessService.instance
+              .tryBuildSource(song, tag);
+          if (lossless != null) return lossless;
+        } catch (e) {
+          print('[lossless] player fallback after error: $e');
+        }
       }
       final saavnUrl = song['jiosaavnStreamUrl'] as String?;
       if (saavnUrl != null && saavnUrl.isNotEmpty) {
@@ -1304,8 +1425,9 @@ class MediaPlayer extends ChangeNotifier {
 
     if (Platform.isWindows &&
         (song['spotifyUri'] as String?)?.isNotEmpty == true) {
-      // SP-7: _tryEnginePlay replaces queueSnapshot with the Spotify
-      // autoqueue on success. Falls through to just_audio on failure.
+      // SP-7 + SP-39d: on success the engine KEEPS the section snapshot
+      // set above as THE queue (the autoqueue is a single-track radio
+      // fallback only now). Falls through to just_audio on failure.
       if (await _tryEnginePlay(song)) return;
     }
 

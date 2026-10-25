@@ -48,6 +48,41 @@ class SearchCubit extends Cubit<SearchState> {
   SearchCubit(this._ytmusic, {this.endpoint}) : super(SearchLoading()) {
     if (endpoint != null) {
       search('');
+    } else {
+      // SP-42 FIX (field report: "on search page that loader spin only no
+      // data come ... deta should come ok like trending on search"). The
+      // landing page never fetched anything: with endpoint == null the
+      // constructor skipped search('') and the state stayed SearchLoading
+      // forever — the page showed an eternal spinner (see screenshot).
+      // The landing now loads the YTM home feed (the same trending shelves
+      // the Home tab shows) so there is real data from the first paint.
+      fetchTrending();
+    }
+  }
+
+  /// Landing page content (no query yet): the trending feed. Sections keep
+  /// their own titles and "More" buttons; a query replaces them via search().
+  Future<void> fetchTrending() async {
+    emit(const SearchLoading());
+    try {
+      final feed = await _ytmusic.browse();
+      final List sections = (feed['sections'] as List?) ?? const [];
+      // Keep the landing compact: the search page renders sections as
+      // vertical lists (unlike the home shelves), so cap each section.
+      final capped = sections.map<Map<String, dynamic>>((s) {
+        final m = Map<String, dynamic>.from(s as Map);
+        final contents = (m['contents'] as List?) ?? const [];
+        if (contents.length > 10) m['contents'] = contents.take(10).toList();
+        return m;
+      }).toList();
+      if (isClosed) return;
+      emit(SearchSuccess(
+          sections: capped, continuation: null, loadingMore: false));
+    } catch (e, st) {
+      if (isClosed) return; // page popped mid-load (SP-39f doctrine)
+      print(e);
+      print(st);
+      emit(SearchError(e.toString(), st.toString()));
     }
   }
 
@@ -60,6 +95,12 @@ class SearchCubit extends Cubit<SearchState> {
   }
 
   Future<void> search(String query, {bool saveHistory = true}) async {
+    // SP-42: an empty query on the landing page re-loads the trending feed
+    // instead of hitting the search endpoint with no query.
+    if (endpoint == null && query.trim().isEmpty) {
+      await fetchTrending();
+      return;
+    }
     emit(const SearchLoading());
     try {
       if (saveHistory &&

@@ -77,7 +77,9 @@ dependencies:
   text_scroll: ^0.2.1
   scrollable_positioned_list: ^0.3.8
   loading_indicator_m3e: ^0.1.1
-  just_audio_background: ^0.0.1-beta.17
+  # SP-48: forked copy with the native notification LIKE button
+  just_audio_background:
+    path: packages/just_audio_background
   just_audio_media_kit: ^2.1.0
   media_kit_native_event_loop: ^1.0.9
   share_plus: ^13.0.0

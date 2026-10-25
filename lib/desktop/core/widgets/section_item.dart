@@ -16,6 +16,7 @@ import '../../utils/enhanced_image.dart';
 import '../extensions.dart';
 import '../../services/media_player.dart';
 import '../../utils/bottom_modals.dart';
+import '../../utils/smooth_scroll.dart';
 
 class SectionItem extends StatefulWidget {
   const SectionItem({required this.section, this.isMore = false, super.key});
@@ -28,7 +29,37 @@ class SectionItem extends StatefulWidget {
 
 class _SectionItemState extends State<SectionItem> {
   final ScrollController horizontalScrollController = ScrollController();
-  PageController horizontalPageController = PageController();
+  // SP-42: created once so paged shelves keep their position across parent
+  // rebuilds (pagination, load-more) instead of snapping back to page 0.
+  // SP-45: PageController.viewportFraction is FINAL — assignable only in the
+  // constructor. The one case that genuinely needs a new fraction is a
+  // window RESIZE: rebuild the controller then (width actually changed),
+  // put the shelf back on the page it was showing, and dispose the old
+  // controller only after the frame has handed it over. Ordinary rebuilds
+  // (width unchanged) never touch the shelf's scroll position.
+  PageController? _pageController;
+  double? _pageControllerWidth;
+  PageController get horizontalPageController {
+    final double width = MediaQuery.of(context).size.width;
+    final bool valid = width > 0;
+    if (_pageController == null) {
+      _pageController =
+          PageController(viewportFraction: valid ? 350 / width : 1.0);
+      _pageControllerWidth = valid ? width : null;
+    } else if (valid && _pageControllerWidth != width) {
+      final PageController old = _pageController!;
+      final double? shownPage = old.hasClients ? old.page : null;
+      _pageController = PageController(
+        viewportFraction: 350 / width,
+        initialPage: shownPage?.round() ?? 0,
+      );
+      _pageControllerWidth = width;
+      // The shelf's PageView still references `old` until this build hands
+      // over the new one; dispose it only once the frame has settled.
+      WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
+    }
+    return _pageController!;
+  }
   bool loadingMore = false;
 
   @override
@@ -38,7 +69,7 @@ class _SectionItemState extends State<SectionItem> {
 
   @override
   void dispose() {
-    horizontalPageController.dispose();
+    _pageController?.dispose();
     horizontalScrollController.dispose();
     super.dispose();
   }
@@ -62,8 +93,10 @@ class _SectionItemState extends State<SectionItem> {
 
   @override
   Widget build(BuildContext context) {
-    horizontalPageController = PageController(
-        viewportFraction: 350 / MediaQuery.of(context).size.width);
+    // SP-45: no per-build writes to viewportFraction — it is final on
+    // PageController and can only be set in the constructor.
+    // horizontalPageController handles the resize case (width changed) by
+    // rebuilding the controller, and ignores width-less rebuilds entirely.
     return widget.section['contents'].isEmpty
         ? const SizedBox()
         : Column(
@@ -207,6 +240,14 @@ class SongList extends StatefulWidget {
 class _SongListState extends State<SongList> {
   late int num;
   late int pages;
+  // SP-42: one shared glide state for this shelf's pages.
+  final ShelfWheelMomentum _momentum = ShelfWheelMomentum();
+
+  @override
+  void dispose() {
+    _momentum.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -225,14 +266,19 @@ class _SongListState extends State<SongList> {
       itemBuilder: (context, index) {
         int start = index * num;
         int end = start + num;
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Column(
-            children: widget.songs
-                .sublist(start, min(end, widget.songs.length))
-                .map((pageSongs) {
-              return SongTile(song: pageSongs);
-            }).toList(),
+        // SP-42: wheel over a paged shelf glides it horizontally.
+        return SmoothShelfWheel(
+          controller: widget.controller,
+          momentum: _momentum,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Column(
+              children: widget.songs
+                  .sublist(start, min(end, widget.songs.length))
+                  .map((pageSongs) {
+                return SongTile(song: pageSongs);
+              }).toList(),
+            ),
           ),
         );
       },
@@ -403,6 +449,22 @@ class ItemList extends StatefulWidget {
 }
 
 class _ItemListState extends State<ItemList> {
+  // SP-42: one shared glide state for this shelf's items.
+  ShelfWheelMomentum? _momentum;
+
+  @override
+  void initState() {
+    super.initState();
+    // Only shelves that actually own a controller get wheel gliding.
+    if (widget.controller != null) _momentum = ShelfWheelMomentum();
+  }
+
+  @override
+  void dispose() {
+    _momentum?.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
@@ -417,7 +479,8 @@ class _ItemListState extends State<ItemList> {
           itemBuilder: (context, index) {
             double width = height * (widget.items[index]?['aspectRatio'] ?? 1);
             String? subtitle = _buildSubtitle(widget.items[index]);
-            return Adaptivecard(
+            // SP-42: wheel over a shelf card glides the shelf horizontally.
+            final card = Adaptivecard(
               elevation: 0,
               borderRadius: BorderRadius.circular(8),
               backgroundColor: Platform.isAndroid ? Colors.transparent : null,
@@ -530,6 +593,12 @@ class _ItemListState extends State<ItemList> {
                   ],
                 ),
               ),
+            );
+            if (_momentum == null || widget.controller == null) return card;
+            return SmoothShelfWheel(
+              controller: widget.controller!,
+              momentum: _momentum!,
+              child: card,
             );
           },
           separatorBuilder: (context, index) => const SizedBox(width: 8),

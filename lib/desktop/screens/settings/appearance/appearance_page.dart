@@ -1,18 +1,3 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), settings/appearance/appearance_page.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-//
-// REDESIGN v2: same design language as the settings home (zen_settings_kit).
-// Same cubit, same AppearancePrefs / PlayerSkinPrefs wiring as before.
-//
-// SP-33: this page is now the ONE place for the player extras —
-//  • "Song backdrop" (formerly "Animated background") is the UNIVERSAL
-//    backdrop switch: mobile drives the 9:16 canvas/video flow, Windows
-//    additionally masters the 16:9 blurred video backdrop service.
-//  • Crossfade row (opens crossfade_page.dart) — every platform.
-//  • Desktop section (Windows only): Mini player + Lyrics overlay
-//    floating windows (same calls as the settings home Desktop group).
-
 import 'dart:io';
 
 import 'package:flutter/material.dart';

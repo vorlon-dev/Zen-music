@@ -7,6 +7,30 @@
 // Behaviour (cubit, playback, routing, suggestion overlay) is unchanged.
 //
 // pubspec.yaml:  fluentui_system_icons: ^1.1.273   (use the latest on pub.dev)
+//
+// SP-41 FIX (field log): the suggestion panel is an OverlayEntry rendered
+// through a CompositedTransformFollower. The "Edit search" IconButton inside
+// that panel carried a Material Tooltip — and a Tooltip is ITSELF a
+// CompositedTransformFollower inside an OverlayPortal. A follower nested in
+// a follower has no reliable paint transform during layout, so hovering the
+// button on Windows threw:
+//   "The paint transform cannot be reliably computed because of
+//    RenderFollowerLayer(s)" (+ a knock-on debugNeedsLayout assert).
+// FIX: that tooltip is removed. The arrow-up-left icon keeps its exact
+// function (fill the field and re-fetch suggestions without submitting);
+// only the hover label is gone. The 'Play as audio' tooltip in _VideoCard
+// sits in the normal result tree — NOT inside the follower overlay — and
+// is intentionally untouched.
+
+// SP-42 FIXES (field report + screenshot):
+// 1. The landing page (no query yet) spun forever: the cubit never fetched
+//    anything when endpoint == null. It now loads the trending feed — see
+//    SearchCubit.fetchTrending() — and onInternetRestored reloads it after a
+//    connection drop, mirroring the titled-page branch.
+// 2. Wheel scrolling on the results is smooth now: the scroll content is
+//    wrapped in SmoothScroll (same controller) so each notch becomes one
+//    eased glide instead of an instant jump. See
+//    lib/desktop/utils/smooth_scroll.dart for the mechanism.
 
 import 'dart:async';
 import 'dart:io';
@@ -23,6 +47,7 @@ import 'package:zenmusic/desktop/screens/video/video_watch_page.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/utils/internet_guard.dart';
+import 'package:zenmusic/desktop/utils/smooth_scroll.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:zenmusic/desktop/utils/bottom_modals.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
@@ -98,6 +123,9 @@ class _SearchPageState extends State<_SearchPage> {
         if (widget.title != null) {
           context.read<SearchCubit>().search('');
         } else {
+          // SP-42: landing page — refetch the trending feed after a
+          // connection drop (the cubit constructor did it once at mount).
+          context.read<SearchCubit>().fetchTrending();
           _focusNode?.requestFocus();
         }
       },
@@ -153,25 +181,31 @@ class _SearchPageState extends State<_SearchPage> {
                       }
                       return SingleChildScrollView(
                         controller: _scrollController,
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints:
-                            const BoxConstraints(maxWidth: _kContentWidth),
-                            child: Padding(
-                              padding:
-                              const EdgeInsets.fromLTRB(16, 4, 16, 32),
-                              child: Column(
-                                children: [
-                                  for (final s in state.sections)
-                                    _SectionBlock(
-                                        section: s, isMore: widget.isMore),
-                                  if (state.loadingMore)
-                                    const Padding(
-                                      padding: EdgeInsets.all(16),
-                                      child: Center(
-                                          child: ExpressiveLoadingIndicator()),
-                                    ),
-                                ],
+                        // SP-42: SmoothScroll inside the viewport wins the
+                        // wheel and glides smoothly; the pagination listener
+                        // (fetchNext near the bottom) is unchanged.
+                        child: SmoothScroll(
+                          controller: _scrollController,
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints:
+                              const BoxConstraints(maxWidth: _kContentWidth),
+                              child: Padding(
+                                padding:
+                                const EdgeInsets.fromLTRB(16, 4, 16, 32),
+                                child: Column(
+                                  children: [
+                                    for (final s in state.sections)
+                                      _SectionBlock(
+                                          section: s, isMore: widget.isMore),
+                                    if (state.loadingMore)
+                                      const Padding(
+                                        padding: EdgeInsets.all(16),
+                                        child: Center(
+                                            child: ExpressiveLoadingIndicator()),
+                                      ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -752,7 +786,10 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
             ),
             title: Text(query, maxLines: 1, overflow: TextOverflow.ellipsis),
             trailing: IconButton(
-              tooltip: 'Edit search',
+              // SP-41: NO Tooltip here — this button lives inside the
+              // suggestion overlay's CompositedTransformFollower, and a
+              // Tooltip is itself a follower: hovering it crashed layout
+              // ("The paint transform cannot be reliably computed...").
               visualDensity: VisualDensity.compact,
               icon: Icon(FluentIcons.arrow_up_left_24_regular,
                   size: 18, color: cs.onSurfaceVariant),

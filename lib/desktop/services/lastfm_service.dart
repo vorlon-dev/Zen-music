@@ -1,42 +1,3 @@
-// ZenMusic Desktop — services/lastfm_service.dart (GPL-3.0).
-//
-// SP-25 — Last.fm scrobbling: every track that plays long enough lands in
-// the user's Last.fm library — the music-taste profile behind their public
-// listening history, recommendations and "year in music".
-//
-// What you get once connected:
-//  • "Now playing" on the Last.fm profile the moment a track starts.
-//  • A real scrobble (artist, track, album, play timestamp) once the
-//    Last.fm client rules are met: heard at least half the track OR at
-//    least 4 minutes of it (whichever comes first), and the track is
-//    longer than 30 seconds. Skipping early does NOT scrobble.
-//  • Offline-safe: scrobbles that fail (no internet, API hiccup) wait in a
-//    Hive queue and are flushed automatically in batches later.
-//
-// One-time setup (2 minutes):
-//  1. Create a (free) API account: https://www.last.fm/api/account/create
-//     — application name "ZenMusic", any description and homepage.
-//  2. Copy the account's Key into kLastfmApiKey and its Shared secret
-//     into kLastfmApiSecret below.
-//  3. In the app: Saved → "Last.fm" card → Connect Last.fm.
-//
-// Login flow: the app fetches a request token, opens the Last.fm
-// authorization page in the browser and listens on
-// http://localhost:51991/ for the redirect. After you press "Yes, allow
-// access" the app finishes the login on its own. If the automatic return
-// fails (port busy, firewall), Last.fm also displays the token on the
-// page — paste it into the field on the setup page to finish.
-//
-// Design rules (same architecture as the SMTC / Discord bridges):
-//  • This is the ONLY ZenMusic file that talks to the Last.fm API.
-//  • No-op until credentials are set and the user connects —
-//    media_player.dart can call these methods unconditionally from any
-//    platform, in any state.
-//  • Every network call is fire-and-swallow: a Last.fm hiccup can never
-//    take audio playback down with it.
-//  • Pure HTTP (dart:io) — no Rust, no ffi, no native build steps, and
-//    no flutter_rust_bridge version pinning to worry about.
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -46,18 +7,10 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// Your Last.fm API credentials — https://www.last.fm/api/account/create
-/// Both must be set or scrobbling stays disabled.
-const String kLastfmApiKey = '';
-const String kLastfmApiSecret = '';
 
-/// Local loopback port the login tab redirects back to. Any free port
-/// works; if it is busy the manual token paste on the setup page still
-/// completes the login.
+const String kLastfmApiKey = '7889e20f0413188d242e87bffc1036e3';
+const String kLastfmApiSecret = '087a65bc3bd239b48368f213ae2c0b94';
 const int kLastfmCallbackPort = 51991;
-
-/// One track's scrobble candidacy. Created when a track becomes current,
-/// scrobbled once the client rules are met, replaced at the next track.
 class _Candidate {
   final String title;
   final String artist;

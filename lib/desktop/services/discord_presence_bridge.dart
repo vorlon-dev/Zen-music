@@ -1,44 +1,3 @@
-// ZenMusic Desktop — services/discord_presence_bridge.dart (GPL-3.0).
-//
-// SP-23 — Discord Rich Presence: show what you're listening to on your
-// Discord profile — a "Listening to" header, song title (top line), artist
-// (bottom line), album artwork, and a live "elapsed" timer that hides
-// while paused.
-//
-// SP-23b — bridge internals moved from package:dart_discord_rpc to
-// package:flutter_discord_rpc. Reason: dart_discord_rpc is abandoned on
-// ffi ^1.x and can never coexist with this project's ffi ^2.1.x (pub's
-// version solving fails with exactly that conflict). flutter_discord_rpc
-// (the RPC plugin used by Spotube, KRTirtho/frb_plugins) is built on
-// flutter_rust_bridge v2 / ffi ^2.1.4 — the same cargokit + Rust stack
-// smtc_windows already uses, so there is no new toolchain and no
-// dependency conflict. The public API of this file is unchanged:
-// media_player.dart does NOT need to be re-pasted.
-//
-// One-time setup (2 minutes):
-//  1. Go to https://discord.com/developers/applications → "New Application"
-//     → name it "ZenMusic" → Create.
-//  2. Open the app → General Information → copy the APPLICATION ID.
-//  3. Paste it into kDiscordApplicationId below (or write it to the
-//     SETTINGS Hive box under the key 'DISCORD_APP_ID' — that overrides).
-//
-// Design rules (same architecture as smtc_bridge.dart / SP-22):
-//  • This is the ONLY ZenMusic file that imports package:flutter_discord_rpc.
-//  • No-op unless an application ID is configured, off desktop platforms, or
-//    after an init failure — media_player.dart can call these methods
-//    unconditionally from any platform, in any state.
-//  • Updates are deduplicated and change-driven (track change, play, pause)
-//    so Discord's rate limits are never hit — never called per position
-//    tick. The elapsed timer is anchored at play/resume and recomputed on
-//    seek via the playing(position:) call.
-//  • Artwork is passed as a direct https URL (largeImage). Current Discord
-//    clients fetch external URLs; on very old clients the artwork simply
-//    doesn't render while the presence itself keeps working.
-//  • Discord not running is a NORMAL state: connect() runs with
-//    autoRetry and a 60 s manual fallback, so presence self-heals when the
-//    Discord client appears — and a connection hiccup can never take audio
-//    playback down with it.
-
 import 'dart:async';
 import 'dart:io';
 
@@ -46,9 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_discord_rpc/flutter_discord_rpc.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-/// Your ZenMusic Discord application ID. Empty = Rich Presence disabled.
-/// Hive override: SETTINGS box, key 'DISCORD_APP_ID'.
-const String kDiscordApplicationId = '';
+const String kDiscordApplicationId = '1563182260516028516';
 
 class _NowPlaying {
   final String title;

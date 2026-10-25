@@ -3,6 +3,12 @@
 // section the user tapped); just_audio-owned tracks render from the player
 // sequence as before. Engine tiles are read-only (no reorder/dismiss) but
 // tappable — tapping plays that item from the snapshot.
+//
+// SP-39d (field log): the drawer's shell Container paints a background
+// color, which hides ListTile's own Material background + ink splashes
+// ("ListTile background color or ink splashes may be invisible"). Both
+// tile types are now wrapped in their own transparent Material — the
+// shell blur/tint is untouched, taps ripple properly again.
 
 import 'dart:io';
 import 'dart:ui';
@@ -167,48 +173,51 @@ class _EngineQueueTile extends StatelessWidget {
     final thumb = (song['thumbnails'] as List?)?.isNotEmpty == true
         ? (song['thumbnails'].first as Map)['url']?.toString() ?? ''
         : '';
-    return ListTile(
-      key: ValueKey('eng-tile-$index'),
-      title: Text(song['title']?.toString() ?? '', maxLines: 1),
-      leading: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Stack(
-          children: [
-            thumb.isEmpty
-                ? const SizedBox(
-                width: 50,
-                height: 50,
-                child: Icon(Icons.music_note))
-                : CachedNetworkImage(
-              imageUrl: thumb,
-              height: 50,
-              width: 50,
-              fit: BoxFit.cover,
-            ),
-            if (isCurrent)
-              Container(
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        key: ValueKey('eng-tile-$index'),
+        title: Text(song['title']?.toString() ?? '', maxLines: 1),
+        leading: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Stack(
+            children: [
+              thumb.isEmpty
+                  ? const SizedBox(
+                  width: 50,
+                  height: 50,
+                  child: Icon(Icons.music_note))
+                  : CachedNetworkImage(
+                imageUrl: thumb,
                 height: 50,
                 width: 50,
-                color: Colors.black.withOpacity(0.6),
+                fit: BoxFit.cover,
               ),
-            if (isCurrent)
-              const Positioned(
-                width: 34,
-                height: 34,
-                left: 8,
-                top: 8,
-                child: Center(
-                  child:
-                  Icon(Icons.music_note_outlined, color: Colors.white),
+              if (isCurrent)
+                Container(
+                  height: 50,
+                  width: 50,
+                  color: Colors.black.withOpacity(0.6),
                 ),
-              ),
-          ],
+              if (isCurrent)
+                const Positioned(
+                  width: 34,
+                  height: 34,
+                  left: 8,
+                  top: 8,
+                  child: Center(
+                    child:
+                    Icon(Icons.music_note_outlined, color: Colors.white),
+                  ),
+                ),
+            ],
+          ),
         ),
+        subtitle: Text(song['artist']?.toString() ?? '', maxLines: 1),
+        onTap: () {
+          mp.playFromSection(mp.queueSnapshot.value, index);
+        },
       ),
-      subtitle: Text(song['artist']?.toString() ?? '', maxLines: 1),
-      onTap: () {
-        mp.playFromSection(mp.queueSnapshot.value, index);
-      },
     );
   }
 }
@@ -239,17 +248,20 @@ class QueueTile extends StatelessWidget {
         await player.removeAudioSourceAt(index);
         return true;
       },
-      child: ListTile(
-        key: Key(index.toString()),
-        title: Text(song.title, maxLines: 1),
-        leading: ArtworkWidget(song: song, isCurrent: isCurrent),
-        subtitle: Text(
-          song.artist ?? song.album ?? song.extras?['subtitle'] ?? '',
-          maxLines: 1,
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListTile(
+          key: Key(index.toString()),
+          title: Text(song.title, maxLines: 1),
+          leading: ArtworkWidget(song: song, isCurrent: isCurrent),
+          subtitle: Text(
+            song.artist ?? song.album ?? song.extras?['subtitle'] ?? '',
+            maxLines: 1,
+          ),
+          onTap: () {
+            player.seek(Duration.zero, index: index);
+          },
         ),
-        onTap: () {
-          player.seek(Duration.zero, index: index);
-        },
       ),
     );
   }

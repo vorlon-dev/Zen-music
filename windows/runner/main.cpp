@@ -92,9 +92,16 @@ CreateAndAttachConsole();
 // renderer at full priority while the window is technically visible but
 // masked. Still needed even with the CBT hook: without them, hiding the
 // WebView2 window at OS level still suspends Chromium's media pipeline.
+//
+// SP-48: MediaSessionService is ALSO disabled — that Chromium feature is
+// what registers the webview's own session with Windows SMTC, which made
+// the volume flyout / Quick Settings show "127.0.0.1:<port>/_spengine"
+// instead of the song. With it off, the ONLY SMTC card is the app's own
+// smtc_bridge session (native title/artist/artwork/timeline). The engine
+// page's navigator.mediaSession guard tolerates the API being absent.
 ::SetEnvironmentVariableW(
 L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-L"--disable-features=CalculateNativeWinOcclusion"
+L"--disable-features=CalculateNativeWinOcclusion,MediaSessionService"
 L" --disable-backgrounding-occluded-windows"
 L" --disable-renderer-backgrounding"
 L" --disable-background-timer-throttling");

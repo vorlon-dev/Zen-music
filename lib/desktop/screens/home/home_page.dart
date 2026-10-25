@@ -1,3 +1,9 @@
+// SP-42: the body's wheel scrolling is smooth now. The SingleChildScrollView
+// content is wrapped in SmoothScroll (same controller) — every mouse-wheel
+// notch becomes one short eased glide instead of an instant pointerScroll
+// teleport, in the correct direction, on the whole feed. See
+// lib/desktop/utils/smooth_scroll.dart for the mechanism.
+
 import 'dart:io';
 
 import 'package:expressive_refresh/expressive_refresh.dart';
@@ -7,12 +13,17 @@ import 'package:go_router/go_router.dart';
 import 'package:zenmusic/desktop/screens/home/cubit/home_cubit.dart';
 import 'package:zenmusic/desktop/core/widgets/section_item.dart';
 import 'package:zenmusic/desktop/utils/internet_guard.dart';
+import 'package:zenmusic/desktop/utils/smooth_scroll.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import '../../themes/text_styles.dart';
 import '../../utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:get_it/get_it.dart';
+// SP-46 (restores SP-36 wiring dropped by the SP-42 rewrite): the signed-in
+// user's Spotify account (playlists + liked songs + real Spotify home
+// shelves) rendered as a section on Home, above the YouTube sections.
+import 'package:zenmusic/desktop/spotify/spotify_home_section.dart';
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -34,6 +45,11 @@ class _HomePage extends StatefulWidget {
 
 class _HomePageState extends State<_HomePage> {
   late ScrollController _scrollController;
+
+  // SP-46 (SP-36): pull-to-refresh also re-fetches the Spotify section
+  // through its public state (SpotifyHomeSectionState.reload()).
+  final GlobalKey<SpotifyHomeSectionState> _spotifySectionKey =
+      GlobalKey<SpotifyHomeSectionState>();
 
   @override
   void initState() {
@@ -107,7 +123,12 @@ class _HomePageState extends State<_HomePage> {
           ),
         ),
         body: ExpressiveRefreshIndicator(
-          onRefresh: context.read<HomeCubit>().refresh,
+          // SP-46 (SP-36): the refresh closure also nudges the Spotify
+          // section; its cubit re-fetches only when a session is active.
+          onRefresh: () async {
+            _spotifySectionKey.currentState?.reload();
+            await context.read<HomeCubit>().refresh();
+          },
           child: BlocBuilder<HomeCubit, HomeState>(
             builder: (context, state) {
               switch (state) {
@@ -123,11 +144,23 @@ class _HomePageState extends State<_HomePage> {
                   return SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     controller: _scrollController,
-                    child: SafeArea(
-                        child: Column(
+                    // SP-42: SmoothScroll sits INSIDE the viewport (deeper
+                    // than the Scrollable), so it wins the PointerSignal
+                    // resolution and converts wheel notches into smooth
+                    // glides. Pull-to-refresh, pagination and drag all
+                    // behave exactly as before.
+                    child: SmoothScroll(
+                      controller: _scrollController,
+                      child: SafeArea(
+                          child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _horizontalChipsRow(state.chips),
+                            // SP-46 (SP-36): the signed-in user's Spotify
+                            // account leads the page. Logged out = slim
+                            // connect banner; failures never touch the
+                            // YT feed below.
+                            SpotifyHomeSection(key: _spotifySectionKey),
                             Column(
                               children: [
                                 ...state.sections.map((section) {
@@ -144,6 +177,7 @@ class _HomePageState extends State<_HomePage> {
                             ),
                           ],
                         )),
+                    ),
                   );
               }
             },
