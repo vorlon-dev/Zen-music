@@ -26,13 +26,13 @@ dependencies:
   webview_flutter: ^4.10.0
   record: ^7.1.1
   # ─────────────────────────────────────────────
-  # 📝 Lyrics
+  #  Lyrics
   # ─────────────────────────────────────────────
   flutter_lyric: ^3.0.8
   http: ^1.2.2
 
   # ─────────────────────────────────────────────
-  # 📦 Local Storage & State
+  #  Local Storage & State
   # ─────────────────────────────────────────────
   shared_preferences: ^2.3.2
   hive: ^2.2.3
@@ -41,19 +41,19 @@ dependencies:
   web_socket_channel: ^3.0.3
   protobuf: ^6.1.0
   # ─────────────────────────────────────────────
-  # 🌐 Networking & Utilities
+  #  Networking & Utilities
   # ─────────────────────────────────────────────
   cached_network_image: ^3.4.1
   permission_handler: ^11.3.1
   receive_sharing_intent: ^1.8.1
   # ─────────────────────────────────────────────
-  # 🎨 UI / State Management
+  #  UI / State Management
   # ─────────────────────────────────────────────
   provider: ^6.1.2
   material_symbols_icons: ^4.2801.1
   palette_generator_master: ^1.1.0
   # ─────────────────────────────────────────────
-  # 🎬 Track 2: extracted-stream video backdrop
+  #  Track 2: extracted-stream video backdrop
   # ─────────────────────────────────────────────
   flutter_file_dialog: ^3.3.3
   video_player: ^2.9.2
