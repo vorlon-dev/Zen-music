@@ -20,6 +20,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/services/settings_manager.dart';
 import 'package:zenmusic/desktop/utils/song_thumbnail.dart';
 
 class QueueList extends StatelessWidget {
@@ -93,7 +94,15 @@ class _Shell extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor.withAlpha(70),
+        // SP-61: under M3 the scaffold background is transparent, so the
+        // drawer shell takes a real M3 surface container (blur still reads
+        // through); classic keeps the translucent scaffold tint.
+        color: GetIt.I<SettingsManager>().isMaterial3
+            ? Theme.of(context)
+                .colorScheme
+                .surfaceContainer
+                .withValues(alpha: 0.88)
+            : Theme.of(context).scaffoldBackgroundColor.withAlpha(70),
       ),
       child: ClipRRect(
         child: BackdropFilter(
@@ -125,15 +134,33 @@ class _Shell extends StatelessWidget {
                           children: [
                             TextButton.icon(
                               style: ButtonStyle(
+                                // SP-61: M3 — container/onContainer pairing.
                                 backgroundColor: WidgetStatePropertyAll(
                                   shuffle
-                                      ? Colors.white
-                                      : Colors.white.withAlpha(50),
+                                      ? (GetIt.I<SettingsManager>().isMaterial3
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .primaryContainer
+                                          : Colors.white)
+                                      : (GetIt.I<SettingsManager>().isMaterial3
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .surfaceContainerHigh
+                                          : Colors.white.withAlpha(50)),
                                 ),
                                 foregroundColor: WidgetStatePropertyAll(
                                   shuffle
-                                      ? Theme.of(context).scaffoldBackgroundColor
-                                      : Colors.white,
+                                      ? (GetIt.I<SettingsManager>().isMaterial3
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .onPrimaryContainer
+                                          : Theme.of(context)
+                                              .scaffoldBackgroundColor)
+                                      : (GetIt.I<SettingsManager>().isMaterial3
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant
+                                          : Colors.white),
                                 ),
                               ),
                               onPressed: () {
@@ -177,7 +204,17 @@ class _EngineQueueTile extends StatelessWidget {
       type: MaterialType.transparency,
       child: ListTile(
         key: ValueKey('eng-tile-$index'),
-        title: Text(song['title']?.toString() ?? '', maxLines: 1),
+        title: Text(
+          song['title']?.toString() ?? '',
+          maxLines: 1,
+          // SP-61: M3 — the playing tile takes the theme primary.
+          style: isCurrent && GetIt.I<SettingsManager>().isMaterial3
+              ? TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                )
+              : null,
+        ),
         leading: ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Stack(
@@ -252,7 +289,17 @@ class QueueTile extends StatelessWidget {
         type: MaterialType.transparency,
         child: ListTile(
           key: Key(index.toString()),
-          title: Text(song.title, maxLines: 1),
+          title: Text(
+            song.title,
+            maxLines: 1,
+            // SP-61: M3 — the playing tile takes the theme primary.
+            style: isCurrent && GetIt.I<SettingsManager>().isMaterial3
+                ? TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  )
+                : null,
+          ),
           leading: ArtworkWidget(song: song, isCurrent: isCurrent),
           subtitle: Text(
             song.artist ?? song.album ?? song.extras?['subtitle'] ?? '',

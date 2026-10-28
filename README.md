@@ -74,7 +74,8 @@ It runs on **Android** (phone and tablet) and **Windows** (a full desktop experi
 <img src="screenshots/player.png" alt="Player screen" width="30%" />
 <img src="screenshots/search.png" alt="Search screen" width="30%" />
 <img src="screenshots/library.png" alt="Library screen" width="30%" />
-<img src="screenshots/youtube.png" alt="Library screen" width="30%" />
+<img src="screenshots/youtube.png" alt="Youtube screen" width="30%" />
+<img src="screenshots/lyrics.png" alt="Lyrics screen" width="30%" />
 <br/>
 <img src="screenshots/Desktop-1.png" alt="Desktop Player Skin 1" width="45%" />
 <img src="screenshots/Desktop-2.png" alt="Desktop Player Skin 2" width="45%" />

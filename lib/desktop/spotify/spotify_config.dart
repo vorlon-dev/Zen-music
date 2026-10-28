@@ -50,6 +50,11 @@ class SpotifyConfig {
   // Endpoints
   static const pathfinderUrl =
       'https://api-partner.spotify.com/pathfinder/v2/query';
+  // SP-71: official Web API — used for the user's liked songs, which the
+  // pathfinder libraryV3 query answers with an empty LikedSongs node for
+  // many accounts. The Bearer minted from sp_dc carries the
+  // user-library-read scope, so /v1/me/tracks answers reliably.
+  static const restApiBase = 'https://api.spotify.com/v1';
   static const serverTimeUrl = 'https://open.spotify.com/api/server-time';
   static const tokenUrlBase =
       'https://open.spotify.com/api/token?reason=transport&productType=web-player';

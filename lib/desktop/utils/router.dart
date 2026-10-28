@@ -36,6 +36,7 @@ import 'package:zenmusic/desktop/screens/chart/chart_details_page.dart';
 import 'package:zenmusic/desktop/services/chart_model.dart';
 import 'package:zenmusic/desktop/screens/shell/app_shell.dart';
 import 'package:zenmusic/desktop/spotify/spotify_login_page.dart';
+import 'package:zenmusic/desktop/ytmusic/ytm_login_page.dart'; // SP-62
 
 
 final router = GoRouter(
@@ -104,6 +105,11 @@ final router = GoRouter(
         GoRoute(
           path: '/spotify-login',
           builder: (context, state) => const SpotifyLoginPage(),
+        ),
+        // SP-62: embedded YouTube Music login (device-code OAuth webview).
+        GoRoute(
+          path: '/ytm-login',
+          builder: (context, state) => const YtmLoginPage(),
         ),
         GoRoute(
           path: '/video',

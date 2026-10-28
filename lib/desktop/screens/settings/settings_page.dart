@@ -15,10 +15,12 @@ import 'package:zenmusic/desktop/screens/offline/offline_cache_page.dart';
 import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/screens/settings/cubit/settings_system_cubit.dart';
 import 'package:zenmusic/desktop/screens/settings/seek_bar_page.dart';
+import 'package:zenmusic/desktop/core/widgets/brand_logos.dart'; // SP-62
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/lyrics_overlay_bridge.dart';
 import 'package:zenmusic/desktop/services/mini_player_bridge.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
+import 'package:zenmusic/desktop/ytmusic/ytm_auth.dart'; // SP-62
 import 'package:zenmusic/desktop/themes/text_styles.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:zenmusic/desktop/utils/zen_icons.dart';
@@ -253,11 +255,29 @@ class _SettingsBodyState extends State<_SettingsBody> {
           ),
         ]),
       _Group('Services', [
-        _Entry(
-          icon: ZenIcons.youtube,
+        // SP-62: brand-logo YouTube Music tile — login via the embedded
+        // webview (device-code OAuth), cookies saved like Spotify; once
+        // connected the home feed follows the account's listening taste.
+        const _Entry(
           title: 'YouTube Music',
           subtitle: 'Account, region and content',
-          keywords: const ['youtube', 'ytmusic', 'login'],
+          keywords: [
+            'youtube',
+            'ytmusic',
+            'login',
+            'account',
+            'google',
+            'feed',
+            'taste',
+            'personalized',
+          ],
+          builder: _ytmBuilder,
+        ),
+        _Entry(
+          icon: ZenIcons.youtube,
+          title: 'Content and region',
+          subtitle: 'Country, language and content type',
+          keywords: const ['region', 'country', 'language', 'content'],
           onTap: () => context.go('/settings/services/ytmusic'),
         ),
         const _Entry(
@@ -331,6 +351,9 @@ class _SettingsBodyState extends State<_SettingsBody> {
   }
 
   static Widget _spotifyBuilder(BuildContext context) => const _SpotifyTile();
+
+  // SP-62
+  static Widget _ytmBuilder(BuildContext context) => const _YtmTile();
 
   @override
   Widget build(BuildContext context) {
@@ -511,7 +534,12 @@ class _SpotifyTileState extends State<_SpotifyTile> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ZenRow(
-              icon: loggedIn ? ZenIcons.connected : ZenIcons.disconnected,
+              // SP-62: real Spotify mark (dimmed while not connected).
+              icon: ZenIcons.connected,
+              leading: Opacity(
+                opacity: loggedIn ? 1.0 : 0.4,
+                child: const SpotifyLogo(size: 22),
+              ),
               title: 'Spotify',
               subtitle: loggedIn
                   ? 'Connected — tap to open your library'
@@ -622,6 +650,208 @@ class _SpotifyTileState extends State<_SpotifyTile> {
                     ),
                   ),
                 ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ── YouTube Music (SP-62, login flow reworked by SP-65) ──────────────
+// Mirrors the Spotify tile: "Log in" opens the YouTube Music sign-in
+// (/ytm-login — an app-hosted webview captures the session cookies of a
+// signed-in music.youtube.com visit; Google removed OAuth support from the
+// YTM API, so cookies are the only working mechanism), and a cookie paste
+// stays as the advanced fallback. Once connected, the home feed follows
+// the account's YouTube Music listening taste.
+
+class _YtmTile extends StatefulWidget {
+  const _YtmTile();
+
+  @override
+  State<_YtmTile> createState() => _YtmTileState();
+}
+
+class _YtmTileState extends State<_YtmTile> {
+  final _ctrl = TextEditingController();
+  bool _showPaste = false;
+  bool _busy = false;
+  bool _hide = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    YtmAuth.instance.load();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openEmbeddedLogin() async {
+    await context.push('/ytm-login');
+    YtmAuth.instance.load();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _loginPaste() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final err = await YtmAuth.instance.loginWithCookies(_ctrl.text);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = err;
+    });
+    if (err == null) _ctrl.clear();
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data?.text != null) {
+      _ctrl.text = data!.text!;
+      setState(() {});
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ValueListenableBuilder<bool>(
+      valueListenable: YtmAuth.instance.loggedIn,
+      builder: (context, loggedIn, _) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ZenRow(
+              // SP-62: real YouTube Music mark (dimmed while not connected).
+              icon: ZenIcons.connected,
+              leading: Opacity(
+                opacity: loggedIn ? 1.0 : 0.4,
+                child: const YouTubeMusicLogo(size: 22),
+              ),
+              title: 'YouTube Music',
+              subtitle: loggedIn
+                  ? 'Connected — your home feed follows your taste'
+                  : 'Not connected',
+              // Connected: tap opens the region/content page (the row the
+              // old entry used to be). Login/logout stay in the trailing.
+              onTap: loggedIn
+                  ? () => context.go('/settings/services/ytmusic')
+                  : null,
+              trailing: loggedIn
+                  ? OutlinedButton(
+                      onPressed: () => YtmAuth.instance.logout(),
+                      child: const Text('Log out'),
+                    )
+                  : FilledButton.tonal(
+                      onPressed: _openEmbeddedLogin,
+                      child: const Text('Log in'),
+                    ),
+            ),
+            if (!loggedIn)
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: _showPaste
+                    ? Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextField(
+                              controller: _ctrl,
+                              maxLines: _hide ? 1 : 3,
+                              obscureText: _hide,
+                              decoration: InputDecoration(
+                                hintText:
+                                    'Paste cookies.txt content or a cookie '
+                                    'header from music.youtube.com',
+                                prefixIcon: Icon(ZenIcons.key, size: 18),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                suffixIcon: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Paste',
+                                      icon: Icon(ZenIcons.paste, size: 18),
+                                      onPressed: _pasteFromClipboard,
+                                    ),
+                                    IconButton(
+                                      tooltip: _hide ? 'Show' : 'Hide',
+                                      icon: Icon(_hide
+                                          ? ZenIcons.eye
+                                          : ZenIcons.eyeOff,
+                                          size: 18),
+                                      onPressed: () =>
+                                          setState(() => _hide = !_hide),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (_error != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Row(
+                                  children: [
+                                    Icon(ZenIcons.error,
+                                        size: 16, color: cs.error),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(_error!,
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              color: cs.error)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                TextButton(
+                                  onPressed: () =>
+                                      setState(() => _showPaste = false),
+                                  child: const Text('Cancel'),
+                                ),
+                                const Spacer(),
+                                FilledButton(
+                                  onPressed: _busy ? null : _loginPaste,
+                                  child: _busy
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2),
+                                        )
+                                      : const Text('Log in with cookies'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.only(left: 54, bottom: 6),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: () =>
+                                setState(() => _showPaste = true),
+                            child: const Text('Use cookies instead'),
+                          ),
+                        ),
+                      ),
               ),
           ],
         );

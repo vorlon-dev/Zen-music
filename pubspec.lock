@@ -978,6 +978,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.1.0"
+  liquid_glass_widgets:
+    dependency: "direct main"
+    description:
+      name: liquid_glass_widgets
+      sha256: "9a916e803059ceac80fddf4659a33f44327e9f1cbb5affad02148269124dad14"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.15.1"
   loading_indicator_m3e:
     dependency: "direct main"
     description:

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SP-58: Material 3 theme tokens — the NATIVE single source of truth for
+  the "Material 3" UI theme on Android.
+
+  Values are extracted 1:1 from PixelMusic (github.com/ianshulyadav/
+  PixelMusic) ui/theme/Color.kt + Theme.kt. Material3Tokens.kt serves
+  them to Flutter over the zen/material3_tokens channel; the Dart side
+  (lib/desktop/material3/m3_palette.dart) carries identical fallbacks so
+  Windows renders the same theme without the channel.
+
+  Edit a colour here + Gradle rebuild → the whole Material 3 theme
+  re-skins on Android without touching Dart.
+-->
+<resources>
+    <!-- PixelMusic dark scheme anchors -->
+    <color name="m3_dark_primary">#FFAB47BC</color>
+    <color name="m3_dark_secondary">#FFF06292</color>
+    <color name="m3_dark_tertiary">#FFFF8A65</color>
+    <color name="m3_dark_background">#FF1E1234</color>
+    <color name="m3_dark_surface">#FF2A1F40</color>
+    <color name="m3_dark_on_surface">#FFE1BEE7</color>
+    <color name="m3_dark_error">#FFFF5252</color>
+    <color name="m3_dark_primary_container">#FF3D2350</color>
+    <color name="m3_dark_on_primary_container">#FFF6D9FF</color>
+    <color name="m3_dark_secondary_container">#FF4A2540</color>
+    <color name="m3_dark_on_secondary_container">#FFFFD9E6</color>
+    <color name="m3_dark_surface_container_high">#FF392C4F</color>
+    <color name="m3_dark_surface_container_highest">#FF44375B</color>
+    <!-- SP-61: full surface ladder + outlines (player lyrics / queue /
+         quality-sheet surfaces consume these roles via the M3 scheme). -->
+    <color name="m3_dark_on_surface_variant">#FFCBBCF0</color>
+    <color name="m3_dark_tertiary_container">#FF57321E</color>
+    <color name="m3_dark_on_tertiary_container">#FFFFDBD1</color>
+    <color name="m3_dark_surface_container_lowest">#FF150C27</color>
+    <color name="m3_dark_surface_container_low">#FF241A38</color>
+    <color name="m3_dark_surface_container">#FF2E2244</color>
+    <color name="m3_dark_outline">#FF9A8FB5</color>
+    <color name="m3_dark_outline_variant">#FF4E4365</color>
+
+    <!-- PixelMusic light scheme anchors -->
+    <color name="m3_light_primary">#FF6C4FF5</color>
+    <color name="m3_light_on_primary">#FFFFFFFF</color>
+    <color name="m3_light_primary_container">#FFE3DBFF</color>
+    <color name="m3_light_on_primary_container">#FF23005C</color>
+    <color name="m3_light_secondary">#FFF06292</color>
+    <color name="m3_light_secondary_container">#FFFFD9E6</color>
+    <color name="m3_light_on_secondary_container">#FF5C1140</color>
+    <color name="m3_light_tertiary">#FFFF8A65</color>
+    <color name="m3_light_background">#FFF7F2FF</color>
+    <color name="m3_light_surface">#FFFBF8FF</color>
+    <color name="m3_light_on_surface">#FF1E1237</color>
+    <color name="m3_light_surface_variant">#FFE8DEF9</color>
+    <color name="m3_light_on_surface_variant">#FF4D4165</color>
+    <color name="m3_light_outline">#FF78659A</color>
+    <color name="m3_light_error">#FFD32F2F</color>
+    <!-- SP-61: remaining container roles for full native coverage. -->
+    <color name="m3_light_tertiary_container">#FFFFDBD1</color>
+    <color name="m3_light_on_tertiary_container">#FF3A0B00</color>
+    <color name="m3_light_surface_container_lowest">#FFFFFFFF</color>
+    <color name="m3_light_surface_container_low">#FFFAF5FF</color>
+    <color name="m3_light_surface_container">#FFF2ECFA</color>
+    <color name="m3_light_surface_container_high">#FFECE6F5</color>
+    <color name="m3_light_surface_container_highest">#FFE6E1EF</color>
+    <color name="m3_light_outline_variant">#FFCFC5E3</color>
+</resources>

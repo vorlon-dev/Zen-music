@@ -18,13 +18,16 @@
 // ZERO new pubspec deps (dart:io HttpClient, dart:convert, hive — all present).
 // R5 print policy: all debug prints use the [yt_lyrics] prefix.
 //
-// LEDGER: this file is SELF-CONTAINED. It does NOT import any other ZenMusic
-// service. Nothing else needs editing for it to compile.
+// LEDGER: imports exactly ONE other ZenMusic file — kugou_lyrics.dart
+// (SP-68 fallback provider, one-way; that file never imports back).
+// Nothing else needs editing for it to compile.
 
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:hive/hive.dart';
+
+import 'kugou_lyrics.dart'; // SP-68: KuGou fallback provider (one-way dep)
 
 // ---------------------------------------------------------------------------
 // Models
@@ -615,6 +618,39 @@ class LyricsService {
               'wordSync: ${data.wordSync})');
           return data;
         }
+      }
+
+      // SP-68: KuGou fallback — the Chinese/Asian long tail LRCLIB
+      // misses. Same cache box, same parser; a miss here finally lands
+      // in the session negative cache below.
+      try {
+        final lrc = await KugouLyrics.lookup(
+          title: clean.cleanTitle,
+          artist: clean.primaryArtist,
+          durationMs: durationMs,
+          album: album,
+        );
+        if (lrc != null) {
+          final synced = LrcParser.parse(lrc);
+          if (synced.isNotEmpty) {
+            final data = LyricsData(
+              trackName: clean.cleanTitle,
+              artistName: clean.primaryArtist,
+              synced: synced,
+              plain: null,
+              instrumental: false,
+              wordSync: false,
+            );
+            final box = await _cache();
+            await box.put(key, data.toMap());
+            print('[yt_lyrics] kugou fallback resolved '
+                '"${data.trackName}" — ${data.artistName} '
+                '(${synced.length} synced lines)');
+            return data;
+          }
+        }
+      } catch (e) {
+        print('[yt_lyrics] kugou fallback failed: $e');
       }
 
       _misses.add(key);

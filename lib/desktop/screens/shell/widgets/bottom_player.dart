@@ -20,6 +20,9 @@ import 'package:palette_generator/palette_generator.dart';
 import 'package:text_scroll/text_scroll.dart';
 
 import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/material3/m3_tokens.dart'; // SP-58
+import 'package:zenmusic/desktop/material3/m3_wavy_slider.dart'; // SP-58
+import 'package:zenmusic/desktop/services/settings_manager.dart'; // SP-54
 import 'package:zenmusic/desktop/utils/adaptive_widgets/buttons.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/progress_ring.dart';
 import 'package:zenmusic/desktop/utils/song_thumbnail.dart';
@@ -207,6 +210,17 @@ class _MiniBodyState extends State<_MiniBody>
   Widget build(BuildContext context) {
     _consumeSlideIntentIfNeeded();
     final song = widget.song;
+    // SP-54: Liquid Glass — in glass mode the artwork-palette gradient is
+    // dropped so the surrounding ZenGlassPanel (shader glass on Windows,
+    // Kotlin glass on Android) shows through; only a faint frost tint and
+    // a soft shadow remain for legibility.
+    // SP-58: Material 3 — PixelMusic surface treatment: solid
+    // surfaceContainerHigh at 16dp radius, theme-aware text, and the
+    // expressive wavy progress line pinned to the bottom edge.
+    final settings = GetIt.I<SettingsManager>();
+    final liquid = settings.liquidGlass;
+    final m3 = settings.isMaterial3; // SP-58
+    final cs = Theme.of(context).colorScheme; // SP-58
     final base = widget.color ?? const Color(0xFF202020);
     final dark = Color.lerp(base, Colors.black, 0.45)!;
     final subtitle = '${song.artist ?? song.extras?['subtitle'] ?? ''}';
@@ -234,24 +248,37 @@ class _MiniBodyState extends State<_MiniBody>
           child: Container(
             height: _height,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [base, dark],
-              ),
-              borderRadius: BorderRadius.circular(_radius),
+              // SP-58: Material 3 — solid M3 surface, no palette gradient.
+              color: m3
+                  ? cs.surfaceContainerHigh
+                  : liquid
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : null,
+              gradient: (liquid || m3)
+                  ? null
+                  : LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [base, dark],
+                    ),
+              borderRadius: BorderRadius.circular(
+                  m3 ? ZenM3MiniPlayer.radius : _radius),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 20,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 5),
+                  color: Colors.black.withValues(
+                      alpha: m3 ? 0.14 : (liquid ? 0.18 : 0.3)),
+                  blurRadius: m3 ? 10 : (liquid ? 18 : 20),
+                  spreadRadius: 0,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(_radius),
-              child: Padding(
+              borderRadius: BorderRadius.circular(
+                  m3 ? ZenM3MiniPlayer.radius : _radius),
+              child: Stack(
+                children: [
+                  Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 child: Row(
                   children: [
@@ -288,8 +315,10 @@ class _MiniBodyState extends State<_MiniBody>
                                     pixelsPerSecond: Offset(30, 0)),
                                 delayBefore: const Duration(seconds: 2),
                                 pauseBetween: const Duration(seconds: 2),
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                style: TextStyle(
+                                  color: m3
+                                      ? cs.onSurface
+                                      : Colors.white, // SP-58
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,
                                   letterSpacing: 0.1,
@@ -302,7 +331,9 @@ class _MiniBodyState extends State<_MiniBody>
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.75),
+                                    color: m3
+                                        ? cs.onSurfaceVariant
+                                        : Colors.white.withValues(alpha: 0.75),
                                     fontSize: 13,
                                     fontWeight: FontWeight.w400,
                                   ),
@@ -317,6 +348,36 @@ class _MiniBodyState extends State<_MiniBody>
                   ],
                 ),
               ),
+                  // SP-58: the expressive wavy progress line along the
+                  // bottom edge (PixelMusic's collapsed-bar indicator).
+                  if (m3)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: ValueListenableBuilder<ProgressBarState>(
+                        valueListenable: _mp.progressBarState,
+                        builder: (context, value, _) {
+                          final total = value.total.inMilliseconds;
+                          final frac = total <= 0
+                              ? 0.0
+                              : (value.current.inMilliseconds / total)
+                                  .clamp(0.0, 1.0);
+                          final playing =
+                              _mp.buttonState.value == ButtonState.playing;
+                          return ExcludeSemantics(
+                            child: ZenM3WavySlider(
+                              value: frac,
+                              playing: playing,
+                              compact: true,
+                              height: ZenM3MiniPlayer.progressLineHeight + 5,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -326,6 +387,9 @@ class _MiniBodyState extends State<_MiniBody>
 
   Widget _buildControls() {
     final mp = _mp;
+    // SP-58: Material 3 — theme-aware control icons.
+    final m3 = GetIt.I<SettingsManager>().isMaterial3;
+    final cs = Theme.of(context).colorScheme;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -343,7 +407,9 @@ class _MiniBodyState extends State<_MiniBody>
               icon: Icon(
                 Icons.skip_next_rounded,
                 size: 26,
-                color: Colors.white.withValues(alpha: 0.85),
+                color: m3
+                    ? cs.onSurfaceVariant
+                    : Colors.white.withValues(alpha: 0.85),
               ),
             ),
           )
@@ -420,6 +486,13 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
     final mp = GetIt.I<MediaPlayer>();
     final isLoading = widget.state == ButtonState.loading;
     final isPlaying = widget.state == ButtonState.playing;
+    // SP-58: Material 3 — ring reads the theme instead of fixed white.
+    final m3 = GetIt.I<SettingsManager>().isMaterial3;
+    final cs = Theme.of(context).colorScheme;
+    final ringColor = m3 ? cs.primary : Colors.white;
+    final ringTrack = m3
+        ? cs.primary.withValues(alpha: 0.22)
+        : Colors.white.withValues(alpha: 0.18);
 
     return SizedBox(
       width: 48,
@@ -441,8 +514,8 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
                   painter: _WaveRingPainter(
                     phase: _phase.value * 2 * math.pi,
                     sweepAngle: 2 * math.pi * progress,
-                    color: Colors.white,
-                    trackColor: Colors.white.withValues(alpha: 0.18),
+                    color: ringColor, // SP-58
+                    trackColor: ringTrack, // SP-58
                     strokeWidth: 3,
                     amplitude: 1.6 * _amp.value,
                   ),

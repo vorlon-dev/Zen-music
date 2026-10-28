@@ -2,7 +2,7 @@ name: zenmusic
 description: "A YouTube zen player built with Flutter."
 publish_to: 'none'
 
-version: 25.10.2026+4
+version: 28.10.2026+4
 
 environment:
   sdk: ^3.13.0
@@ -52,6 +52,7 @@ dependencies:
   provider: ^6.1.2
   material_symbols_icons: ^4.2801.1
   palette_generator_master: ^1.1.0
+  liquid_glass_widgets: ^1.15.1
   # ─────────────────────────────────────────────
   #  Track 2: extracted-stream video backdrop
   # ─────────────────────────────────────────────
@@ -128,6 +129,12 @@ flutter:
     - family: Retro Blendy
       fonts:
         - asset: assets/fonts/Retro Blendy.otf
+    # SP-58: Material 3 theme — Google Sans Flex variable font, the same
+    # rounded family PixelMusic's whole type scale runs on (OFL-licensed;
+    # license bundled at assets/fonts/GoogleSansFlex-OFL.txt).
+    - family: ZenSansFlex
+      fonts:
+        - asset: assets/fonts/gflex_variable.ttf
 
 flutter_launcher_icons:
   image_path: "assets/icon/logo.png"

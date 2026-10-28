@@ -90,6 +90,32 @@ class AppearancePage extends StatelessWidget {
                             .read<AppearanceCubit>()
                             .setDynamicColors(v),
                       ),
+                      // SP-62.2: whole-app UI theme — Classic / Liquid
+                      // Glass / Material 3. Restores the SP-58 switch that
+                      // the repo baseline never carried: without this row
+                      // (and the SettingsManager members behind it) the
+                      // app was stuck on whatever UI_THEME Hive held and
+                      // there was NO way to reach the other designs.
+                      ZenRow(
+                        icon: ZenIcons.themeMode,
+                        title: 'UI theme',
+                        trailing: AdaptiveDropdownButton<String>(
+                          value: s.uiTheme,
+                          items: [
+                            AdaptiveDropdownMenuItem(
+                                value: 'classic', child: Text('Classic')),
+                            AdaptiveDropdownMenuItem(
+                                value: 'liquid',
+                                child: Text('Liquid Glass')),
+                            AdaptiveDropdownMenuItem(
+                                value: 'm3', child: Text('Material 3')),
+                          ],
+                          onChanged: (v) {
+                            if (v == null) return;
+                            context.read<AppearanceCubit>().setUiTheme(v);
+                          },
+                        ),
+                      ),
                     ]),
 
                     // ── Player ──

@@ -18,6 +18,9 @@ import 'package:go_router/go_router.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+// SP-68: Song DNA — the playing track's backstory (release, meaning,
+// artist bio) opened as a card from the song options list.
+import 'song_dna_dialog.dart';
 
 import 'package:zenmusic/desktop/screens/import_dialog.dart';
 import 'package:zenmusic/desktop/services/import_service.dart';
@@ -1002,6 +1005,16 @@ class _SongWindowContent extends StatelessWidget {
         const SizedBox(height: 8),
 
         // Actions
+        // SP-68: Song DNA — leads the list, one tap to the backstory.
+        _buildAction(
+          context,
+          icon: Icons.fingerprint_rounded,
+          title: 'Song DNA',
+          onTap: () {
+            Navigator.pop(context);
+            showSongDnaDialog(context, Map.from(song));
+          },
+        ),
         if ((song['videoId'] ?? '').toString().isNotEmpty)
           _buildAction(
             context,

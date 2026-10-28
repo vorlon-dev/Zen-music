@@ -2,10 +2,20 @@
 // Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
 // remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../client.dart';
 
 import '../helpers.dart';
 import 'utils.dart';
+
+// SP-71: the library shelves are parsed with hard `List x = nav(...)`
+// casts that threw "type 'Null' is not a subtype of type 'List<dynamic>'"
+// whenever YouTube Music answered with an empty/limited library page
+// (musicNotifierShelfRenderer instead of music shelves, grid without
+// items, fresh session with no history). Every hop used by the account
+// section (getHistory / getLibrarySongs / getLibraryPlaylists) is now
+// null-guarded and reports what it actually saw under [ytm-lib].
 
 mixin LibraryMixin on YTClient {
   Future<Map> getLibrarySongs({String? continuationParams}) async {
@@ -16,10 +26,13 @@ mixin LibraryMixin on YTClient {
 
     Map outerContents = {};
     if (continuationParams != null) {
-      outerContents =
-          nav(response, ['continuationContents', 'musicShelfContinuation']);
+      outerContents = (nav(response, [
+        'continuationContents',
+        'musicShelfContinuation',
+      ]) as Map?) ??
+          {};
     } else {
-      Map contents = nav(response, [
+      final first = (nav(response, [
         'contents',
         'singleColumnBrowseResultsRenderer',
         'tabs',
@@ -29,9 +42,11 @@ mixin LibraryMixin on YTClient {
         'sectionListRenderer',
         'contents',
         0,
-      ]);
-      outerContents = nav(contents, ['musicShelfRenderer']) ??
-          nav(contents, ['itemSectionRenderer']);
+      ]) as Map?) ??
+          {};
+      outerContents = (nav(first, ['musicShelfRenderer']) as Map?) ??
+          (nav(first, ['itemSectionRenderer']) as Map?) ??
+          {};
     }
 
     String? continuation = nav(outerContents,
@@ -39,7 +54,9 @@ mixin LibraryMixin on YTClient {
     if (continuation != null) {
       continuation = getContinuationString(continuation);
     }
-    List contents = nav(outerContents, ['contents']);
+    // SP-71: null-guarded — empty shelves answer without contents.
+    final List contents =
+        (nav(outerContents, ['contents']) as List?) ?? const [];
 
     return {
       'contents': handleContents(contents),
@@ -136,10 +153,13 @@ mixin LibraryMixin on YTClient {
         additionalParams: continuationParams ?? '');
     Map outerContents = {};
     if (continuationParams != null) {
-      outerContents =
-          nav(response, ['continuationContents', 'gridContinuation']);
+      outerContents = (nav(response, [
+        'continuationContents',
+        'gridContinuation',
+      ]) as Map?) ??
+          {};
     } else {
-      Map contents = nav(response, [
+      final first = (nav(response, [
         'contents',
         'singleColumnBrowseResultsRenderer',
         'tabs',
@@ -149,24 +169,27 @@ mixin LibraryMixin on YTClient {
         'sectionListRenderer',
         'contents',
         0,
-      ]);
-      outerContents = nav(contents, ['gridRenderer']) ??
-          nav(contents, [
-            'itemSectionRenderer',
-          ]);
+      ]) as Map?) ??
+          {};
+      outerContents = (nav(first, ['gridRenderer']) as Map?) ??
+          (nav(first, ['itemSectionRenderer']) as Map?) ??
+          {};
     }
     String? continuation = nav(outerContents,
         ['continuations', 0, 'nextContinuationData', 'continuation']);
     if (continuation != null) {
       continuation = getContinuationString(continuation);
     }
-    List contents = nav(outerContents, ['items']);
-    if (continuationParams == null) {
-      contents = contents.sublist(1);
+    // SP-71: null-guarded + length-guarded. The first grid slot is the
+    // "New playlist" create-card (dropped here); a page without items
+    // (empty library / notifier shelf) must yield [] not a cast crash.
+    List items = (nav(outerContents, ['items']) as List?) ?? const [];
+    if (continuationParams == null && items.length > 1) {
+      items = items.sublist(1);
     }
 
     return {
-      'contents': handleContents(contents),
+      'contents': handleContents(items),
       'continuation': continuation,
     };
   }
@@ -237,7 +260,12 @@ mixin LibraryMixin on YTClient {
     Map<String, dynamic> body = {'browseId': 'FEmusic_history'};
     var response = await sendRequest('browse', body);
 
-    List allContents = nav(response, [
+    // SP-71: null-guarded walk. An account with an empty/off history gets
+    // a musicNotifierShelfRenderer section instead of music shelves — the
+    // old `List allContents = nav(...)` / `List contents = nav(...)` casts
+    // turned that into "type 'Null' is not a subtype of type
+    // 'List<dynamic>'" and the whole tier was skipped.
+    final allContents = (nav(response, [
       'contents',
       'singleColumnBrowseResultsRenderer',
       'tabs',
@@ -246,14 +274,31 @@ mixin LibraryMixin on YTClient {
       'content',
       'sectionListRenderer',
       'contents',
-    ]);
+    ]) as List?) ??
+        const [];
+
     List result = [];
     for (var content in allContents) {
-      List contents = nav(content, ['musicShelfRenderer', 'contents']);
-      Map header = nav(content, ['musicShelfRenderer']);
+      if (content is! Map) continue;
+      final shelf = nav(content, ['musicShelfRenderer']);
+      if (shelf is! Map) {
+        // Empty / paused history page — surface WHY instead of crashing.
+        final note = nav(content, [
+          'musicNotifierShelfRenderer',
+          'title',
+          'runs',
+          0,
+          'text',
+        ]);
+        if (note != null) {
+          debugPrint('[ytm-lib] history: $note');
+        }
+        continue;
+      }
+      final List shelfItems = (nav(shelf, ['contents']) as List?) ?? const [];
       Map section = {
-        'title': nav(header, ['title', 'runs', 0, 'text']),
-        'contents': handleContents(contents),
+        'title': nav(shelf, ['title', 'runs', 0, 'text']),
+        'contents': handleContents(shelfItems),
       };
       result.add(section);
     }

@@ -82,6 +82,10 @@ Future<void> main() async {
 
   GetIt.I.registerSingleton<YTMusic>(ytMusic);
 
+  // SP-62: YouTube Music account — restore the device-OAuth session (or the
+  // pasted-cookie fallback) so the home feed is personalized from boot.
+  YtmAuth.instance.load();
+
   runApp(
     MultiProvider(
       providers: [

@@ -16,7 +16,7 @@ import 'package:zenmusic/desktop/utils/internet_guard.dart';
 import 'package:zenmusic/desktop/utils/smooth_scroll.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
+import 'package:zenmusic/desktop/ytmusic/ytmusic.dart'; // SP-62.1: barrel now also exports YtmAuth (ytm_auth.dart)
 import '../../themes/text_styles.dart';
 import '../../utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:get_it/get_it.dart';
@@ -24,6 +24,10 @@ import 'package:get_it/get_it.dart';
 // user's Spotify account (playlists + liked songs + real Spotify home
 // shelves) rendered as a section on Home, above the YouTube sections.
 import 'package:zenmusic/desktop/spotify/spotify_home_section.dart';
+// SP-68: the signed-in YouTube Music account as a Home section — last
+// listening (history), liked music and the user's playlists, mirroring
+// the YTM app's Library surfaces.
+import 'package:zenmusic/desktop/ytmusic/ytm_account_section.dart';
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -51,11 +55,35 @@ class _HomePageState extends State<_HomePage> {
   final GlobalKey<SpotifyHomeSectionState> _spotifySectionKey =
       GlobalKey<SpotifyHomeSectionState>();
 
+  // SP-68: same hook for the YouTube Music account shelves.
+  final GlobalKey<YtmAccountSectionState> _ytmSectionKey =
+      GlobalKey<YtmAccountSectionState>();
+
   @override
   void initState() {
     super.initState();
     _scrollController = ScrollController();
     _scrollController.addListener(_scrollListener);
+    // SP-62: when a YouTube Music account connects (settings login), the
+    // feed re-fetches so taste-based shelves (Quick picks, Listen again,
+    // Mixed for you) appear without an app restart.
+    YtmAuth.instance.loggedIn.addListener(_onYtmAuthChanged);
+  }
+
+  void _onYtmAuthChanged() {
+    if (!mounted) return;
+    // SP-65: re-fetch on login AND logout — the feed follows the session in
+    // both directions without a restart. When a session is invalidated
+    // server-side (YtmAuth.sessionRejected), the public feed returns by
+    // itself instead of the page staying broken.
+    context.read<HomeCubit>().fetch();
+  }
+
+  @override
+  void dispose() {
+    YtmAuth.instance.loggedIn.removeListener(_onYtmAuthChanged);
+    _scrollController.dispose();
+    super.dispose();
   }
 
   // PORT: Echo's _checkFirstLaunch/_showSupportDialog removed — see header.
@@ -127,6 +155,7 @@ class _HomePageState extends State<_HomePage> {
           // section; its cubit re-fetches only when a session is active.
           onRefresh: () async {
             _spotifySectionKey.currentState?.reload();
+            _ytmSectionKey.currentState?.reload();
             await context.read<HomeCubit>().refresh();
           },
           child: BlocBuilder<HomeCubit, HomeState>(
@@ -161,6 +190,11 @@ class _HomePageState extends State<_HomePage> {
                             // connect banner; failures never touch the
                             // YT feed below.
                             SpotifyHomeSection(key: _spotifySectionKey),
+                            // SP-68: the signed-in YTM account — Listen
+                            // again / Liked music / Your playlists. Slim
+                            // connect banner when logged out; silent per-
+                            // tier failures never touch the feed below.
+                            YtmAccountSection(key: _ytmSectionKey),
                             Column(
                               children: [
                                 ...state.sections.map((section) {

@@ -12,9 +12,12 @@
 import 'dart:core';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../client.dart';
 
 import '../helpers.dart';
+import '../ytm_auth.dart';
 import 'utils.dart';
 
 mixin BrowsingMixin on YTClient {
@@ -226,6 +229,9 @@ mixin BrowsingMixin on YTClient {
 
   Future addYoutubeHistory(String videoId) async {
     try {
+      // SP-71: only worth a round-trip when an account is connected — an
+      // anonymous ping attributes to nobody and just burns a request.
+      if (!YtmAuth.instance.loggedIn.value) return;
       signatureTimestamp = signatureTimestamp ?? getDatestamp() - 1;
       Map<String, dynamic> body = {};
       body['playbackContext'] = {
@@ -243,7 +249,12 @@ mixin BrowsingMixin on YTClient {
       if (tracking is Map) {
         baseUrl = tracking['videostatsPlaybackUrl']?['baseUrl'];
       }
-      if (baseUrl is! String || baseUrl.isEmpty) return;
+      if (baseUrl is! String || baseUrl.isEmpty) {
+        // SP-71: say WHY nothing was recorded — the old silent bail made
+        // "Listen again stays empty" undiagnosable from a run log.
+        debugPrint('[ytm-history] no playbackTracking for $videoId');
+        return;
+      }
       String url = baseUrl;
       const String cpna =
           "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
@@ -258,7 +269,10 @@ mixin BrowsingMixin on YTClient {
       params.forEach((k, v) {
         url += '&$k=$v';
       });
-      await sendGetRequest(url, headers);
+      // SP-71: one visible line per recorded play — the next run log must
+      // prove that in-app listening actually lands in the account history.
+      final res = await sendGetRequest(url, headers);
+      debugPrint('[ytm-history] recorded $videoId (HTTP ${res.statusCode})');
     } catch (e) {
       // History is best-effort telemetry: never let it crash playback.
       print('[addYoutubeHistory] skipped: $e');

@@ -202,29 +202,39 @@ class SpotifyHomeFeed {
       return _accountCache;
     }
     try {
-      final r = await _client
-          .get(
-        Uri.parse('https://api.spotify.com/v1/me'),
-        headers: {
-          'authorization': 'Bearer $token',
-          'accept': 'application/json',
-          'user-agent': SpotifyConfig.userAgent,
-        },
-      )
-          .timeout(const Duration(seconds: 12));
-      if (r.statusCode < 200 || r.statusCode >= 300) {
+      var (status, body) = await _meCall(token);
+      // SP-70: 401 is the stale-token signature, not a rate limit — re-mint
+      // once and retry BEFORE the session-wide kill switch. The old code
+      // disabled /v1/me for the whole session on the first stale token,
+      // which read as "Spotify gone" after a restart. 429 (Spotify
+      // rate-limiting the Web API for Web-Player tokens) and every other
+      // code keep the one-shot-per-session rule.
+      if (status == 401) {
+        SpotifyAuth.instance.invalidateAccessToken();
+        final fresh = await SpotifyAuth.instance.getAccessToken(force: true);
+        if (fresh != null && fresh != token) {
+          final retry = await _meCall(fresh);
+          status = retry.$1;
+          body = retry.$2;
+          if (status >= 200 && status < 300) _log('me recovered after re-mint');
+        } else {
+          _log('me 401 with no recoverable session: '
+              '${SpotifyAuth.instance.lastError}');
+        }
+      }
+      if (status < 200 || status >= 300) {
         _meDisabled = true; // never retry this session (429 etc.)
-        if (r.statusCode == 429) {
+        if (status == 429) {
           _log('me HTTP 429 — Spotify rate-limits the Web API for '
               'Web-Player tokens. Extras (avatar/plan/country) are '
               'skipped for this session; nothing else needs it.');
         } else {
-          _log('me HTTP ${r.statusCode}: ${_short(r.body)} '
+          _log('me HTTP $status: ${_short(body)} '
               '(extras skipped for this session)');
         }
         return _accountCache;
       }
-      final me = jsonDecode(r.body) as Map<String, dynamic>;
+      final me = jsonDecode(body) as Map<String, dynamic>;
       final images = me['images'] as List? ?? const [];
       final account = <String, dynamic>{
         'display_name': me['display_name']?.toString() ?? '',
@@ -246,6 +256,22 @@ class SpotifyHomeFeed {
       _log('me error: $e (extras skipped for this session)');
       return _accountCache;
     }
+  }
+
+  /// SP-70: one GET /v1/me with a given bearer — (statusCode, body). The
+  /// 401-retry in [accountDetails] reuses this for both attempts.
+  Future<(int, String)> _meCall(String bearer) async {
+    final r = await _client
+        .get(
+      Uri.parse('https://api.spotify.com/v1/me'),
+      headers: {
+        'authorization': 'Bearer $bearer',
+        'accept': 'application/json',
+        'user-agent': SpotifyConfig.userAgent,
+      },
+    )
+        .timeout(const Duration(seconds: 12));
+    return (r.statusCode, r.body);
   }
 
   // ── 2. editorial playlists via oEmbed (public, no auth) ──────────

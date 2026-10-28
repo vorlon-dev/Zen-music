@@ -44,18 +44,62 @@ class SpotifyLibrary {
 
   Future<Map<String, dynamic>?> _post(
       Map<String, dynamic> payload) async {
+    final clientBefore = await SpotifyAuth.instance.getClientToken();
+    final first = await _postAttempt(payload, clientBefore);
+    // SP-70: HTTP 401 = the Bearer in hand is dead on the server (aged
+    // token-only session, revoked credential) — NOT a query problem. Drop
+    // the token, re-mint, and give the query one more life before it is
+    // allowed to look like an empty shelf. The old code just logged and
+    // returned null, so one stale token quietly wiped the whole signed-in
+    // home/library for the rest of the session (the "[spotify-lib]
+    // pathfinder HTTP 401" flood in the field log).
+    // SP-72: a 401 can ALSO mean the CLIENT-TOKEN is dead — the partner
+    // API answers an unbound client-token with the same
+    // "Missing/invalid/expired access token" body (field log: fresh
+    // Android sign-in, Bearer minting fine, every pathfinder call
+    // 401-ing because ONE transient client-token mint failure had
+    // permanently downgraded the session to the captured constant). Drop
+    // both credentials; retry when either actually moved.
+    if (first.$2 != 401) return first.$1;
+    SpotifyAuth.instance.notePathfinderAuthRejected();
+    SpotifyAuth.instance.invalidateAccessToken();
+    final fresh = await SpotifyAuth.instance.getAccessToken(force: true);
+    final clientAfter = await SpotifyAuth.instance.getClientToken();
+    final tokenMoved = fresh != null && fresh != first.$3;
+    final clientMoved = clientAfter != clientBefore;
+    if (!tokenMoved && !clientMoved) {
+      _log('no usable session after 401: '
+          '${SpotifyAuth.instance.lastError ?? 're-mint kept the held token'}');
+      return first.$1;
+    }
+    final second = await _postAttempt(payload, clientAfter);
+    if (second.$2 != 200) {
+      _log('pathfinder retry after re-mint -> HTTP ${second.$2}');
+    }
+    return second.$1;
+  }
+
+  /// One pathfinder round-trip. Returns (decoded body | null, statusCode,
+  /// token used) so the retry wrapper above can tell a dead token from a
+  /// dead session. 0 = no request happened (no session / network error).
+  /// SP-72: [clientToken] is the credential the retry wrapper already
+  /// holds, so the recovery path can observe the client-token moving
+  /// between attempts instead of silently re-reading the same cache.
+  Future<(Map<String, dynamic>?, int, String)> _postAttempt(
+      Map<String, dynamic> payload,
+      [String? clientToken]) async {
     final token = await SpotifyAuth.instance.getAccessToken();
     if (token == null) {
       _log('no session: ${SpotifyAuth.instance.lastError}');
-      return null;
+      return (null, 0, '');
     }
-    final clientToken = await SpotifyAuth.instance.getClientToken();
+    final ct = clientToken ?? await SpotifyAuth.instance.getClientToken();
     try {
       final r = await _client
           .post(Uri.parse(SpotifyConfig.pathfinderUrl),
           headers: {
             'authorization': 'Bearer $token',
-            'client-token': clientToken,
+            'client-token': ct,
             'content-type': 'application/json;charset=UTF-8',
             'app-platform': SpotifyConfig.appPlatform,
             'spotify-app-version': SpotifyConfig.spotifyAppVersion,
@@ -67,17 +111,17 @@ class SpotifyLibrary {
           .timeout(const Duration(seconds: 20));
       if (r.statusCode < 200 || r.statusCode >= 300) {
         _log('pathfinder HTTP ${r.statusCode}: ${_short(r.body)}');
-        return null;
+        return (null, r.statusCode, token);
       }
       final root = jsonDecode(r.body) as Map<String, dynamic>;
       final errs = root['errors'];
       if (errs is List && errs.isNotEmpty) {
         _log('errors: ${_short(jsonEncode(errs), 400)}');
       }
-      return root;
+      return (root, r.statusCode, token);
     } catch (e) {
       _log('pathfinder error $e');
-      return null;
+      return (null, 0, token);
     }
   }
 
@@ -173,9 +217,11 @@ class SpotifyLibrary {
     return out;
   }
 
-  /// User's liked songs via libraryV3 with the LikedSongs filter.
-  /// Diagnostic build: dumps the first item so we can pin the exact wrapper
-  /// shape (the LikedSongs node is a Playlist wrapper, not a normal one).
+  /// User's liked songs. Primary source stays libraryV3 with the
+  /// LikedSongs filter; SP-71 adds the official Web API fallback because
+  /// libraryV3 answers with an empty items node for many accounts in the
+  /// field ("userLikedSongs: 0 items from libraryV3") even while every
+  /// other libraryV3 filter works.
   Future<List<Map<String, dynamic>>> userLikedSongs(
       {int limit = 100, int offset = 0}) async {
     final data = await _post(_op('libraryV3', SpotifyConfig.libraryHash, {
@@ -186,22 +232,136 @@ class SpotifyLibrary {
       'limit': limit,
       'offset': offset,
     }));
-    if (data == null) return [];
-    final items = data['data']?['me']?['libraryV3']?['items'] as List? ?? [];
-    _log('userLikedSongs: ${items.length} items from libraryV3');
-    if (items.isNotEmpty) {
-      _log('userLikedSongs first wrap raw (1400 chars): '
-          '${_short(jsonEncode(items.first), 1400)}');
+    if (data != null) {
+      final items =
+          data['data']?['me']?['libraryV3']?['items'] as List? ?? [];
+      _log('userLikedSongs: ${items.length} items from libraryV3');
+      final songs = <Map<String, dynamic>>[];
+      for (final wrap in items) {
+        final s = _trackFromPathfinder(wrap);
+        if (s != null) songs.add(s);
+      }
+      if (songs.isNotEmpty) {
+        _log('userLikedSongs: ${songs.length} parsed');
+        return songs;
+      }
     }
-    // For now, return whatever we can extract as tracks from the response.
-    // If the LikedSongs node embeds a playlist with items, we'll get them.
-    final songs = <Map<String, dynamic>>[];
-    for (final wrap in items) {
-      final s = _trackFromPathfinder(wrap);
-      if (s != null) songs.add(s);
+    // SP-71: libraryV3 came up empty (or failed) — the official Web API
+    // /v1/me/tracks endpoint is what the Spotify web player itself uses
+    // for the Liked Songs page, and the minted Bearer carries
+    // user-library-read.
+    final viaRest = await _likedSongsViaRest(limit, offset);
+    _log('userLikedSongs: ${viaRest.length} via REST me/tracks');
+    return viaRest;
+  }
+
+  /// SP-71: liked songs from the official Web API. Paginates 50 at a time
+  /// (the API max) until [limit] is reached; 401 re-mints the token once,
+  /// 403 means the scope is genuinely absent (logged, then empty result).
+  Future<List<Map<String, dynamic>>> _likedSongsViaRest(
+      int limit, int offset) async {
+    var token = await SpotifyAuth.instance.getAccessToken();
+    if (token == null) {
+      _log('liked REST: no token — ${SpotifyAuth.instance.lastError}');
+      return [];
     }
-    _log('userLikedSongs: ${songs.length} parsed');
-    return songs;
+    final out = <Map<String, dynamic>>[];
+    var pageOffset = offset;
+    var reMinted = false;
+    // Hard cap: 6 pages = 300 rows, keeps the Library screen snappy.
+    while (out.length < limit && pageOffset < offset + 300) {
+      try {
+        final r = await _client
+            .get(
+                Uri.parse('${SpotifyConfig.restApiBase}/me/tracks'
+                    '?limit=50&offset=$pageOffset'),
+                headers: {
+                  'authorization': 'Bearer $token',
+                  'accept': 'application/json',
+                  'user-agent': SpotifyConfig.userAgent,
+                })
+            .timeout(const Duration(seconds: 20));
+        if (r.statusCode == 401 && !reMinted) {
+          reMinted = true;
+          SpotifyAuth.instance.invalidateAccessToken();
+          final fresh = await SpotifyAuth.instance.getAccessToken(force: true);
+          if (fresh == null) {
+            _log('liked REST: re-mint failed — '
+                '${SpotifyAuth.instance.lastError}');
+            break;
+          }
+          token = fresh;
+          continue;
+        }
+        if (r.statusCode == 403) {
+          _log('liked REST 403 — token lacks user-library-read');
+          break;
+        }
+        if (r.statusCode < 200 || r.statusCode >= 300) {
+          _log('liked REST HTTP ${r.statusCode}: ${_short(r.body)}');
+          break;
+        }
+        final body = jsonDecode(r.body) as Map<String, dynamic>;
+        final items = body['items'] as List? ?? const [];
+        for (final it in items) {
+          final t = _trackFromRest(it);
+          if (t != null) out.add(t);
+        }
+        final total = (body['total'] as num?)?.toInt() ?? 0;
+        pageOffset += items.length;
+        if (items.isEmpty || pageOffset >= total) break;
+      } catch (e) {
+        _log('liked REST error: $e');
+        break;
+      }
+    }
+    return out;
+  }
+
+  /// SP-71: official Web API saved-track object -> the standard track map
+  /// every other parser in this file emits (same keys as _trackFromMap).
+  Map<String, dynamic>? _trackFromRest(dynamic item) {
+    final track = (item as Map?)?['track'];
+    if (track is! Map || track['is_local'] == true) return null;
+    final id = track['id']?.toString() ?? '';
+    final name = track['name']?.toString() ?? '';
+    if (id.isEmpty || name.isEmpty) return null;
+
+    final artistNames = <String>[];
+    for (final a in (track['artists'] as List? ?? const [])) {
+      final n = (a as Map?)?['name']?.toString() ?? '';
+      if (n.isNotEmpty) artistNames.add(n);
+    }
+
+    final album = track['album'] as Map?;
+    String cover = '';
+    final images = album?['images'] as List? ?? const [];
+    for (final img in images) {
+      if (img is! Map) continue;
+      final h = (img['height'] as num?)?.toInt() ?? 0;
+      if (h >= 300 && h <= 640) {
+        cover = img['url']?.toString() ?? '';
+        break;
+      }
+    }
+    if (cover.isEmpty && images.isNotEmpty) {
+      cover = (images.first as Map?)?['url']?.toString() ?? '';
+    }
+
+    return {
+      'videoId': id,
+      'title': name,
+      'artist': artistNames.isEmpty
+          ? 'Unknown Artist'
+          : artistNames.join(', '),
+      'artists': [for (final n in artistNames) {'name': n}],
+      'thumbnails': [{'url': cover}],
+      'duration':
+          Duration(milliseconds: (track['duration_ms'] as num?)?.toInt() ?? 0),
+      'album': {'name': album?['name']?.toString() ?? ''},
+      'spotifyUri': track['uri']?.toString() ?? 'spotify:track:$id',
+      'type': 'SPOTIFY',
+    };
   }
 
   /// Fetches tracks of a NORMAL playlist. Pass the full uri

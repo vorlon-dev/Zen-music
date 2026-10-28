@@ -176,7 +176,7 @@ class _ConnectBanner extends StatelessWidget {
                             fontSize: 14, fontWeight: FontWeight.w700)),
                     Text(
                         'Your Spotify home — recents, shelves and charts '
-                        '— will show up here.',
+                            '— will show up here.',
                         style: TextStyle(fontSize: 12)),
                   ],
                 ),
@@ -300,8 +300,8 @@ class _SpotifyContentState extends State<_SpotifyContent> {
             visible = _filterIndex == 1
                 ? all.where((s) => !_isPodcastSection(s)).toList()
                 : _filterIndex == 2
-                    ? all.where(_isPodcastSection).toList()
-                    : all;
+                ? all.where(_isPodcastSection).toList()
+                : all;
           }
 
           final bool contentEmpty = state.likedSongs.isEmpty &&
@@ -347,7 +347,7 @@ class _SpotifyContentState extends State<_SpotifyContent> {
                 if (visible.isEmpty && _filterIndex == 2)
                   const _SlimRow(
                       label:
-                          'No podcasts in your Spotify home right now.'),
+                      'No podcasts in your Spotify home right now.'),
               ] else ...[
                 // FALLBACK (SP-36/37/38 layout): the `home` query came
                 // back empty — account header + trending + library.
@@ -428,7 +428,7 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String initial =
-        (userName.isNotEmpty ? userName[0] : 'S').toUpperCase();
+    (userName.isNotEmpty ? userName[0] : 'S').toUpperCase();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
       child: Row(
@@ -444,11 +444,11 @@ class _TopBar extends StatelessWidget {
                   : CachedNetworkImageProvider(avatarUrl),
               child: avatarUrl.isEmpty
                   ? Text(initial,
-                      style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color:
-                              Theme.of(context).colorScheme.onPrimary))
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color:
+                      Theme.of(context).colorScheme.onPrimary))
                   : null,
             ),
           ),
@@ -546,10 +546,10 @@ class _QuickGrid extends StatelessWidget {
           Expanded(
             child: (i + 1 < n)
                 ? _QuickPlayCard(
-                    track: recent[i + 1],
-                    onTap: () => GetIt.I<MediaPlayer>()
-                        .playFromSection(recent, i + 1),
-                  )
+              track: recent[i + 1],
+              onTap: () => GetIt.I<MediaPlayer>()
+                  .playFromSection(recent, i + 1),
+            )
                 : const SizedBox.shrink(),
           ),
         ],
@@ -574,9 +574,9 @@ class _QuickPlayCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String thumb =
-        (track['thumbnails'] as List?)?.isNotEmpty == true
-            ? (track['thumbnails'].first as Map)['url']?.toString() ?? ''
-            : '';
+    (track['thumbnails'] as List?)?.isNotEmpty == true
+        ? (track['thumbnails'].first as Map)['url']?.toString() ?? ''
+        : '';
     return AdaptiveInkWell(
       borderRadius: BorderRadius.circular(4),
       onTap: onTap,
@@ -595,17 +595,17 @@ class _QuickPlayCard extends StatelessWidget {
               ),
               child: thumb.isEmpty
                   ? Container(
-                      width: 52,
-                      height: 52,
-                      color: Colors.grey.withValues(alpha: 0.14),
-                      child: Icon(Icons.album,
-                          size: 24,
-                          color: Theme.of(context).colorScheme.primary))
+                  width: 52,
+                  height: 52,
+                  color: Colors.grey.withValues(alpha: 0.14),
+                  child: Icon(Icons.album,
+                      size: 24,
+                      color: Theme.of(context).colorScheme.primary))
                   : CachedNetworkImage(
-                      imageUrl: thumb,
-                      width: 52,
-                      height: 52,
-                      fit: BoxFit.cover),
+                  imageUrl: thumb,
+                  width: 52,
+                  height: 52,
+                  fit: BoxFit.cover),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -673,12 +673,12 @@ class _RecentShelf extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             itemCount: recent.length,
             separatorBuilder: (BuildContext context, int index) =>
-                const SizedBox(width: 10),
+            const SizedBox(width: 10),
             itemBuilder: (BuildContext context, int index) =>
                 _RecentCard(
-              track: recent[index],
-              onTap: () => onPlay(index),
-            ),
+                  track: recent[index],
+                  onTap: () => onPlay(index),
+                ),
           ),
         ),
       ],
@@ -694,9 +694,9 @@ class _RecentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String thumb =
-        (track['thumbnails'] as List?)?.isNotEmpty == true
-            ? (track['thumbnails'].first as Map)['url']?.toString() ?? ''
-            : '';
+    (track['thumbnails'] as List?)?.isNotEmpty == true
+        ? (track['thumbnails'].first as Map)['url']?.toString() ?? ''
+        : '';
     return AdaptiveInkWell(
       borderRadius: BorderRadius.circular(6),
       onTap: onTap,
@@ -716,38 +716,38 @@ class _RecentCard extends StatelessWidget {
               ),
               child: thumb.isEmpty
                   ? Icon(Icons.album,
-                      size: 36,
-                      color: Theme.of(context).colorScheme.primary)
+                  size: 36,
+                  color: Theme.of(context).colorScheme.primary)
                   : Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: CachedNetworkImage(
-                              imageUrl: thumb,
-                              fit: BoxFit.cover,
-                              width: 164,
-                              height: 164),
-                        ),
-                        Positioned(
-                          right: 6,
-                          bottom: 6,
-                          child: Container(
-                            width: 34,
-                            height: 34,
-                            decoration: BoxDecoration(
-                              color:
-                                  Theme.of(context).colorScheme.primary,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(Icons.play_arrow,
-                                size: 20,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onPrimary),
-                          ),
-                        ),
-                      ],
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: CachedNetworkImage(
+                        imageUrl: thumb,
+                        fit: BoxFit.cover,
+                        width: 164,
+                        height: 164),
+                  ),
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color:
+                        Theme.of(context).colorScheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.play_arrow,
+                          size: 20,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onPrimary),
                     ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 6),
             Text(track['title'] ?? '',
@@ -809,7 +809,7 @@ class _HomeShelf extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             itemCount: items.length,
             separatorBuilder: (BuildContext context, int index) =>
-                const SizedBox(width: 10),
+            const SizedBox(width: 10),
             itemBuilder: (BuildContext context, int index) {
               final item = items[index];
               if (_isArtistShelf ||
@@ -841,9 +841,9 @@ class _SquareCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String thumb =
-        (item['thumbnails'] as List?)?.isNotEmpty == true
-            ? (item['thumbnails'].first as Map)['url']?.toString() ?? ''
-            : '';
+    (item['thumbnails'] as List?)?.isNotEmpty == true
+        ? (item['thumbnails'].first as Map)['url']?.toString() ?? ''
+        : '';
     return AdaptiveInkWell(
       borderRadius: BorderRadius.circular(6),
       onTap: onTap,
@@ -861,34 +861,34 @@ class _SquareCard extends StatelessWidget {
               ),
               child: thumb.isEmpty
                   ? Icon(Icons.album,
-                      size: 48,
-                      color: Theme.of(context).hintColor)
+                  size: 48,
+                  color: Theme.of(context).hintColor)
                   : Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: CachedNetworkImage(
-                              imageUrl: thumb,
-                              fit: BoxFit.cover,
-                              width: 164,
-                              height: 164),
-                        ),
-                        Positioned(
-                          right: 8,
-                          bottom: 8,
-                          child: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.65),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.play_arrow,
-                                size: 20, color: Colors.white),
-                          ),
-                        ),
-                      ],
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: CachedNetworkImage(
+                        imageUrl: thumb,
+                        fit: BoxFit.cover,
+                        width: 164,
+                        height: 164),
+                  ),
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.play_arrow,
+                          size: 20, color: Colors.white),
                     ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 6),
             Text(item['title']?.toString() ?? '',
@@ -919,9 +919,9 @@ class _ArtistCircleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String thumb =
-        (item['thumbnails'] as List?)?.isNotEmpty == true
-            ? (item['thumbnails'].first as Map)['url']?.toString() ?? ''
-            : '';
+    (item['thumbnails'] as List?)?.isNotEmpty == true
+        ? (item['thumbnails'].first as Map)['url']?.toString() ?? ''
+        : '';
     return AdaptiveInkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: onTap,
@@ -938,14 +938,14 @@ class _ArtistCircleCard extends StatelessWidget {
               ),
               child: thumb.isEmpty
                   ? Icon(Icons.person,
-                      size: 44, color: Theme.of(context).hintColor)
+                  size: 44, color: Theme.of(context).hintColor)
                   : ClipOval(
-                      child: CachedNetworkImage(
-                          imageUrl: thumb,
-                          fit: BoxFit.cover,
-                          width: 105,
-                          height: 105),
-                    ),
+                child: CachedNetworkImage(
+                    imageUrl: thumb,
+                    fit: BoxFit.cover,
+                    width: 105,
+                    height: 105),
+              ),
             ),
             const SizedBox(height: 8),
             Text(item['title']?.toString() ?? '',
@@ -994,7 +994,7 @@ class _HomeShimmer extends StatelessWidget {
                     scrollDirection: Axis.horizontal,
                     itemCount: 4,
                     separatorBuilder: (BuildContext context, int index) =>
-                        const SizedBox(width: 14),
+                    const SizedBox(width: 14),
                     itemBuilder: (BuildContext context, int index) =>
                         Container(
                             width: 150,
@@ -1048,8 +1048,8 @@ class _Header extends StatelessWidget {
                 : CachedNetworkImageProvider(avatar),
             child: avatar.isEmpty
                 ? Icon(Icons.library_music,
-                    size: 16,
-                    color: Theme.of(context).colorScheme.onPrimary)
+                size: 16,
+                color: Theme.of(context).colorScheme.onPrimary)
                 : null,
           ),
           const SizedBox(width: 10),
@@ -1200,7 +1200,7 @@ class _HotTracksRow extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             itemCount: count,
             separatorBuilder: (BuildContext context, int index) =>
-                const SizedBox(width: 12),
+            const SizedBox(width: 12),
             itemBuilder: (BuildContext context, int index) {
               final Map<String, dynamic> track = chart.tracks[index];
               return _TrackCard(
@@ -1228,9 +1228,9 @@ class _TrackCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String thumb =
-        (track['thumbnails'] as List?)?.isNotEmpty == true
-            ? (track['thumbnails'].first as Map)['url']?.toString() ?? ''
-            : '';
+    (track['thumbnails'] as List?)?.isNotEmpty == true
+        ? (track['thumbnails'].first as Map)['url']?.toString() ?? ''
+        : '';
     return AdaptiveInkWell(
       borderRadius: BorderRadius.circular(10),
       onTap: onTap,
@@ -1249,35 +1249,35 @@ class _TrackCard extends StatelessWidget {
               child: thumb.isEmpty
                   ? const Icon(Icons.music_note, size: 36)
                   : Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: CachedNetworkImage(
-                              imageUrl: thumb,
-                              fit: BoxFit.cover,
-                              width: 136,
-                              height: 136),
-                        ),
-                        Positioned(
-                          right: 6,
-                          bottom: 6,
-                          child: Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color:
-                                  Theme.of(context).colorScheme.primary,
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                            child: Icon(Icons.play_arrow,
-                                size: 20,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onPrimary),
-                          ),
-                        ),
-                      ],
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: CachedNetworkImage(
+                        imageUrl: thumb,
+                        fit: BoxFit.cover,
+                        width: 136,
+                        height: 136),
+                  ),
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color:
+                        Theme.of(context).colorScheme.primary,
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: Icon(Icons.play_arrow,
+                          size: 20,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onPrimary),
                     ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 6),
             Text(track['title'] ?? '',
@@ -1319,7 +1319,7 @@ class _ChartsShelf extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             itemCount: charts.length,
             separatorBuilder: (BuildContext context, int index) =>
-                const SizedBox(width: 12),
+            const SizedBox(width: 12),
             itemBuilder: (BuildContext context, int index) =>
                 _ChartCard(chart: charts[index]),
           ),
@@ -1350,71 +1350,71 @@ class _ChartCard extends StatelessWidget {
         child: chart.coverUrl.isEmpty
             ? const Icon(Icons.leaderboard, size: 40)
             : Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: CachedNetworkImage(
+                  imageUrl: chart.coverUrl,
+                  fit: BoxFit.cover,
+                  width: 168,
+                  height: 168),
+            ),
+            // Dark scrim so the white text reads on any art.
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Colors.black87],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 10,
+              right: 10,
+              bottom: 10,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: CachedNetworkImage(
-                        imageUrl: chart.coverUrl,
-                        fit: BoxFit.cover,
-                        width: 168,
-                        height: 168),
-                  ),
-                  // Dark scrim so the white text reads on any art.
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        gradient: const LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Colors.black87],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 10,
-                    right: 10,
-                    bottom: 10,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(chart.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white)),
-                        if (chart.topLine.isNotEmpty)
-                          Text('#1 ${chart.topLine}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white
-                                      .withValues(alpha: 0.8))),
-                      ],
-                    ),
-                  ),
-                  Positioned(
-                    top: 8,
-                    left: 8,
-                    child: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primary,
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: Icon(Icons.play_arrow,
-                          size: 20,
-                          color: Theme.of(context).colorScheme.onPrimary),
-                    ),
-                  ),
+                  Text(chart.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white)),
+                  if (chart.topLine.isNotEmpty)
+                    Text('#1 ${chart.topLine}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.white
+                                .withValues(alpha: 0.8))),
                 ],
               ),
+            ),
+            Positioned(
+              top: 8,
+              left: 8,
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(Icons.play_arrow,
+                    size: 20,
+                    color: Theme.of(context).colorScheme.onPrimary),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1437,7 +1437,7 @@ class _LikedSongsCard extends StatelessWidget {
         },
         child: Container(
           padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             gradient: const LinearGradient(
@@ -1463,7 +1463,7 @@ class _LikedSongsCard extends StatelessWidget {
                         style: TextStyle(
                             fontSize: 12,
                             color:
-                                Colors.white.withValues(alpha: 0.75))),
+                            Colors.white.withValues(alpha: 0.75))),
                   ],
                 ),
               ),
@@ -1501,13 +1501,13 @@ class _PlaylistShelf extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             itemCount: playlists.length,
             separatorBuilder: (BuildContext context, int index) =>
-                const SizedBox(width: 12),
+            const SizedBox(width: 12),
             itemBuilder: (BuildContext context, int index) {
               final Map<String, dynamic> p = playlists[index];
               final String thumb =
-                  (p['thumbnails'] as List?)?.isNotEmpty == true
-                      ? (p['thumbnails'].first as Map)['url']?.toString() ?? ''
-                      : '';
+              (p['thumbnails'] as List?)?.isNotEmpty == true
+                  ? (p['thumbnails'].first as Map)['url']?.toString() ?? ''
+                  : '';
               return AdaptiveInkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: () {
@@ -1533,10 +1533,10 @@ class _PlaylistShelf extends StatelessWidget {
                         child: thumb.isEmpty
                             ? const Icon(Icons.queue_music, size: 36)
                             : ClipRRect(
-                                borderRadius: BorderRadius.circular(10),
-                                child: CachedNetworkImage(
-                                    imageUrl: thumb, fit: BoxFit.cover),
-                              ),
+                          borderRadius: BorderRadius.circular(10),
+                          child: CachedNetworkImage(
+                              imageUrl: thumb, fit: BoxFit.cover),
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(p['title'] ?? '',

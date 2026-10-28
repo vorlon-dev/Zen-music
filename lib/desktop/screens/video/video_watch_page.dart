@@ -1,52 +1,5 @@
-// ZenMusic — YouTube-style video watch page (Desktop; YtVideoEngine extraction).
-//
-// SP-12 — YouTube desktop video engine:
-//  * Data source swapped from InnertubexBridge (Android-native extraction;
-//    its platform channel does not exist on Windows) to
-//    lib/desktop/services/yt_video_engine.dart — the SAME proven pipeline
-//    that powers desktop YT audio: vendored youtube_explode_dart fork,
-//    client chain visionOs → ios → android, per-client header replay.
-//  * videoUrl / audioUrl are LOCAL loopback proxy URLs; the engine adds the
-//    minted-client headers upstream and re-resolves expired URLs on every
-//    request. Muxed (≤360p) needs no audio track; adaptive plays the audio
-//    URL as mpv's external track in the same Player (one clock).
-//  * libmpv (media_kit) is the C engine doing demux/decode/render —
-//    media_kit_libs_windows_video is already compiled in (Route B swap).
-//  * UI, gestures, quality/speed sheets, related list, autoplay: unchanged
-//    from the previous version of this file.
-//
-// SP-12b — A/V SYNC FIX ("audio plays separate from video"):
-//  * Old: open(video) → setAudioTrack(AudioTrack.uri(audio)) → play().
-//    That maps to mpv's `audio-add` on an ALREADY-PRIMED video demuxer;
-//    the audio track then opens/buffers/seeks on its own timeline, which
-//    surfaces as audio and video running "separately".
-//  * New: mpv option `audio-files` is set BEFORE open(). mpv now opens
-//    BOTH demuxers together in one session and interleaves them with
-//    proper A/V sync from t=0 — the same mechanism as
-//    `mpv video.webm --audio-file=audio.webm` (standard yt-dlp playback).
-//    Seeks and `start:` offsets apply to both tracks. For muxed playback
-//    the option is set to '' (cleared) so no stale track lingers.
-//
-// ONE PLAYER, NO SYNC. The extractor returns separate video and audio URLs.
-// media_kit (libmpv) opens the video and attaches the audio URL as an
-// external track in the same player, so both share one clock.
-//
-// pubspec.yaml:
-//   media_kit: ^1.1.11
-//   media_kit_video: ^1.2.5
-//   media_kit_libs_android_video: ^1.3.6   (Android)
-//   media_kit_libs_windows_video: ^1.0.11  (Windows — Route B swap)
-//
-// SPEED
-//  * Stream URL, related list and quality list are requested in parallel.
-//  * The thumbnail shows instantly as a poster until the first frame.
-//  * Stream URLs are cached; the first "Up next" video is prefetched.
-//  * One Player is reused for every video (no re-create, no black flash).
-//  * Starts at _kStartHeight; the chosen quality sticks for later videos.
-//  * Scrubbing seeks once, on release.
-
 import 'dart:async';
-import 'dart:ui' show FontFeature;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -59,9 +12,15 @@ import 'package:zenmusic/desktop/core/widgets/section_item.dart';
 import 'package:zenmusic/desktop/services/yt_video_engine.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 
+// ─────────────────────────────────────────────────────────── design tokens
 const Color _kRed = Color(0xFFFF0033);
-const Color _kSurface = Color(0xFF181818);
+const Color _kBg = Color(0xFF0A0A0B);
+const Color _kSurface = Color(0xFF151517);
+const Color _kSurfaceHi = Color(0xFF1E1E21);
+const Color _kLine = Color(0x14FFFFFF);
+const Color _kMuted = Color(0x99FFFFFF);
 const List<double> _kSpeeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+const List<int> _kSleepOptions = [15, 30, 45, 60];
 
 /// First-frame speed knob: 360 fastest, 720 / 1080 sharper.
 const int _kStartHeight = 480;
@@ -88,6 +47,9 @@ class _StreamCache {
   }
 }
 
+String _thumb(String id) => 'https://i.ytimg.com/vi/$id/mqdefault.jpg';
+
+// ───────────────────────────────────────────────────────────────── page
 class VideoWatchPage extends StatefulWidget {
   const VideoWatchPage({super.key, required this.videoId, this.item});
   final String videoId;
@@ -101,12 +63,13 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   late String _id = widget.videoId;
   String _title = '';
   String _artist = '';
+  final List<Map<String, String>> _history = [];
 
   late final Player _p;
   late final VideoController _vc;
   final List<StreamSubscription> _subs = [];
 
-  // Live player state, as notifiers so only the widgets that need them rebuild.
+  // Live player state as notifiers: only the widgets that need them rebuild.
   final _pos = ValueNotifier<Duration>(Duration.zero);
   final _dur = ValueNotifier<Duration>(Duration.zero);
   final _bufd = ValueNotifier<Duration>(Duration.zero);
@@ -115,6 +78,8 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   final _hasFrame = ValueNotifier<bool>(false);
   final _ended = ValueNotifier<bool>(false);
   final _drag = ValueNotifier<double?>(null);
+  final _toast = ValueNotifier<String?>(null);
+  final _accent = ValueNotifier<Color>(const Color(0xFF5A1020));
 
   List<YtVideoQuality> _qualities = const [];
   int _height = _kStartHeight; // 0 = auto (best)
@@ -128,14 +93,20 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   bool _loop = false;
   bool _muted = false;
   bool _autoplay = true;
+  bool _ambient = true;
+  bool _cover = false;
   bool _advancing = false;
+  int _volume = 100;
   double _speed = 1.0;
   double _speedBeforeHold = 1.0;
   bool _holding = false;
   int _flash = 0;
+  int _sleepMin = 0;
   Offset _lastTap = Offset.zero;
   Timer? _hideTimer;
   Timer? _flashTimer;
+  Timer? _toastTimer;
+  Timer? _sleepTimer;
   int _loadToken = 0;
 
   @override
@@ -182,18 +153,24 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   // ------------------------------------------------------------- loading
 
   Future<void> _load(String id,
-      {String? title, String? artist, bool keepMeta = false}) async {
+      {String? title,
+        String? artist,
+        bool keepMeta = false,
+        bool fromHistory = false}) async {
     final token = ++_loadToken;
     _hideTimer?.cancel();
+
+    if (!fromHistory && id != _id && _title.isNotEmpty) {
+      _history.add({'id': _id, 'title': _title, 'artist': _artist});
+      if (_history.length > 30) _history.removeAt(0);
+    }
 
     // Start every slow thing at once.
     final streamF = _StreamCache.get(id, _height);
     final relatedF = YtVideoEngine.relatedSongs(id);
     final qualF = YtVideoEngine.videoQualities(id);
-    // SP-12c: defer the pause OUT of the build phase. Pausing the app
-    // player makes just_audio broadcast SequenceState synchronously, and
-    // any StreamBuilder listening to it would call setState while THIS
-    // page is still mounting ("setState() called during build").
+    _extractAmbient(id, token);
+    // SP-12c: defer the pause OUT of the build phase (setState during build).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_pauseAppAudio());
     });
@@ -239,20 +216,14 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     await _open(s, token: token);
   }
 
-  Future<void> _open(YtVideoStreams s,
-      {Duration? startAt, int? token}) async {
+  Future<void> _open(YtVideoStreams s, {Duration? startAt, int? token}) async {
     try {
       // SP-12b: mpv must learn about the external audio track BEFORE the
-      // main file is opened. `audio-files` opens BOTH demuxers in one
-      // session (proper A/V sync from t=0); setAudioTrack/AudioTrack.uri
-      // after open() maps to `audio-add`, which bolts a second demuxer
-      // onto an already-primed video — the "audio separate" bug.
-      // '' clears the option for muxed playback (no stale track).
+      // main file is opened so both demuxers start in one session.
       final platform = _p.platform;
       if (platform is NativePlayer) {
-        final ext = (s.audioUrl == null || s.audioUrl!.isEmpty)
-            ? ''
-            : s.audioUrl!;
+        final ext =
+        (s.audioUrl == null || s.audioUrl!.isEmpty) ? '' : s.audioUrl!;
         await platform.setProperty('audio-files', ext);
       }
       await _p.open(
@@ -285,6 +256,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     final s = await _StreamCache.get(_id, height);
     if (!mounted || s?.videoUrl == null) return;
     await _open(s!, startAt: at);
+    _say(height == 0 ? 'Quality: Auto' : 'Quality: ${height}p');
   }
 
   void _prefetchNext() {
@@ -300,6 +272,53 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   Future<void> _pauseAppAudio() async {
     try {
       await GetIt.I<MediaPlayer>().player.pause();
+    } catch (_) {}
+  }
+
+  /// Samples the thumbnail and derives a muted, vibrant accent used by the
+  /// ambient background. No extra packages needed.
+  Future<void> _extractAmbient(String id, int token) async {
+    try {
+      final stream = NetworkImage(_thumb(id)).resolve(ImageConfiguration.empty);
+      final done = Completer<ui.Image>();
+      late ImageStreamListener l;
+      l = ImageStreamListener((info, _) {
+        if (!done.isCompleted) done.complete(info.image);
+        stream.removeListener(l);
+      }, onError: (e, s) {
+        if (!done.isCompleted) done.completeError(e);
+        stream.removeListener(l);
+      });
+      stream.addListener(l);
+      final img = await done.future.timeout(const Duration(seconds: 8));
+      final bd = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (bd == null || !mounted || token != _loadToken) return;
+      double r = 0, g = 0, b = 0, wsum = 0;
+      final step = (img.width * img.height ~/ 1800).clamp(1, 1 << 20);
+      for (var i = 0; i < img.width * img.height; i += step) {
+        final o = i * 4;
+        final pr = bd.getUint8(o) / 255, pg = bd.getUint8(o + 1) / 255;
+        final pb = bd.getUint8(o + 2) / 255;
+        final mx = [pr, pg, pb].reduce((a, c) => a > c ? a : c);
+        final mn = [pr, pg, pb].reduce((a, c) => a < c ? a : c);
+        if (mx < 0.12) continue; // letterbox / pure black
+        final sat = mx == 0 ? 0 : (mx - mn) / mx;
+        final w = 0.15 + sat * sat * 1.6;
+        r += pr * w;
+        g += pg * w;
+        b += pb * w;
+        wsum += w;
+      }
+      if (wsum == 0) return;
+      final base = Color.fromRGBO(
+          (r / wsum * 255).round(), (g / wsum * 255).round(),
+          (b / wsum * 255).round(), 1);
+      final hsl = HSLColor.fromColor(base);
+      final tuned = hsl
+          .withSaturation(hsl.saturation.clamp(0.35, 0.8))
+          .withLightness(hsl.lightness.clamp(0.22, 0.42))
+          .toColor();
+      if (mounted && token == _loadToken) _accent.value = tuned;
     } catch (_) {}
   }
 
@@ -322,6 +341,17 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
         return;
       }
     }
+    _say('Nothing queued');
+  }
+
+  void _playPrevious() {
+    if (_pos.value.inSeconds > 4 || _history.isEmpty) {
+      _p.seek(Duration.zero);
+      return;
+    }
+    final h = _history.removeLast();
+    _load(h['id']!,
+        title: h['title'], artist: h['artist'], fromHistory: true);
   }
 
   // -------------------------------------------------------- map helpers
@@ -346,11 +376,21 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
 
   // ----------------------------------------------------------- controls
 
+  void _say(String msg) {
+    _toastTimer?.cancel();
+    _toast.value = msg;
+    _toastTimer = Timer(const Duration(milliseconds: 1100), () {
+      if (mounted) _toast.value = null;
+    });
+  }
+
   void _poke() {
     _hideTimer?.cancel();
     if (!_controls) setState(() => _controls = true);
     _hideTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && _playing.value) setState(() => _controls = false);
+      if (mounted && _playing.value && _drag.value == null) {
+        setState(() => _controls = false);
+      }
     });
   }
 
@@ -373,11 +413,15 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     _poke();
   }
 
-  void _seekBy(int seconds) {
+  void _seekBy(int seconds, {bool flash = true}) {
     var t = _pos.value + Duration(seconds: seconds);
     if (t < Duration.zero) t = Duration.zero;
     if (t > _dur.value) t = _dur.value;
     _p.seek(t);
+    if (!flash) {
+      _say('${seconds > 0 ? '+' : ''}$seconds s');
+      return;
+    }
     _flashTimer?.cancel();
     setState(() => _flash = seconds < 0 ? -1 : 1);
     _flashTimer = Timer(const Duration(milliseconds: 650), () {
@@ -388,14 +432,41 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   void _setSpeed(double s) {
     setState(() => _speed = s);
     _p.setRate(s);
+    _say(s == 1 ? 'Normal speed' : '${s}x');
   }
 
-  void _toggleLoop() => setState(() => _loop = !_loop);
+  void _toggleLoop() {
+    setState(() => _loop = !_loop);
+    _say(_loop ? 'Loop on' : 'Loop off');
+  }
 
   void _toggleMute() {
     setState(() => _muted = !_muted);
-    _p.setVolume(_muted ? 0 : 100);
+    _p.setVolume(_muted ? 0 : _volume.toDouble());
+    _say(_muted ? 'Muted' : 'Volume $_volume%');
     _poke();
+  }
+
+  void _nudgeVolume(int delta) {
+    _volume = (_volume + delta).clamp(0, 100);
+    _muted = _volume == 0;
+    _p.setVolume(_volume.toDouble());
+    setState(() {});
+    _say('Volume $_volume%');
+  }
+
+  void _setSleep(int minutes) {
+    _sleepTimer?.cancel();
+    setState(() => _sleepMin = minutes);
+    if (minutes > 0) {
+      _sleepTimer = Timer(Duration(minutes: minutes), () {
+        _p.pause();
+        if (mounted) setState(() => _sleepMin = 0);
+      });
+      _say('Sleep in $minutes min');
+    } else {
+      _say('Sleep timer off');
+    }
   }
 
   Future<void> _toggleFullscreen() async {
@@ -409,9 +480,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       ]);
     } else {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      await SystemChrome.setPreferredOrientations(const [
-        DeviceOrientation.portraitUp,
-      ]);
+      await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     }
     _poke();
   }
@@ -419,11 +488,16 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   void _copyLink() {
     Clipboard.setData(
         ClipboardData(text: 'https://music.youtube.com/watch?v=$_id'));
+    HapticFeedback.selectionClick();
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(
-        content: Text('Link copied'),
-        duration: Duration(seconds: 2),
+      ..showSnackBar(SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: _kSurfaceHi,
+        width: 220,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        content: const Text('Link copied', textAlign: TextAlign.center),
+        duration: const Duration(seconds: 2),
       ));
   }
 
@@ -438,7 +512,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
         'title': _title,
         'subtitle': _artist,
         'thumbnails': [
-          {'url': 'https://i.ytimg.com/vi/$_id/mqdefault.jpg'},
+          {'url': _thumb(_id)},
         ],
       });
       await mp.player.seek(at);
@@ -446,16 +520,57 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     if (mounted) Navigator.of(context).maybePop();
   }
 
+  KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    if (k == LogicalKeyboardKey.space || k == LogicalKeyboardKey.keyK) {
+      _togglePlay();
+    } else if (k == LogicalKeyboardKey.arrowLeft) {
+      _seekBy(-5, flash: false);
+    } else if (k == LogicalKeyboardKey.arrowRight) {
+      _seekBy(5, flash: false);
+    } else if (k == LogicalKeyboardKey.keyJ) {
+      _seekBy(-10);
+    } else if (k == LogicalKeyboardKey.keyL) {
+      _seekBy(10);
+    } else if (k == LogicalKeyboardKey.arrowUp) {
+      _nudgeVolume(10);
+    } else if (k == LogicalKeyboardKey.arrowDown) {
+      _nudgeVolume(-10);
+    } else if (k == LogicalKeyboardKey.keyM) {
+      _toggleMute();
+    } else if (k == LogicalKeyboardKey.keyF) {
+      _toggleFullscreen();
+    } else if (k == LogicalKeyboardKey.keyN) {
+      _playNextRelated();
+    } else if (k == LogicalKeyboardKey.keyP) {
+      _playPrevious();
+    } else if (k == LogicalKeyboardKey.keyR) {
+      _toggleLoop();
+    } else if (k == LogicalKeyboardKey.keyA) {
+      setState(() => _ambient = !_ambient);
+      _say(_ambient ? 'Ambient mode on' : 'Ambient mode off');
+    } else if (k == LogicalKeyboardKey.escape && _fullscreen) {
+      _toggleFullscreen();
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
   @override
   void dispose() {
     _hideTimer?.cancel();
     _flashTimer?.cancel();
+    _toastTimer?.cancel();
+    _sleepTimer?.cancel();
     for (final s in _subs) {
       s.cancel();
     }
     _p.dispose();
     for (final n in [
-      _pos, _dur, _bufd, _playing, _buffering, _hasFrame, _ended, _drag
+      _pos, _dur, _bufd, _playing, _buffering, _hasFrame, _ended, _drag,
+      _toast, _accent
     ]) {
       n.dispose();
     }
@@ -466,41 +581,47 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
 
   // -------------------------------------------------------------- sheets
 
-  void _sheet(String title, List<Widget> children) {
+  void _sheet(String title, List<Widget> Function(StateSetter) build) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: _kSurface,
       isScrollControlled: true,
+      showDragHandle: false,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      constraints: const BoxConstraints(maxWidth: 560),
-      builder: (_) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.7),
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(2),
+      constraints: const BoxConstraints(maxWidth: 520),
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setS) => SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.72),
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(8, 10, 8, 12),
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-                child: Text(title,
-                    style: const TextStyle(
-                        fontSize: 17, fontWeight: FontWeight.w700)),
-              ),
-              ...children,
-            ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+                  child: Text(title.toUpperCase(),
+                      style: const TextStyle(
+                          fontSize: 11,
+                          letterSpacing: 1.4,
+                          color: _kMuted,
+                          fontWeight: FontWeight.w700)),
+                ),
+                ...build(setS),
+              ],
+            ),
           ),
         ),
       ),
@@ -509,8 +630,11 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
 
   Widget _opt(String label, bool selected, VoidCallback onTap) => ListTile(
     dense: true,
-    title: Text(label),
-    trailing: selected ? const Icon(Icons.check, color: _kRed) : null,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    title: Text(label,
+        style: TextStyle(
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500)),
+    trailing: selected ? const Icon(Icons.check_rounded, color: _kRed) : null,
     onTap: () {
       Navigator.of(context).pop();
       onTap();
@@ -518,43 +642,94 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   );
 
   void _qualitySheet() {
-    final sorted = [..._qualities]
-      ..sort((a, b) => b.height.compareTo(a.height));
-    _sheet('Quality', [
+    final sorted = [..._qualities]..sort((a, b) => b.height.compareTo(a.height));
+    _sheet('Quality', (_) => [
       _opt('Auto (best)', _height == 0, () => _switchQuality(0)),
       for (final q in sorted)
         _opt('${q.height}p', _height == q.height,
-            () => _switchQuality(q.height)),
+                () => _switchQuality(q.height)),
     ]);
   }
 
   void _speedSheet() {
-    _sheet('Playback speed', [
+    _sheet('Playback speed', (_) => [
       for (final s in _kSpeeds)
         _opt(s == 1.0 ? 'Normal' : '${s}x', _speed == s, () => _setSpeed(s)),
     ]);
   }
 
+  void _sleepSheet() {
+    _sheet('Sleep timer', (_) => [
+      _opt('Off', _sleepMin == 0, () => _setSleep(0)),
+      for (final m in _kSleepOptions)
+        _opt('$m minutes', _sleepMin == m, () => _setSleep(m)),
+    ]);
+  }
+
+  Widget _switchRow(IconData icon, String label, String? sub, bool value,
+      ValueChanged<bool> onChanged) {
+    return SwitchListTile(
+      secondary: Icon(icon, color: Colors.white70),
+      title: Text(label),
+      subtitle: sub == null
+          ? null
+          : Text(sub, style: const TextStyle(color: _kMuted, fontSize: 12)),
+      value: value,
+      activeColor: Colors.white,
+      activeTrackColor: _kRed,
+      onChanged: onChanged,
+    );
+  }
+
   void _moreSheet() {
-    _sheet('Settings', [
+    _sheet('Settings', (setS) => [
+      _switchRow(Icons.blur_on_rounded, 'Ambient mode',
+          'Glow and colour from the video', _ambient, (v) {
+            setState(() => _ambient = v);
+            setS(() {});
+          }),
+      _switchRow(Icons.skip_next_rounded, 'Autoplay', 'Continue to next video',
+          _autoplay, (v) {
+            setState(() => _autoplay = v);
+            setS(() {});
+          }),
+      _switchRow(Icons.repeat_one_rounded, 'Loop', null, _loop, (v) {
+        setState(() => _loop = v);
+        setS(() {});
+      }),
+      _switchRow(Icons.crop_free_rounded, 'Fill screen', 'Crop to fit the frame',
+          _cover, (v) {
+            setState(() => _cover = v);
+            setS(() {});
+          }),
       ListTile(
         leading: const Icon(Icons.high_quality_outlined),
         title: const Text('Quality'),
         trailing: Text(_height == 0 ? 'Auto' : '${_height}p',
-            style: const TextStyle(color: Colors.white60)),
+            style: const TextStyle(color: _kMuted)),
         onTap: () {
           Navigator.of(context).pop();
           if (_qualities.isNotEmpty) _qualitySheet();
         },
       ),
       ListTile(
-        leading: const Icon(Icons.speed),
+        leading: const Icon(Icons.speed_rounded),
         title: const Text('Playback speed'),
         trailing: Text(_speed == 1 ? 'Normal' : '${_speed}x',
-            style: const TextStyle(color: Colors.white60)),
+            style: const TextStyle(color: _kMuted)),
         onTap: () {
           Navigator.of(context).pop();
           _speedSheet();
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.bedtime_outlined),
+        title: const Text('Sleep timer'),
+        trailing: Text(_sleepMin == 0 ? 'Off' : '$_sleepMin min',
+            style: const TextStyle(color: _kMuted)),
+        onTap: () {
+          Navigator.of(context).pop();
+          _sleepSheet();
         },
       ),
     ]);
@@ -564,57 +739,218 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !_fullscreen,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _fullscreen) _toggleFullscreen();
-      },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: _fullscreen
-            ? SizedBox.expand(child: _player(full: true))
-            : SafeArea(
-          child: LayoutBuilder(builder: (context, box) {
-            final wide = box.maxWidth >= 900;
-            if (wide) {
-              return Row(
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _onKey,
+      child: PopScope(
+        canPop: !_fullscreen,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && _fullscreen) _toggleFullscreen();
+        },
+        child: Scaffold(
+          backgroundColor: _kBg,
+          body: _fullscreen
+              ? SizedBox.expand(child: _player(full: true, radius: 0))
+              : Stack(
+            children: [
+              Positioned.fill(child: _ambientBg()),
+              SafeArea(child: LayoutBuilder(builder: _layout)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _layout(BuildContext context, BoxConstraints box) {
+    final w = box.maxWidth;
+
+    // Phone in landscape: player left, details right.
+    if (box.maxHeight < 480 && w > box.maxHeight) {
+      return Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Center(
+              child: AspectRatio(
+                  aspectRatio: 16 / 9, child: _player(full: false, radius: 0)),
+            ),
+          ),
+          SizedBox(
+            width: 320,
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [..._info(), ..._upNext()],
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Desktop / large tablet: theatre on the left, queue panel on the right.
+    if (w >= 1100) {
+      return Row(
+        children: [
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(28, 20, 14, 40),
+              children: [
+                _framed(
+                    AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: _player(full: false, radius: 18)),
+                    18),
+                const SizedBox(height: 6),
+                ..._info(),
+              ],
+            ),
+          ),
+          Container(
+            width: w >= 1500 ? 440 : 380,
+            margin: const EdgeInsets.fromLTRB(0, 20, 24, 20),
+            decoration: BoxDecoration(
+              color: _kSurface.withValues(alpha: 0.82),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _kLine),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: ListView(
+                padding: const EdgeInsets.only(top: 6),
+                children: _upNext(),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Tablet / narrow desktop: centred single column.
+    if (w >= 700) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 860),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+            children: [
+              _framed(
+                  AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: _player(full: false, radius: 16)),
+                  16),
+              ..._info(),
+              ..._upNext(),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Phone portrait.
+    return Column(
+      children: [
+        AspectRatio(
+            aspectRatio: 16 / 9, child: _player(full: false, radius: 0)),
+        Expanded(
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [..._info(), ..._upNext()],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Soft coloured halo behind the player when ambient mode is on.
+  Widget _framed(Widget child, double radius) {
+    return ValueListenableBuilder<Color>(
+      valueListenable: _accent,
+      builder: (_, c, __) => AnimatedContainer(
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(radius),
+          boxShadow: _ambient
+              ? [
+            BoxShadow(
+                color: c.withValues(alpha: 0.55),
+                blurRadius: 90,
+                spreadRadius: -6,
+                offset: const Offset(0, 20)),
+          ]
+              : const [
+            BoxShadow(
+                color: Colors.black54,
+                blurRadius: 30,
+                offset: Offset(0, 12))
+          ],
+        ),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _ambientBg() {
+    return ValueListenableBuilder<Color>(
+      valueListenable: _accent,
+      builder: (_, c, __) {
+        final tint = _ambient ? c : const Color(0xFF1A1A1C);
+        return TweenAnimationBuilder<Color?>(
+          tween: ColorTween(end: tint),
+          duration: const Duration(milliseconds: 1000),
+          builder: (_, col, __) {
+            final k = col ?? tint;
+            return RepaintBoundary(
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        AspectRatio(
-                            aspectRatio: 16 / 9,
-                            child: _player(full: false)),
-                        ..._info(),
-                      ],
+                  if (_ambient)
+                    Positioned(
+                      left: -60,
+                      right: -60,
+                      top: -40,
+                      height: 460,
+                      child: ShaderMask(
+                        blendMode: BlendMode.dstIn,
+                        shaderCallback: (r) => const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.black, Colors.transparent],
+                        ).createShader(r),
+                        child: ImageFiltered(
+                          imageFilter: ui.ImageFilter.blur(
+                              sigmaX: 36, sigmaY: 36, tileMode: TileMode.mirror),
+                          child: Opacity(
+                            opacity: 0.38,
+                            child: Image.network(_thumb(_id),
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) =>
+                                const SizedBox.shrink()),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                  Container(
-                    width: 400,
-                    color: const Color(0xFF0F0F0F),
-                    child: ListView(
-                      padding: const EdgeInsets.only(top: 8),
-                      children: _upNext(),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [0, 0.45, 1],
+                        colors: [
+                          k.withValues(alpha: _ambient ? 0.55 : 0.25),
+                          _kBg.withValues(alpha: 0.92),
+                          _kBg,
+                        ],
+                      ),
                     ),
                   ),
                 ],
-              );
-            }
-            return Column(
-              children: [
-                AspectRatio(
-                    aspectRatio: 16 / 9, child: _player(full: false)),
-                Expanded(
-                  child: ListView(
-                    padding: EdgeInsets.zero,
-                    children: [..._info(), ..._upNext()],
-                  ),
-                ),
-              ],
+              ),
             );
-          }),
-        ),
-      ),
+          },
+        );
+      },
     );
   }
 
@@ -624,12 +960,13 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     top: 4,
     left: 4,
     child: _roundBtn(
-        Icons.keyboard_arrow_down, () => Navigator.of(context).maybePop()),
+        Icons.keyboard_arrow_down_rounded, () => Navigator.of(context).maybePop()),
   );
 
-  Widget _player({required bool full}) {
+  Widget _player({required bool full, required double radius}) {
+    Widget body;
     if (_error != null) {
-      return Container(
+      body = Container(
         color: const Color(0xFF0B0B0B),
         child: Stack(
           children: [
@@ -646,7 +983,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: Colors.white70)),
                     const SizedBox(height: 12),
-                    TextButton(
+                    FilledButton.tonal(
                         onPressed: () => _load(_id, keepMeta: true),
                         child: const Text('Retry')),
                   ],
@@ -657,8 +994,13 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
           ],
         ),
       );
+    } else {
+      body = _stage(full);
     }
+    return ClipRRect(borderRadius: BorderRadius.circular(radius), child: body);
+  }
 
+  Widget _stage(bool full) {
     return LayoutBuilder(builder: (context, box) {
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -683,106 +1025,115 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
           setState(() => _holding = false);
           _p.setRate(_speedBeforeHold);
         },
-        child: Container(
-          color: Colors.black,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // Poster: visible until the first frame arrives.
-              ValueListenableBuilder<bool>(
-                valueListenable: _hasFrame,
-                builder: (_, has, __) => has
-                    ? const SizedBox.shrink()
-                    : Opacity(
-                  opacity: 0.55,
-                  child: Image.network(
-                    'https://i.ytimg.com/vi/$_id/mqdefault.jpg',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) =>
-                    const SizedBox.shrink(),
+        child: MouseRegion(
+          onHover: (_) {
+            if (!_controls) _poke();
+          },
+          child: Container(
+            color: Colors.black,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // Poster: visible until the first frame arrives.
+                ValueListenableBuilder<bool>(
+                  valueListenable: _hasFrame,
+                  builder: (_, has, __) => AnimatedOpacity(
+                    duration: const Duration(milliseconds: 250),
+                    opacity: has ? 0 : 0.55,
+                    child: Image.network(_thumb(_id),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink()),
                   ),
                 ),
-              ),
-              Video(
-                controller: _vc,
-                controls: NoVideoControls,
-                fill: Colors.transparent,
-                fit: BoxFit.contain,
-              ),
-              // Spinner while opening or buffering.
-              ListenableBuilder(
-                listenable: Listenable.merge([_buffering, _hasFrame]),
-                builder: (_, __) => (_loading ||
-                    _buffering.value ||
-                    !_hasFrame.value)
-                    ? const Center(
-                  child: SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 3),
-                  ),
-                )
-                    : const SizedBox.shrink(),
-              ),
-              if (_flash != 0)
-                Align(
-                  alignment: _flash < 0
-                      ? Alignment.centerLeft
-                      : Alignment.centerRight,
-                  child: Container(
-                    width: box.maxWidth / 2.6,
-                    height: double.infinity,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.horizontal(
-                        left: _flash < 0
-                            ? Radius.zero
-                            : Radius.circular(box.maxHeight),
-                        right: _flash > 0
-                            ? Radius.zero
-                            : Radius.circular(box.maxHeight),
-                      ),
+                Video(
+                  controller: _vc,
+                  controls: NoVideoControls,
+                  fill: Colors.transparent,
+                  fit: _cover ? BoxFit.cover : BoxFit.contain,
+                ),
+                // Spinner while opening or buffering.
+                ListenableBuilder(
+                  listenable: Listenable.merge([_buffering, _hasFrame]),
+                  builder: (_, __) =>
+                  (_loading || _buffering.value || !_hasFrame.value)
+                      ? const Center(
+                    child: SizedBox(
+                      width: 38,
+                      height: 38,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2.5),
                     ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                            _flash < 0
-                                ? Icons.fast_rewind_rounded
-                                : Icons.fast_forward_rounded,
-                            size: 34),
-                        const Text('10 seconds',
-                            style: TextStyle(fontSize: 12)),
-                      ],
+                  )
+                      : const SizedBox.shrink(),
+                ),
+                if (_flash != 0) _seekFlash(box),
+                if (_holding)
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: _tag('2x  ·  Holding', top: 14),
+                  ),
+                // Transient status message (volume, speed, shortcuts…).
+                ValueListenableBuilder<String?>(
+                  valueListenable: _toast,
+                  builder: (_, t, __) => Align(
+                    alignment: Alignment.topCenter,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 160),
+                      child: t == null
+                          ? const SizedBox.shrink()
+                          : KeyedSubtree(
+                          key: ValueKey(t), child: _tag(t, top: 56)),
                     ),
                   ),
                 ),
-              if (_holding)
-                Align(
-                  alignment: Alignment.topCenter,
-                  child: Container(
-                    margin: const EdgeInsets.only(top: 14),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Text('2x',
-                        style: TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.w700)),
-                  ),
-                ),
-              _overlay(full),
-            ],
+                _overlay(full, box),
+              ],
+            ),
           ),
         ),
       );
     });
   }
 
-  Widget _overlay(bool full) {
+  Widget _tag(String text, {double top = 14}) => Container(
+    margin: EdgeInsets.only(top: top),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.66),
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Text(text,
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+  );
+
+  Widget _seekFlash(BoxConstraints box) => Align(
+    alignment: _flash < 0 ? Alignment.centerLeft : Alignment.centerRight,
+    child: Container(
+      width: box.maxWidth / 2.6,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.horizontal(
+          left: _flash < 0 ? Radius.zero : Radius.circular(box.maxHeight),
+          right: _flash > 0 ? Radius.zero : Radius.circular(box.maxHeight),
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+              _flash < 0
+                  ? Icons.fast_rewind_rounded
+                  : Icons.fast_forward_rounded,
+              size: 32),
+          const Text('10 seconds', style: TextStyle(fontSize: 12)),
+        ],
+      ),
+    ),
+  );
+
+  Widget _overlay(bool full, BoxConstraints box) {
+    final compact = box.maxHeight < 260;
     return IgnorePointer(
       ignoring: !_controls,
       child: AnimatedOpacity(
@@ -793,10 +1144,12 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
+              stops: const [0, 0.3, 0.6, 1],
               colors: [
-                Colors.black.withValues(alpha: 0.65),
-                Colors.black.withValues(alpha: 0.18),
-                Colors.black.withValues(alpha: 0.75),
+                Colors.black.withValues(alpha: 0.72),
+                Colors.black.withValues(alpha: 0.10),
+                Colors.black.withValues(alpha: 0.10),
+                Colors.black.withValues(alpha: 0.82),
               ],
             ),
           ),
@@ -807,7 +1160,9 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
                 child: Row(
                   children: [
                     _roundBtn(
-                      full ? Icons.fullscreen_exit : Icons.keyboard_arrow_down,
+                      full
+                          ? Icons.arrow_back_rounded
+                          : Icons.keyboard_arrow_down_rounded,
                       full
                           ? _toggleFullscreen
                           : () => Navigator.of(context).maybePop(),
@@ -821,9 +1176,17 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
                               fontSize: 15, fontWeight: FontWeight.w600))
                           : const SizedBox.shrink(),
                     ),
-                    _roundBtn(_muted ? Icons.volume_off : Icons.volume_up,
+                    _roundBtn(
+                        _ambient ? Icons.blur_on_rounded : Icons.blur_off_rounded,
+                            () {
+                          setState(() => _ambient = !_ambient);
+                          _say(_ambient ? 'Ambient mode on' : 'Ambient mode off');
+                          _poke();
+                        }),
+                    _roundBtn(
+                        _muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
                         _toggleMute),
-                    _roundBtn(Icons.more_vert, _moreSheet),
+                    _roundBtn(Icons.tune_rounded, _moreSheet),
                   ],
                 ),
               ),
@@ -831,54 +1194,101 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
                 child: Center(
                   child: ListenableBuilder(
                     listenable: Listenable.merge([_playing, _ended]),
-                    builder: (_, __) => GestureDetector(
-                      onTap: _togglePlay,
-                      child: Container(
-                        width: 62,
-                        height: 62,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          shape: BoxShape.circle,
+                    builder: (_, __) => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _ghostBtn(Icons.skip_previous_rounded, _playPrevious,
+                            size: compact ? 26 : 32),
+                        SizedBox(width: compact ? 10 : 22),
+                        _ghostBtn(Icons.replay_10_rounded, () => _seekBy(-10),
+                            size: compact ? 26 : 32),
+                        SizedBox(width: compact ? 10 : 18),
+                        GestureDetector(
+                          onTap: _togglePlay,
+                          child: Container(
+                            width: compact ? 52 : 66,
+                            height: compact ? 52 : 66,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.4),
+                                    blurRadius: 18)
+                              ],
+                            ),
+                            child: Icon(
+                              _ended.value
+                                  ? Icons.replay_rounded
+                                  : (_playing.value
+                                  ? Icons.pause_rounded
+                                  : Icons.play_arrow_rounded),
+                              color: Colors.black,
+                              size: compact ? 32 : 42,
+                            ),
+                          ),
                         ),
-                        child: Icon(
-                          _ended.value
-                              ? Icons.replay_rounded
-                              : (_playing.value
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded),
-                          size: 40,
-                        ),
-                      ),
+                        SizedBox(width: compact ? 10 : 18),
+                        _ghostBtn(Icons.forward_10_rounded, () => _seekBy(10),
+                            size: compact ? 26 : 32),
+                        SizedBox(width: compact ? 10 : 22),
+                        _ghostBtn(Icons.skip_next_rounded, _playNextRelated,
+                            size: compact ? 26 : 32),
+                      ],
                     ),
                   ),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 4, 2),
+                padding: const EdgeInsets.fromLTRB(14, 0, 4, 0),
                 child: Row(
                   children: [
                     ListenableBuilder(
                       listenable: Listenable.merge([_pos, _dur]),
                       builder: (_, __) => Text(
-                        '${_fmt(_pos.value)} / ${_fmt(_dur.value)}',
+                        '${_fmt(_pos.value)}  /  ${_fmt(_dur.value)}',
                         style: const TextStyle(
                           fontSize: 12,
                           color: Colors.white,
-                          fontFeatures: [FontFeature.tabularFigures()],
+                          fontFeatures: [ui.FontFeature.tabularFigures()],
                         ),
                       ),
                     ),
                     const Spacer(),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                          minimumSize: const Size(40, 32),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          foregroundColor: Colors.white),
+                      onPressed: _speedSheet,
+                      child: Text(_speed == 1 ? '1x' : '${_speed}x',
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w700)),
+                    ),
                     IconButton(
                       visualDensity: VisualDensity.compact,
-                      icon: Icon(
-                          full ? Icons.fullscreen_exit : Icons.fullscreen),
+                      tooltip: _cover ? 'Fit' : 'Fill',
+                      icon: Icon(_cover
+                          ? Icons.fit_screen_rounded
+                          : Icons.crop_free_rounded),
+                      onPressed: () {
+                        setState(() => _cover = !_cover);
+                        _say(_cover ? 'Fill' : 'Fit');
+                        _poke();
+                      },
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(full
+                          ? Icons.fullscreen_exit_rounded
+                          : Icons.fullscreen_rounded),
                       onPressed: _toggleFullscreen,
                     ),
                   ],
                 ),
               ),
               _scrubber(),
+              const SizedBox(height: 4),
             ],
           ),
         ),
@@ -887,64 +1297,86 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   }
 
   Widget _scrubber() {
-    return ListenableBuilder(
-      listenable: Listenable.merge([_pos, _dur, _bufd, _drag]),
-      builder: (_, __) {
-        final total = _dur.value.inMilliseconds;
-        final pos = _pos.value.inMilliseconds;
-        final buffered = total > 0
-            ? (_bufd.value.inMilliseconds / total).clamp(0.0, 1.0)
-            : 0.0;
-        return SizedBox(
-          height: 24,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Positioned.fill(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: FractionallySizedBox(
-                      widthFactor: buffered,
-                      child: Container(
-                        height: 3,
-                        color: Colors.white.withValues(alpha: 0.35),
+    return LayoutBuilder(builder: (context, box) {
+      final w = box.maxWidth;
+      double frac(Offset p) => ((p.dx - 14) / (w - 28)).clamp(0.0, 1.0);
+      return ListenableBuilder(
+        listenable: Listenable.merge([_pos, _dur, _bufd, _drag]),
+        builder: (_, __) {
+          final total = _dur.value.inMilliseconds;
+          final pos = _pos.value.inMilliseconds;
+          final dragging = _drag.value != null;
+          final played =
+              _drag.value ?? (total > 0 ? (pos / total).clamp(0.0, 1.0) : 0.0);
+          final buffered = total > 0
+              ? (_bufd.value.inMilliseconds / total).clamp(0.0, 1.0)
+              : 0.0;
+          void commit() {
+            final f = _drag.value;
+            if (f != null && total > 0) {
+              _p.seek(Duration(milliseconds: (f * total).round()));
+            }
+            _drag.value = null;
+            _poke();
+          }
+
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (d) {
+              if (total > 0) {
+                _p.seek(Duration(
+                    milliseconds: (frac(d.localPosition) * total).round()));
+              }
+            },
+            onHorizontalDragStart: (d) {
+              _hideTimer?.cancel();
+              _drag.value = frac(d.localPosition);
+            },
+            onHorizontalDragUpdate: (d) => _drag.value = frac(d.localPosition),
+            onHorizontalDragEnd: (_) => commit(),
+            onHorizontalDragCancel: commit,
+            child: SizedBox(
+              height: 34,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _BarPainter(
+                        played: played,
+                        buffered: buffered,
+                        active: dragging,
                       ),
                     ),
                   ),
-                ),
+                  if (dragging)
+                    Positioned(
+                      left: (14 + played * (w - 28) - 28).clamp(0.0, w - 56),
+                      top: -30,
+                      width: 56,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.75),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _fmt(Duration(milliseconds: (played * total).round())),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              fontFeatures: [ui.FontFeature.tabularFigures()]),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3,
-                  activeTrackColor: _kRed,
-                  inactiveTrackColor: Colors.white.withValues(alpha: 0.18),
-                  thumbColor: _kRed,
-                  overlayColor: _kRed.withValues(alpha: 0.2),
-                  thumbShape:
-                  const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  overlayShape:
-                  const RoundSliderOverlayShape(overlayRadius: 14),
-                ),
-                child: Slider(
-                  value: _drag.value ??
-                      (total > 0 ? (pos / total).clamp(0.0, 1.0) : 0.0),
-                  onChangeStart: (_) => _hideTimer?.cancel(),
-                  // Move the thumb while dragging; seek once on release.
-                  onChanged: (f) => _drag.value = f,
-                  onChangeEnd: (f) {
-                    _p.seek(Duration(milliseconds: (f * total).round()));
-                    _drag.value = null;
-                    _poke();
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+            ),
+          );
+        },
+      );
+    });
   }
 
   Widget _roundBtn(IconData icon, VoidCallback onTap) => IconButton(
@@ -952,10 +1384,20 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     onPressed: onTap,
   );
 
+  Widget _ghostBtn(IconData icon, VoidCallback onTap, {double size = 32}) =>
+      IconButton(
+        iconSize: size,
+        splashRadius: size,
+        icon: Icon(icon, color: Colors.white),
+        onPressed: () {
+          onTap();
+          _poke();
+        },
+      );
+
   String _fmt(Duration d) {
     final h = d.inHours;
-    final m =
-    d.inMinutes.remainder(60).toString().padLeft(h > 0 ? 2 : 1, '0');
+    final m = d.inMinutes.remainder(60).toString().padLeft(h > 0 ? 2 : 1, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
@@ -965,56 +1407,46 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   List<Widget> _info() {
     return [
       Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: Text(
+          _title.isEmpty ? 'Now watching' : _title,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              height: 1.25,
+              letterSpacing: -0.2),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text(
-              _title.isEmpty ? 'Now watching' : _title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.w700, height: 1.25),
-            ),
-            if (_artist.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 14,
-                    backgroundColor: Colors.white12,
-                    child: Text(
-                      _artist.characters.first.toUpperCase(),
-                      style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(_artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w600)),
-                  ),
-                ],
-              ),
-            ],
+            _meta(_height == 0 ? 'AUTO' : '${_height}P'),
+            if (_speed != 1) _meta('${_speed}X'),
+            if (_loop) _meta('LOOP'),
+            if (_ambient) _meta('AMBIENT'),
+            if (_sleepMin > 0) _meta('SLEEP $_sleepMin'),
           ],
         ),
       ),
+      _channelCard(),
       SizedBox(
-        height: 52,
+        height: 54,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           children: [
             ValueListenableBuilder(
               valueListenable: Hive.box('FAVOURITES').listenable(),
               builder: (context, box, _) {
                 final liked = box.get(_id) != null;
                 return _chip(
-                  liked ? Icons.favorite : Icons.favorite_border,
+                  liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                   liked ? 'Liked' : 'Like',
                       () async {
                     HapticFeedback.lightImpact();
@@ -1034,21 +1466,129 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
                 );
               },
             ),
-            _chip(Icons.link, 'Copy link', _copyLink),
-            _chip(Icons.repeat_one, _loop ? 'Loop on' : 'Loop', _toggleLoop,
+            _chip(Icons.headphones_rounded, 'Audio only', _audioOnly),
+            _chip(Icons.link_rounded, 'Copy link', _copyLink),
+            _chip(Icons.blur_on_rounded, 'Ambient', () {
+              setState(() => _ambient = !_ambient);
+            }, active: _ambient),
+            _chip(Icons.repeat_one_rounded, _loop ? 'Loop on' : 'Loop', _toggleLoop,
                 active: _loop),
-            _chip(Icons.speed, _speed == 1 ? 'Speed' : '${_speed}x',
+            _chip(Icons.speed_rounded, _speed == 1 ? 'Speed' : '${_speed}x',
                 _speedSheet,
                 active: _speed != 1),
             if (_qualities.isNotEmpty)
               _chip(Icons.high_quality_outlined,
                   _height == 0 ? 'Quality' : '${_height}p', _qualitySheet),
-            _chip(Icons.headphones, 'Audio only', _audioOnly),
+            _chip(Icons.bedtime_outlined,
+                _sleepMin == 0 ? 'Sleep' : '$_sleepMin min', _sleepSheet,
+                active: _sleepMin > 0),
           ],
         ),
       ),
-      const Divider(height: 1, color: Colors.white10),
+      const Divider(height: 1, color: _kLine),
     ];
+  }
+
+  Widget _meta(String t) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.white24),
+      borderRadius: BorderRadius.circular(5),
+    ),
+    child: Text(t,
+        style: const TextStyle(
+            fontSize: 10,
+            letterSpacing: 1.1,
+            fontWeight: FontWeight.w700,
+            color: _kMuted)),
+  );
+
+  /// Channel row: avatar with YouTube badge, name, branded source line.
+  Widget _channelCard() {
+    final name = _artist.isEmpty ? 'YouTube' : _artist;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _kSurface.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kLine),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 48,
+            height: 48,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                ValueListenableBuilder<Color>(
+                  valueListenable: _accent,
+                  builder: (_, c, __) => Container(
+                    width: 46,
+                    height: 46,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Color.lerp(c, Colors.white, 0.12),
+                    ),
+                    child: Text(
+                      name.characters.first.toUpperCase(),
+                      style: const TextStyle(
+                          fontSize: 19, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  right: -4,
+                  bottom: -2,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _kSurface,
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: const _YtLogo(width: 17),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 3),
+                const Row(
+                  children: [
+                    _YtLogo(width: 15),
+                    SizedBox(width: 6),
+                    Text('YouTube',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            color: _kMuted,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.1)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          IconButton.filledTonal(
+            tooltip: 'Copy YouTube link',
+            style: IconButton.styleFrom(backgroundColor: _kSurfaceHi),
+            onPressed: _copyLink,
+            icon: const Icon(Icons.open_in_new_rounded, size: 18),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _chip(IconData icon, String label, VoidCallback onTap,
@@ -1059,17 +1599,17 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       child: Material(
         color: active && activeColor == null
             ? Colors.white
-            : Colors.white.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(18),
+            : Colors.white.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(20),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Row(
               children: [
                 Icon(icon, size: 18, color: fg),
-                const SizedBox(width: 6),
+                const SizedBox(width: 7),
                 Text(label,
                     style: TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w600, color: fg)),
@@ -1086,14 +1626,18 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   List<Widget> _upNext() {
     return [
       Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 8, 4),
+        padding: const EdgeInsets.fromLTRB(16, 14, 10, 4),
         child: Row(
           children: [
             const Text('Up next',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+            const SizedBox(width: 8),
+            if (!_relatedLoading && _related.isNotEmpty)
+              Text('${_related.length}',
+                  style: const TextStyle(color: _kMuted, fontSize: 13)),
             const Spacer(),
             const Text('Autoplay',
-                style: TextStyle(fontSize: 12, color: Colors.white60)),
+                style: TextStyle(fontSize: 12, color: _kMuted)),
             Switch(
               value: _autoplay,
               activeColor: Colors.white,
@@ -1107,7 +1651,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
         for (var i = 0; i < 5; i++) _skeleton()
       else if (_related.isEmpty)
         const Padding(
-          padding: EdgeInsets.all(24),
+          padding: EdgeInsets.all(28),
           child: Center(
             child: Text('No related videos',
                 style: TextStyle(color: Colors.white54)),
@@ -1115,7 +1659,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
         )
       else
         for (final r in _related) _relatedTile(r),
-      const SizedBox(height: 24),
+      const SizedBox(height: 28),
     ];
   }
 
@@ -1124,8 +1668,8 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     child: Row(
       children: [
         Container(
-          width: 160,
-          height: 90,
+          width: 148,
+          height: 83,
           decoration: BoxDecoration(
             color: Colors.white10,
             borderRadius: BorderRadius.circular(10),
@@ -1156,27 +1700,52 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       });
     }
     final sub = _subOf(r);
+    final current = id == _id;
     return InkWell(
-      onTap: () => _load(id, title: title, artist: sub),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      onTap: current ? null : () => _load(id, title: title, artist: sub),
+      child: Container(
+        color: current ? Colors.white.withValues(alpha: 0.06) : null,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: SizedBox(
-                width: 160,
-                height: 90,
-                child: Image.network(
-                  'https://i.ytimg.com/vi/$id/mqdefault.jpg',
-                  fit: BoxFit.cover,
-                  cacheWidth: 320,
-                  errorBuilder: (_, __, ___) => Container(
-                    color: Colors.white10,
-                    child: const Icon(Icons.play_circle_outline,
-                        color: Colors.white38),
-                  ),
+                width: 148,
+                height: 83,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      _thumb(id),
+                      fit: BoxFit.cover,
+                      cacheWidth: 320,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: Colors.white10,
+                        child: const Icon(Icons.play_circle_outline_rounded,
+                            color: Colors.white38),
+                      ),
+                    ),
+                    Positioned(
+                      right: 5,
+                      bottom: 5,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.7),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: const _YtLogo(width: 13),
+                      ),
+                    ),
+                    if (current)
+                      Container(
+                        color: Colors.black54,
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.equalizer_rounded, color: _kRed),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -1197,8 +1766,16 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
                     Text(sub,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 12.5, color: Colors.white60)),
+                        style: const TextStyle(fontSize: 12.5, color: _kMuted)),
+                  ],
+                  if (current) ...[
+                    const SizedBox(height: 6),
+                    const Text('NOW PLAYING',
+                        style: TextStyle(
+                            fontSize: 10,
+                            letterSpacing: 1.2,
+                            color: _kRed,
+                            fontWeight: FontWeight.w800)),
                   ],
                 ],
               ),
@@ -1208,4 +1785,72 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       ),
     );
   }
+}
+
+// ──────────────────────────────────────────────────────────── painters
+
+/// Seek bar: buffered + played segments, growing thumb while dragging.
+class _BarPainter extends CustomPainter {
+  _BarPainter(
+      {required this.played, required this.buffered, required this.active});
+  final double played;
+  final double buffered;
+  final bool active;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const pad = 14.0;
+    final w = size.width - pad * 2;
+    final cy = size.height / 2;
+    final h = active ? 5.0 : 3.0;
+    RRect seg(double a, double b) => RRect.fromLTRBR(
+        pad + w * a, cy - h / 2, pad + w * b, cy + h / 2, Radius.circular(h));
+
+    canvas.drawRRect(
+        seg(0, 1), Paint()..color = Colors.white.withValues(alpha: 0.2));
+    canvas.drawRRect(
+        seg(0, buffered), Paint()..color = Colors.white.withValues(alpha: 0.38));
+    if (played > 0) {
+      canvas.drawRRect(seg(0, played), Paint()..color = _kRed);
+    }
+    final tx = pad + w * played;
+    canvas.drawCircle(Offset(tx, cy), active ? 15 : 0,
+        Paint()..color = _kRed.withValues(alpha: 0.22));
+    canvas.drawCircle(Offset(tx, cy), active ? 8 : 5.5, Paint()..color = _kRed);
+  }
+
+  @override
+  bool shouldRepaint(_BarPainter o) =>
+      o.played != played || o.buffered != buffered || o.active != active;
+}
+
+/// Compact YouTube play-button mark.
+class _YtLogo extends StatelessWidget {
+  const _YtLogo({this.width = 20});
+  final double width;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: width,
+    height: width * 0.7,
+    child: CustomPaint(painter: _YtLogoPainter()),
+  );
+}
+
+class _YtLogoPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size s) {
+    final r = RRect.fromRectAndRadius(
+        Offset.zero & s, Radius.circular(s.height * 0.3));
+    canvas.drawRRect(r, Paint()..color = const Color(0xFFFF0000));
+    final tri = Path()
+      ..moveTo(s.width * 0.41, s.height * 0.28)
+      ..lineTo(s.width * 0.41, s.height * 0.72)
+      ..lineTo(s.width * 0.66, s.height * 0.5)
+      ..close();
+    canvas.drawPath(tri, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
 }

@@ -20,6 +20,8 @@ class AppearanceCubit extends Cubit<AppearanceState> {
             accentColor: GetIt.I<SettingsManager>().accentColor,
             amoledBlack: GetIt.I<SettingsManager>().amoledBlack,
             dynamicColors: GetIt.I<SettingsManager>().dynamicColors,
+            liquidGlass: GetIt.I<SettingsManager>().liquidGlass, // SP-54
+            uiTheme: GetIt.I<SettingsManager>().uiTheme, // SP-58
           ),
         ) {
     _listener = () {
@@ -40,6 +42,8 @@ class AppearanceCubit extends Cubit<AppearanceState> {
         accentColor: _settings.accentColor,
         amoledBlack: _settings.amoledBlack,
         dynamicColors: _settings.dynamicColors,
+        liquidGlass: _settings.liquidGlass, // SP-54
+        uiTheme: _settings.uiTheme, // SP-58
       ),
     );
   }
@@ -54,6 +58,16 @@ class AppearanceCubit extends Cubit<AppearanceState> {
 
   void setDynamicColors(bool value) {
     _settings.dynamicColors = value;
+  }
+
+  // SP-54: Liquid Glass — whole-app glass theme switch.
+  void setLiquidGlass(bool value) {
+    _settings.liquidGlass = value;
+  }
+
+  // SP-58: Material 3 / Classic / Liquid Glass tri-state switch.
+  void setUiTheme(String value) {
+    _settings.setUiTheme(value);
   }
 
   @override

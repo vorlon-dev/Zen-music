@@ -32,6 +32,9 @@ import com.zen.music.zenmusic.innertube.ZenInnertubeResolver
 import com.zen.music.zenmusic.lossless.NativeAudioEngine
 import com.zen.music.zenmusic.lossless.broadcastNativeEqualizer
 import com.zen.music.zenmusic.potoken.ZenPoTokenBridge
+import com.zen.music.zenmusic.liquid.ZenLiquidGlassEngine // SP-54
+import com.zen.music.zenmusic.liquid.ZenLiquidGlassViewFactory // SP-54
+import com.zen.music.zenmusic.material3.Material3Tokens // SP-58
 import com.zen.music.zenmusic.videoplayer.ZenVideoPlayerViewFactory
 import kotlinx.coroutines.runBlocking
 import io.flutter.embedding.engine.FlutterEngine
@@ -101,6 +104,20 @@ class MainActivity : AudioServiceActivity() {
                 "zen_video_player",
                 ZenVideoPlayerViewFactory(flutterEngine.dartExecutor.binaryMessenger)
             )
+        // SP-54: Liquid Glass — Kotlin-rendered glass layer (bridge +
+        // platform views). The theme UI is drawn natively here so it stays
+        // smooth on low-end phones; Dart only flips the switch and stacks
+        // its content above the glass.
+        ZenLiquidGlassEngine.register(flutterEngine, this)
+        flutterEngine.platformViewsController.registry
+            .registerViewFactory(
+                ZenLiquidGlassEngine.VIEW_TYPE,
+                ZenLiquidGlassViewFactory()
+            )
+        // SP-58: Material 3 theme — native palette provider. Tokens live
+        // in res/values/material3_tokens.xml and are served to Flutter
+        // (m3_bridge.dart) once at boot. Failure-soft; no platform views.
+        Material3Tokens.register(flutterEngine, this)
         // Flutter apps have no BuildConfig — use the runtime debuggable
         // flag instead. Also gates the extraction resolver's verbose logs.
         val isDebuggable =

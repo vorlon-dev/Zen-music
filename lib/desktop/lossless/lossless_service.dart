@@ -61,7 +61,7 @@ class LosslessService {
   static final LosslessService instance = LosslessService._();
 
   /// The user's deployed qobuz-api instance. One-line change if it moves.
-  static const String endpoint = 'https://justfreefun.antideploy.app/';
+  static const String endpoint = 'https://jobfolw.antideploy.app/';
 
   static const _connectTimeout = Duration(seconds: 8);
   static const _ioTimeout = Duration(seconds: 12);
