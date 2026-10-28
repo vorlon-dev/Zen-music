@@ -10,7 +10,7 @@
 
 <br/>
 
-[**Website**](https://vorlon-dev.github.io/Zen-music/) · [**Download**](#download-now) · [**Features**](#features) · [**Build**](#building-from-source) · [**Troubleshooting**](#troubleshooting) · [**Contribute**](#contributing) · [**Legal**](#legal)
+[**Website**](https://zenmusic-d6t.pages.dev/) · [**Download**](#download-now) · [**Features**](#features) · [**Build**](#building-from-source) · [**Troubleshooting**](#troubleshooting) · [**Contribute**](#contributing) · [**Legal**](#legal)
 
 </div>
 
@@ -21,7 +21,6 @@
 
 > [!TIP]
 > **Future Updates** - Coming in the next update:
-> - **YouTube Music Login** support
 > - More themes and skins
 > - And many more things, very soon. Stay tuned!
 
@@ -509,8 +508,8 @@ Yes. ZenMusic supports source extensions.
 
 ## Roadmap
 
-- [ ] YouTube Music login
 - [ ] More themes and skins
+- [x] YouTube Music login
 - [x] Lossless streaming (FLAC / Hi-Res)
 - [x] Spotify login and playlist import
 - [x] Windows desktop app with installer
