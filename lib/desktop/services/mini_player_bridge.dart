@@ -69,7 +69,6 @@ class MiniPlayerBridge {
     if (_miniMode || _mainArmed) return;
     _mainArmed = true;
     DesktopMultiWindow.setMethodHandler(_onMainEvent);
-    debugPrint('$_tag main-window handler armed');
   }
 
   Future<dynamic> _onMainEvent(MethodCall call, int fromWindowId) async {
@@ -109,11 +108,9 @@ class MiniPlayerBridge {
   /// never be left pointing at a window the user already closed.
   Future<void> openMiniPlayer() async {
     if (_miniMode) {
-      debugPrint('$_tag openMiniPlayer skipped — we ARE the mini window');
       return;
     }
     if (_opening) {
-      debugPrint('$_tag openMiniPlayer skipped — already opening');
       return;
     }
     _opening = true;
@@ -124,7 +121,6 @@ class MiniPlayerBridge {
         } catch (_) {}
         _miniWindowId = null;
       }
-      debugPrint('$_tag creating mini window…');
       final WindowController window = await DesktopMultiWindow.createWindow(
         jsonEncode(<String, String>{'type': 'zenmini'}),
       );
@@ -137,7 +133,6 @@ class MiniPlayerBridge {
       );
       await window.center();
       await window.show();
-      debugPrint('$_tag mini window ${window.windowId} created (dpr $dpr)');
       _pushSnapshot();
       // Insurance against the fresh engine's handler not being armed in
       // time: push once more shortly after. Harmless if redundant.
@@ -155,7 +150,6 @@ class MiniPlayerBridge {
     if (id == null) return;
     try {
       await WindowController.fromWindowId(id).close();
-      debugPrint('$_tag mini window $id closed');
     } catch (e) {
       debugPrint('$_tag close failed (ignored): $e');
     }
@@ -259,7 +253,6 @@ class MiniPlayerBridge {
     bridge._miniMode = true;
     bridge._miniId = windowId;
     DesktopMultiWindow.setMethodHandler(bridge._onMiniEvent);
-    debugPrint('$_tag mini engine up (window $windowId) — saying hello');
     // Tell the main window we exist so it binds to us and pushes a snapshot.
     await _sendToMain('command', const <String, dynamic>{'cmd': 'hello'});
     runApp(const MiniPlayerApp());
@@ -297,7 +290,6 @@ class MiniPlayerBridge {
   /// Transport button pressed inside the mini bar. 'close' additionally
   /// arms a self-close fallback in case the main window is gone.
   static void sendCommand(String cmd) {
-    debugPrint('$_tag command → $cmd');
     _sendToMain('command', <String, dynamic>{'cmd': cmd});
     if (cmd == 'close') {
       Timer(const Duration(milliseconds: 700), () async {

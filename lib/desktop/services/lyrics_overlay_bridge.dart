@@ -106,7 +106,6 @@ class LyricsOverlayBridge {
     if (_overlayMode || _mainArmed) return;
     _mainArmed = true;
     DesktopMultiWindow.setMethodHandler(_onMainEvent);
-    debugPrint('$_tag main-window handler armed');
   }
 
   Future<dynamic> _onMainEvent(MethodCall call, int fromWindowId) async {
@@ -134,7 +133,6 @@ class LyricsOverlayBridge {
         _pinned = value;
         _applyPinned();
         _send('pinned', <String, dynamic>{'value': _pinned});
-        debugPrint('$_tag pinned → $_pinned');
         break;
       default:
         debugPrint('$_tag ignored command "$cmd" from window $fromWindowId');
@@ -149,11 +147,9 @@ class LyricsOverlayBridge {
   /// closed.
   Future<void> openOverlay() async {
     if (_overlayMode) {
-      debugPrint('$_tag openOverlay skipped — we ARE the overlay window');
       return;
     }
     if (_opening) {
-      debugPrint('$_tag openOverlay skipped — already opening');
       return;
     }
     _opening = true;
@@ -164,7 +160,6 @@ class LyricsOverlayBridge {
         } catch (_) {}
         _overlayWindowId = null;
       }
-      debugPrint('$_tag creating overlay window…');
       final WindowController window = await DesktopMultiWindow.createWindow(
         jsonEncode(<String, String>{'type': 'zenlyrics'}),
       );
@@ -216,7 +211,6 @@ class LyricsOverlayBridge {
     if (id == null) return;
     try {
       await WindowController.fromWindowId(id).close();
-      debugPrint('$_tag overlay window $id closed');
     } catch (e) {
       debugPrint('$_tag close failed (ignored): $e');
     }
@@ -358,7 +352,6 @@ class LyricsOverlayBridge {
 
   void _pushSnapshot() {
     if (_overlayMode || _overlayWindowId == null) return;
-    debugPrint('$_tag snapshot → "${_lastTrack?.title}" pinned=$_pinned');
     _send('track', <String, dynamic>{
       'title': _lastTrack?.title,
       'artist': _lastTrack?.artist,
@@ -413,7 +406,6 @@ class LyricsOverlayBridge {
     bridge._overlayMode = true;
     bridge._overlayId = windowId;
     DesktopMultiWindow.setMethodHandler(bridge._onOverlayEvent);
-    debugPrint('$_tag overlay engine up (window $windowId) — saying hello');
     // Tell the main window we exist so it binds to us and pushes a
     // snapshot.
     await _sendToMain('command', const <String, dynamic>{'cmd': 'hello'});
@@ -473,7 +465,6 @@ class LyricsOverlayBridge {
   /// Button pressed inside the overlay. 'close' additionally arms a
   /// self-close fallback in case the main window is gone.
   static void sendCommand(String cmd, {bool? pinned}) {
-    debugPrint('$_tag command → $cmd');
     _sendToMain('command', <String, dynamic>{
       'cmd': cmd,
       if (pinned != null) 'value': pinned,

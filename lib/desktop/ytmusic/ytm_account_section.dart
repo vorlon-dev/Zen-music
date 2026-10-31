@@ -126,7 +126,6 @@ class YtmAccountSectionState extends State<YtmAccountSection> {
           'contents': items.take(24).toList(),
         });
       }
-      debugPrint('[ytm-account] liked: ${items.length} rows');
     } catch (e) {
       debugPrint('[ytm-account] liked songs skipped: $e');
     }
@@ -145,7 +144,6 @@ class YtmAccountSectionState extends State<YtmAccountSection> {
           'contents': items.take(24).toList(),
         });
       }
-      debugPrint('[ytm-account] playlists: ${items.length}');
     } catch (e) {
       debugPrint('[ytm-account] playlists skipped: $e');
     }

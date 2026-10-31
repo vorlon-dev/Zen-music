@@ -182,7 +182,6 @@ Future<_Resolved?> _resolveBest(String videoId) async {
             a.bitrate.bitsPerSecond));
       if (pool.isEmpty) {
         lastError = Exception('$client returned no audio-only streams');
-        print('[yt_cache] $client: $lastError');
         continue;
       }
 
@@ -268,7 +267,6 @@ class SongCache {
       final f = File(rec.filePath);
       if (!await f.exists()) {
         await box.delete(videoId);
-        print('[yt_cache] stale record evicted: $videoId');
         return null;
       }
       return rec;
@@ -431,7 +429,6 @@ class SongCache {
           } catch (_) {}
         }
       }
-      print('[yt_cache] deleted $videoId');
     } catch (e) {
       print('[yt_cache] delete($videoId) failed: $e');
     }

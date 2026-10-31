@@ -62,12 +62,10 @@ _getManifestWithFallback(String videoId) async {
       final usable = manifest.audioOnly.where(_hasUsableUrl).toList();
       if (usable.isNotEmpty) {
         final clientName = client.payload['context']?['client']?['clientName'];
-        print('[yt_audio] $videoId resolved via $clientName');
         return (manifest: manifest, client: client);
       }
       // Manifest came back but every stream is URL-less (PO-token wall).
       lastError = Exception('$client returned no audio streams with URLs');
-      print('[yt_audio] $client: $lastError');
     } catch (e) {
       print('[yt_audio] $client failed: $e');
       lastError = e;
@@ -219,7 +217,6 @@ Future<void> handleAudioRequest(HttpRequest request) async {
     return;
   }
 
-  print('Processing request for video ID: $videoId (Quality: $quality)');
 
   try {
     final audioStreamInfo = await resolveAudioStreamInfo(videoId, quality);

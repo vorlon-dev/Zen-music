@@ -221,7 +221,6 @@ class LosslessService {
       if (id == null || id.length != 11) return null;
       _saavnToYt[saavnId] = id;
       _evict(_saavnToYt);
-      print('[lossless] JioSaavn "$query" -> YT $id');
       return id;
     } catch (e) {
       print('[lossless] JioSaavn YTM lookup failed: $e');
@@ -294,7 +293,6 @@ class LosslessService {
       _streamCache[videoId] =
       (streams: streams, expiry: now.add(_positiveTtl));
       _evict(_streamCache);
-      print('[lossless] resolved $videoId (${streams.length} tiers)');
       return streams;
     } catch (e) {
       print('[lossless] endpoint error for $videoId: $e');

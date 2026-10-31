@@ -171,7 +171,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
         final cookies = await wv.getAllCookies();
         for (final c in cookies) {
           if (c.name == 'sp_dc' && c.value.length >= 20) {
-            debugPrint('[zen-login] sp_dc captured via getAllCookies');
             await _finishLogin('sp_dc=${c.value}');
             return;
           }
@@ -193,7 +192,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
         }
         final m = RegExp(r'sp_dc=([^;\s]{20,})').firstMatch(cookie);
         if (m != null) {
-          debugPrint('[zen-login] sp_dc captured via document.cookie');
           await _finishLogin('sp_dc=${m.group(1)}');
           return;
         }
@@ -224,7 +222,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
           if (decoded is Map) {
             final token = decoded['token']?.toString() ?? '';
             if (token.startsWith('BQ')) {
-              debugPrint('[zen-login] bearer token captured via fetch hook');
               _done = true;
               _poll?.cancel();
               _closeWindow();
@@ -301,7 +298,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
         final t = jsonDecode(tokensJson) as Map;
         final token = t['token']?.toString() ?? '';
         if (token.startsWith('BQ')) {
-          debugPrint('[zen-login] bearer token captured via fetch hook');
           _done = true;
           _poll?.cancel();
           await SpotifyAuth.instance.ingestAccessToken(token);

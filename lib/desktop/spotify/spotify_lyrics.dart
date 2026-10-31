@@ -80,7 +80,6 @@ class SpotifyLyricsService {
         'https://spclient.wg.spotify.com/color-lyrics/v2/track/$cleanId?format=json&vocalRemoval=false&market=from_token';
       }
 
-      debugPrint('[spotify-lyrics] fetching $urlStr');
 
       final r = await http.get(
         Uri.parse(urlStr),

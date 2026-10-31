@@ -62,7 +62,6 @@ class LastfmService {
       if (key != null && key.isNotEmpty) {
         _sessionKey = key;
         _user.value = (name == null || name.isEmpty) ? 'connected' : name;
-        debugPrint('[lastfm] connected as ${_user.value}');
         unawaited(_flushQueue()); // send whatever piled up offline
       } else if (!hasCredentials) {
         debugPrint('[lastfm] disabled — set kLastfmApiKey/kLastfmApiSecret '
@@ -191,7 +190,6 @@ class LastfmService {
     final box = Hive.box('SETTINGS');
     await box.put('LASTFM_SESSION_KEY', key);
     await box.put('LASTFM_USER', _user.value);
-    debugPrint('[lastfm] connected as ${_user.value}');
     unawaited(_flushQueue());
     return 'Connected as ${_user.value}.';
   }
@@ -206,7 +204,6 @@ class LastfmService {
       await box.delete('LASTFM_SESSION_KEY');
       await box.delete('LASTFM_USER');
     } catch (_) {}
-    debugPrint('[lastfm] disconnected');
   }
 
   void _stopCallbackServer() {
@@ -268,7 +265,6 @@ class LastfmService {
         'duration': c.total!.inSeconds.toString(),
     };
     await _writeCall('track.updateNowPlaying', params);
-    debugPrint('[lastfm] now playing: ${c.artist} — ${c.title}');
   }
 
   Future<void> _scrobble(_Candidate c) async {
@@ -289,7 +285,6 @@ class LastfmService {
         if (c.total != null && c.total!.inSeconds > 0)
           'duration': c.total!.inSeconds.toString(),
       });
-      debugPrint('[lastfm] scrobbled: ${c.artist} — ${c.title}');
       unawaited(_flushQueue()); // good moment to push the backlog too
     } catch (e) {
       debugPrint('[lastfm] scrobble queued (offline?): $e');

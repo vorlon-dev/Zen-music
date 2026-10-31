@@ -1262,7 +1262,6 @@ class MediaPlayer extends ChangeNotifier {
             if (cdn != null && token != null && cdn.isNotEmpty) {
               final clientToken =
               await SpotifyAuth.instance.getClientToken();
-              print('[spotify-play] DRM source for $spotifyUri');
               return AudioSource.uri(Uri.parse(cdn), tag: tag, headers: {
                 'User-Agent': SpotifyConfig.userAgent,
                 'Origin': 'https://open.spotify.com',

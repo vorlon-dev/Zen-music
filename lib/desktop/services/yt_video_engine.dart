@@ -127,7 +127,6 @@ Future<List<_Res>> _resolveCandidates(String videoId) async {
         return res;
       }
       lastError = Exception('$client returned no video streams with URLs');
-      print('[yt_video] $client: $lastError');
     } catch (e) {
       print('[yt_video] $client failed for $videoId: $e');
       lastError = e;
@@ -256,7 +255,6 @@ Future<String> _serverBase() async {
   _srv = srv;
   srv.listen(_route, onError: (Object e) => print('[yt_video] server: $e'));
   _base = 'http://127.0.0.1:${srv.port}';
-  print('[yt_video] proxy started on $_base');
   return _base!;
 }
 

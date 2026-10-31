@@ -60,7 +60,6 @@ class DownloadManager {
           status == 'DOWNLOADING' && !activeIds.contains(id);
       final isInvalidQueued = status == 'QUEUED' && !queuedIds.contains(id);
       if (isInvalidDownloading || isInvalidQueued) {
-        debugPrint("Cleaning up interrupted download: ${song['title']}");
         await _updateSongMetadata(id, {'status': 'DELETED'});
       }
     }
