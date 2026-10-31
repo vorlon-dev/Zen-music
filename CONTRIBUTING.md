@@ -312,6 +312,24 @@ We follow [Semantic Versioning](https://semver.org/). The version is set in `pub
 - **MINOR**: New functionality (backward compatible)
 - **PATCH**: Bug fixes (backward compatible)
 
+### Release Signing
+
+Release APKs are signed with a release key so users can update between versions. The key is never committed.
+
+1. Create a keystore once and keep it (and its passwords) safe. Losing it means users must uninstall to update:
+   ```bash
+   keytool -genkeypair -v -keystore zenmusic-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias zenmusic
+   ```
+2. Encode it as base64:
+   ```bash
+   base64 -w0 zenmusic-release.jks                                                     # Linux / macOS
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("zenmusic-release.jks"))           # Windows PowerShell
+   ```
+3. Add these GitHub repository secrets (Settings > Secrets and variables > Actions):
+   `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
+
+The release and nightly workflows write `android/key.properties` from these secrets. Without them, builds fall back to the debug key (for testing only).
+
 ### Release Checklist
 
 - [ ] All tests pass
