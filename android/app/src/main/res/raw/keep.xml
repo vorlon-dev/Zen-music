@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Resource shrinking must not remove the Material 3 colors that
+  Material3Tokens.kt looks up by name via Resources.getIdentifier().
+-->
+<resources
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@color/m3_*" />
