@@ -98,3 +98,37 @@
 # Keep generic signatures for reflection
 -keepattributes Signature
 -keepattributes *Annotation*
+
+# ─────────────────────────────────────────────
+# 8. Shrink-only mode (safety)
+# ─────────────────────────────────────────────
+
+# This app calls Java/Kotlin from native code and Dart (JNI, method
+# channels) by NAME. To keep that safe, R8 is used only to REMOVE unused
+# code: no renaming and no optimization passes.
+-dontobfuscate
+-dontoptimize
+
+# ─────────────────────────────────────────────
+# 9. Classes reached by name from native code / Dart
+# ─────────────────────────────────────────────
+
+# Innertube (YouTube Music) models and serializers
+-keep class com.music.innertube.** { *; }
+
+# media_kit's Android helper is looked up by libmpv over JNI
+-keep class com.alexmercerind.** { *; }
+
+# package:jni (dartjni) resolves Java classes by name
+-keep class com.github.dart_lang.jni.** { *; }
+
+# FFmpegKit: native code calls back into several classes by name
+-keep class com.antonkarpenko.ffmpegkit.** { *; }
+
+# Optional / platform classes that are referenced but not shipped
+-dontwarn com.google.android.play.core.**
+-dontwarn javax.annotation.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+

@@ -71,8 +71,14 @@ android {
             signingConfig = signingConfigs.getByName(
                 if (hasReleaseKeystore) "release" else "debug"
             )
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8 code shrinking (unused-code removal only; see the
+            // -dontobfuscate / -dontoptimize notes in proguard-rules.pro).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
