@@ -305,7 +305,6 @@ class _VideoBackdropState extends State<VideoBackdrop> {
     try {
       c.setPlaybackSpeed(speed);
       _currentSpeed = speed;
-      debugPrint('VideoBackdrop: speed → ${speed}x');
     } catch (_) {
       _speedControlAvailable = false;
       _currentSpeed = 1.0;

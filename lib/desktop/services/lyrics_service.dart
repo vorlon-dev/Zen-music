@@ -568,7 +568,6 @@ class LyricsService {
         if (cached is Map) {
           final d = LyricsData.fromMap(Map<String, dynamic>.from(cached));
           if (d != null) {
-            print('[yt_lyrics] cache hit for "${clean.cleanTitle}"');
             return d;
           }
         }

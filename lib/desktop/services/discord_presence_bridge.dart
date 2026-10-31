@@ -53,7 +53,6 @@ class DiscordPresenceBridge {
       return;
     }
     _ready = true;
-    debugPrint('[discord] rich presence armed ($appId)');
     unawaited(_connect());
   }
 
@@ -70,7 +69,6 @@ class DiscordPresenceBridge {
       await Future<void>.sync(
           () => FlutterDiscordRPC.instance.connect(autoRetry: true));
       _connected = true;
-      debugPrint('[discord] connected to the Discord client');
       _send(); // flush whatever arrived while connecting
     } catch (e) {
       _connected = false;

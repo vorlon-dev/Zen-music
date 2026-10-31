@@ -85,14 +85,12 @@ class SmtcBridge {
       return;
     }
     if (_ready) {
-      debugPrint('[smtc] init skipped — already ready');
       return;
     }
     if (_dead) {
       debugPrint('[smtc] init skipped — failed earlier this session');
       return;
     }
-    debugPrint('[smtc] init starting — loading the Rust plugin…');
     try {
       // main.dart stays untouched: running initialize() from a service is
       // equivalent to the package example's "await SMTCWindows.initialize()"
@@ -100,7 +98,6 @@ class SmtcBridge {
       // singleton is constructed before runApp().
       WidgetsFlutterBinding.ensureInitialized();
       await SMTCWindows.initialize();
-      debugPrint('[smtc] plugin loaded');
       final smtc = SMTCWindows(
         config: const SMTCConfig(
           fastForwardEnabled: false,
@@ -122,7 +119,6 @@ class SmtcBridge {
           PressedButton.stop => SmtcButton.stop,
           _ => null,
         };
-        debugPrint('[smtc] OS button press: $ours');
         if (ours != null && !_presses.isClosed) _presses.add(ours);
       });
       _smtc = smtc;
@@ -138,17 +134,14 @@ class SmtcBridge {
   // ── Playback status ──
 
   void playing() {
-    debugPrint('[smtc] status → playing');
     _fire(() => _smtc!.setPlaybackStatus(PlaybackStatus.playing));
   }
 
   void paused() {
-    debugPrint('[smtc] status → paused');
     _fire(() => _smtc!.setPlaybackStatus(PlaybackStatus.paused));
   }
 
   void stopped() {
-    debugPrint('[smtc] status → stopped');
     _fire(() async {
       await _smtc!.setPlaybackStatus(PlaybackStatus.stopped);
       await _smtc!.clearMetadata();
@@ -158,7 +151,6 @@ class SmtcBridge {
   // ── Track metadata ──
 
   void updateTrack(SmtcTrack track) {
-    debugPrint('[smtc] track → "${track.title}" — ${track.artist}');
     _fire(() async {
       await _smtc!.updateMetadata(MusicMetadata(
         title: track.title.isEmpty ? 'ZenMusic' : track.title,

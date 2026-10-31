@@ -122,7 +122,6 @@ class WindowsBackdropService {
     if (!Platform.isWindows) return;
     if (_inited) return;
     _inited = true;
-    debugPrint('[backdrop] init — Windows video backdrop');
     try {
       final box = Hive.box('SETTINGS');
       final dynamic stored = box.get(_kEnabledKey);
@@ -131,7 +130,6 @@ class WindowsBackdropService {
       debugPrint('[backdrop] settings read failed (defaulting to on): $e');
     }
     if (!_enabled) {
-      debugPrint('[backdrop] disabled in settings — staying off');
       return;
     }
     await _startup();
@@ -143,7 +141,6 @@ class WindowsBackdropService {
     try {
       Hive.box('SETTINGS').put(_kEnabledKey, value);
     } catch (_) {}
-    debugPrint('[backdrop] enabled: $value');
     if (!Platform.isWindows || _dead) return;
     if (value) {
       await _startup();
@@ -300,7 +297,6 @@ class WindowsBackdropService {
       );
       _player = player;
       _controller = controller;
-      debugPrint('[backdrop] video player ready (muted, looping)');
     } catch (e) {
       _dead = true;
       _player = null;
@@ -364,7 +360,6 @@ class WindowsBackdropService {
       await player.open(Media(url), play: _isPlaying);
       if (token != _resolveToken || !_enabled) return;
       _setState(WindowsBackdropState.active);
-      debugPrint('[backdrop] video ${width}x$height → $videoId');
     } catch (e) {
       if (token != _resolveToken || !_enabled) return;
       _setState(WindowsBackdropState.hidden);
@@ -375,7 +370,6 @@ class WindowsBackdropService {
         if (_enabled &&
             _currentVideoId == videoId &&
             _state == WindowsBackdropState.hidden) {
-          debugPrint('[backdrop] retrying $videoId…');
           _resolve(videoId);
         }
       });
