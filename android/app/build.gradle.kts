@@ -20,6 +20,12 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // Store native libraries compressed inside the APK. This makes
+            // the downloaded APK much smaller (libmpv, libflutter and libapp
+            // are ~34 MB uncompressed); the system extracts them at install.
+            useLegacyPackaging = true
+        }
         resources {
             // libsoxr ships AL/LGPL META-INF metadata that breaks
             // duplicate-resource merging.
