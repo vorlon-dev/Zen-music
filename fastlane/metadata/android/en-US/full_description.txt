@@ -1,0 +1,16 @@
+ZenMusic is a free, open-source music player built with Flutter. It brings several music sources into one clean, fast interface so you don't have to switch between apps.
+
+<b>Features</b>
+• Search and play from JioSaavn, YouTube Music and Spotify in one place
+• Synced lyrics that follow the song
+• Listen Together: sync playback with friends
+• Offline downloads
+• Song recognition
+• Sleep timer and equalizer
+• Customizable player skins, sliders and layouts
+
+<b>Open source</b>
+ZenMusic is licensed under GPL-3.0. Source code, issues and releases are on GitHub.
+
+<b>Please note</b>
+ZenMusic is still in active development, so you may run into bugs. Some sources may be unavailable in your region without a VPN or proxy. ZenMusic is an unofficial client and is not affiliated with YouTube, JioSaavn or Spotify.
