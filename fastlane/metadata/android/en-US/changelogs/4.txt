@@ -1,0 +1,2 @@
+Latest ZenMusic release. See the full release notes on GitHub:
+https://github.com/vorlon-dev/Zen-music/releases
