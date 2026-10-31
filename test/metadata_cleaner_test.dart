@@ -4,7 +4,8 @@ import 'package:zenmusic/desktop/services/lyrics_service.dart';
 void main() {
   group('MetadataCleaner.clean titles', () {
     test('strips an (Official Video) tag', () {
-      final r = MetadataCleaner.clean('Song Name (Official Video)', 'Some Artist');
+      final r =
+          MetadataCleaner.clean('Song Name (Official Video)', 'Some Artist');
       expect(r.cleanTitle, 'Song Name');
       expect(r.primaryArtist, 'Some Artist');
       expect(r.featuredArtists, isEmpty);
@@ -42,11 +43,13 @@ void main() {
     });
 
     test('removes hashtags', () {
-      expect(MetadataCleaner.clean('Song #shorts', 'Artist').cleanTitle, 'Song');
+      final r = MetadataCleaner.clean('Song #shorts', 'Artist');
+      expect(r.cleanTitle, 'Song');
     });
 
     test('removes emoji', () {
-      expect(MetadataCleaner.clean('Song \u{1F525}', 'Artist').cleanTitle, 'Song');
+      final r = MetadataCleaner.clean('Song \u{1F525}', 'Artist');
+      expect(r.cleanTitle, 'Song');
     });
 
     test('decodes HTML entities', () {
