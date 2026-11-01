@@ -247,6 +247,8 @@ class KugouLyrics {
       final res = await req.close().timeout(const Duration(seconds: 12));
       if (res.statusCode != 200) {
         _log('HTTP ${res.statusCode} from ${uri.host}');
+        // Drain the error body — undrained responses pin the socket.
+        await res.drain<void>().timeout(const Duration(seconds: 5));
         return null;
       }
       final body = await res.transform(utf8.decoder).join();

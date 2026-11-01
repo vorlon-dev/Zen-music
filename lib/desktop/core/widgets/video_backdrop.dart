@@ -1,9 +1,29 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:video_player/video_player.dart';
-class VideoBackdrop extends StatefulWidget {
+
+/// Video backdrop behind the player UI — one contract, two engines.
+///
+/// SP-76: Android / iOS / macOS keep the proven video_player implementation.
+/// Windows runs media_kit (libmpv) instead: `video_player` ships NO Windows
+/// implementation in this app's dependency set (pubspec.lock carries only
+/// the android / avfoundation / web hosts), so every Spotify canvas on
+/// Windows used to die inside initialize() and the backdrop silently
+/// cleared itself — the canvas "never worked" on the platform this app is
+/// mostly used on. Both engines report the same signals: poster while
+/// warming up, first-frame reveal, [onReadyChanged], [onUnavailable].
+///
+/// Looping: [shortLoop] marks a source that is already a short loop
+/// (Spotify canvases are 3–8 s clips) — the whole asset loops, muted,
+/// seamlessly where the engine supports it. [synchronized] marks a
+/// full-length video (YT music video) that is position-locked to the audio
+/// stream instead. The two are mutually exclusive by contract.
+class VideoBackdrop extends StatelessWidget {
   final String streamUrl;
   final bool playing;
   final Duration clipLength;
@@ -16,13 +36,18 @@ class VideoBackdrop extends StatefulWidget {
   /// Pass the song's artwork to kill the initial black gap.
   final String? posterUrl;
 
-  /// True when the source is already a short loop (Apple canvas):
+  /// True when the source is already a short loop (Spotify canvas):
   /// loop the entire asset, no clip window.
   final bool shortLoop;
 
   /// SYNCHRONIZED mode: full-length, unmuted, position locked to
   /// [positionStream]. Requires positionStream to be provided.
   final bool synchronized;
+
+  /// First frame is on screen (and the poster can hand over), or the
+  /// backdrop went back to warming up. SP-76: the player screen uses this
+  /// to fade the still cover out exactly while the canvas fades in.
+  final ValueChanged<bool>? onReadyChanged;
 
   const VideoBackdrop({
     super.key,
@@ -36,13 +61,75 @@ class VideoBackdrop extends StatefulWidget {
     this.posterUrl,
     this.shortLoop = false,
     this.synchronized = false,
+    this.onReadyChanged,
   });
 
   @override
-  State<VideoBackdrop> createState() => _VideoBackdropState();
+  Widget build(BuildContext context) {
+    if (Platform.isWindows) {
+      return _MediaKitBackdrop(
+        streamUrl: streamUrl,
+        playing: playing,
+        httpHeaders: httpHeaders,
+        onUnavailable: onUnavailable,
+        posterUrl: posterUrl,
+        onReadyChanged: onReadyChanged,
+      );
+    }
+    return _VideoPlayerBackdrop(
+      streamUrl: streamUrl,
+      playing: playing,
+      clipLength: clipLength,
+      clipStart: clipStart,
+      httpHeaders: httpHeaders,
+      onUnavailable: onUnavailable,
+      positionStream: positionStream,
+      posterUrl: posterUrl,
+      shortLoop: shortLoop,
+      synchronized: synchronized,
+      onReadyChanged: onReadyChanged,
+    );
+  }
 }
 
-class _VideoBackdropState extends State<VideoBackdrop> {
+// ══════════════════════════════════════════════════════════════════════
+// Engine 1 — video_player (Android / iOS / macOS / web). Unchanged
+// behavior, plus onReadyChanged reporting and native looping for
+// shortLoop sources.
+// ══════════════════════════════════════════════════════════════════════
+
+class _VideoPlayerBackdrop extends StatefulWidget {
+  final String streamUrl;
+  final bool playing;
+  final Duration clipLength;
+  final Duration? clipStart;
+  final Map<String, String> httpHeaders;
+  final void Function(String reason)? onUnavailable;
+  final Stream<Duration>? positionStream;
+  final String? posterUrl;
+  final bool shortLoop;
+  final bool synchronized;
+  final ValueChanged<bool>? onReadyChanged;
+
+  const _VideoPlayerBackdrop({
+    required this.streamUrl,
+    this.playing = true,
+    this.clipLength = const Duration(seconds: 15),
+    this.clipStart,
+    this.httpHeaders = const {},
+    this.onUnavailable,
+    this.positionStream,
+    this.posterUrl,
+    this.shortLoop = false,
+    this.synchronized = false,
+    this.onReadyChanged,
+  });
+
+  @override
+  State<_VideoPlayerBackdrop> createState() => _VideoPlayerBackdropState();
+}
+
+class _VideoPlayerBackdropState extends State<_VideoPlayerBackdrop> {
   VideoPlayerController? _controller;
   bool _initialized = false;
   bool _errorSent = false;
@@ -94,7 +181,7 @@ class _VideoBackdropState extends State<VideoBackdrop> {
   }
 
   @override
-  void didUpdateWidget(covariant VideoBackdrop oldWidget) {
+  void didUpdateWidget(covariant _VideoPlayerBackdrop oldWidget) {
     super.didUpdateWidget(oldWidget);
 
     if (widget.streamUrl != oldWidget.streamUrl) {
@@ -132,6 +219,7 @@ class _VideoBackdropState extends State<VideoBackdrop> {
     _applyingSeek = false;
     _loopingSeek = false;
     _currentSpeed = 1.0;
+    widget.onReadyChanged?.call(false);
 
     final c = VideoPlayerController.networkUrl(
       Uri.parse(widget.streamUrl),
@@ -192,14 +280,19 @@ class _VideoBackdropState extends State<VideoBackdrop> {
 
     // CANVAS mode: muted clip loop.
     await c.setVolume(0);
-    await c.setLooping(false);
 
     if (widget.shortLoop) {
+      // SP-76: the whole asset IS the loop (a Spotify canvas is a 3–8 s
+      // clip). Prefer the platform's native looping — seamless where it
+      // is supported — and keep the tick seek below as the safety net
+      // for engines where setLooping is a no-op.
+      await c.setLooping(true);
       _loopStart = Duration.zero;
       _loopEnd = c.value.duration > Duration.zero
           ? c.value.duration
           : const Duration(seconds: 5);
     } else {
+      await c.setLooping(false);
       final duration = c.value.duration;
       var start = widget.clipStart ?? _autoClipStart(duration);
       var end = start + widget.clipLength;
@@ -336,7 +429,10 @@ class _VideoBackdropState extends State<VideoBackdrop> {
     if (!_videoReady) {
       if (c.value.isBuffering) return;
       if (c.value.position <= Duration.zero && !c.value.isPlaying) return;
-      if (mounted) setState(() => _videoReady = true);
+      if (mounted) {
+        setState(() => _videoReady = true);
+        widget.onReadyChanged?.call(true);
+      }
     }
 
     if (widget.synchronized) {
@@ -402,7 +498,7 @@ class _VideoBackdropState extends State<VideoBackdrop> {
       return;
     }
 
-    // Canvas mode: loop window.
+    // Canvas mode: loop window (safety net beside native looping).
     final end = _loopEnd;
     if (end == null || _loopingSeek) return;
 
@@ -477,6 +573,197 @@ class _VideoBackdropState extends State<VideoBackdrop> {
                   ),
                 );
               },
+            )
+          else if (!_errorSent)
+            const SizedBox.expand(),
+        ],
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Engine 2 — media_kit (Windows). libmpv plays the canvas: muted, the
+// whole asset looped via PlaylistMode.loop (loop-file restarts a clip
+// without a reload gap), hardware acceleration on — the exact player
+// recipe the Windows video backdrop service already ships.
+// ══════════════════════════════════════════════════════════════════════
+
+class _MediaKitBackdrop extends StatefulWidget {
+  final String streamUrl;
+  final bool playing;
+  final Map<String, String> httpHeaders;
+  final void Function(String reason)? onUnavailable;
+  final String? posterUrl;
+  final ValueChanged<bool>? onReadyChanged;
+
+  const _MediaKitBackdrop({
+    required this.streamUrl,
+    this.playing = true,
+    this.httpHeaders = const {},
+    this.onUnavailable,
+    this.posterUrl,
+    this.onReadyChanged,
+  });
+
+  @override
+  State<_MediaKitBackdrop> createState() => _MediaKitBackdropState();
+}
+
+class _MediaKitBackdropState extends State<_MediaKitBackdrop> {
+  Player? _player;
+  VideoController? _controller;
+  bool _ready = false;
+  bool _errorSent = false;
+  StreamSubscription<String>? _errorSub;
+  StreamSubscription<VideoParams>? _videoSub;
+  bool _starting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MediaKitBackdrop oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.streamUrl != oldWidget.streamUrl) {
+      // A fresh URL is a fresh attempt — the previous one's failure
+      // must not latch the new one into the error state.
+      _errorSent = false;
+      _setReady(false);
+      _open(playing: widget.playing);
+    }
+    if (widget.playing != oldWidget.playing) {
+      final p = _player;
+      if (p != null) {
+        if (widget.playing) {
+          p.play();
+        } else {
+          p.pause();
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _errorSub?.cancel();
+    _videoSub?.cancel();
+    final p = _player;
+    _player = null;
+    _controller = null;
+    try {
+      p?.dispose();
+    } catch (_) {}
+    super.dispose();
+  }
+
+  Future<void> _start() async {
+    if (_starting || _player != null) return;
+    _starting = true;
+    try {
+      MediaKit.ensureInitialized();
+
+      final player = Player();
+      await player.setVolume(0.0); // silent layer — audio owns the app
+      // Whole-asset loop: canvases are 3–8 s clips and mpv restarts the
+      // file without a reload gap.
+      await player.setPlaylistMode(PlaylistMode.loop);
+
+      _errorSub = player.stream.error.listen((String e) {
+        debugPrint('[canvas-mk] playback error: $e');
+        _reportUnavailable('player_error');
+      });
+      _videoSub = player.stream.videoParams.listen((VideoParams p) {
+        // VideoParams arrive once the decoder knows the frame geometry —
+        // the media_kit equivalent of "first frame is renderable". mpv
+        // names the frame size w/h and hands them over nullable.
+        final int w = p.w ?? 0;
+        final int h = p.h ?? 0;
+        if (!_ready && w > 0 && h > 0 && mounted) {
+          setState(() => _ready = true);
+          widget.onReadyChanged?.call(true);
+        }
+      });
+
+      _player = player;
+      _controller = VideoController(
+        player,
+        configuration: const VideoControllerConfiguration(
+          enableHardwareAcceleration: true,
+        ),
+      );
+      await _open(playing: widget.playing);
+    } catch (e) {
+      debugPrint('[canvas-mk] init failed: $e');
+      _reportUnavailable('stream_init_failed');
+    } finally {
+      _starting = false;
+    }
+  }
+
+  Future<void> _open({required bool playing}) async {
+    final p = _player;
+    if (p == null) return;
+    try {
+      await p.open(
+        Media(
+          widget.streamUrl,
+          httpHeaders:
+              widget.httpHeaders.isEmpty ? null : widget.httpHeaders,
+        ),
+        play: playing,
+      );
+    } catch (e) {
+      debugPrint('[canvas-mk] open failed: $e');
+      _reportUnavailable('stream_init_failed');
+    }
+  }
+
+  void _setReady(bool ready) {
+    if (_ready == ready) return;
+    _ready = ready;
+    if (mounted) setState(() {});
+    widget.onReadyChanged?.call(ready);
+  }
+
+  void _reportUnavailable(String reason) {
+    if (_errorSent) return;
+    _errorSent = true;
+    _setReady(false);
+    widget.onUnavailable?.call(reason);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+
+    return IgnorePointer(
+      // Pure backdrop — every tap belongs to the player UI above it.
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // POSTER under everything: blurred artwork — kills the black
+          // warm-up gap AND gives stalled starts a visible state.
+          if (!_ready)
+            Positioned.fill(
+              child: (widget.posterUrl?.isNotEmpty ?? false)
+                  ? _PosterArtwork(imageUrl: widget.posterUrl!)
+                  : const ColoredBox(color: Colors.black),
+            ),
+          if (_ready && controller != null)
+            Positioned.fill(
+              // COVER: fill both dimensions, crop the rest — the same
+              // presentation the video_player engine computes by hand.
+              child: Video(
+                controller: controller,
+                fit: BoxFit.cover,
+                wakelock: false,
+                filterQuality: FilterQuality.low,
+                controls: NoVideoControls,
+              ),
             )
           else if (!_errorSent)
             const SizedBox.expand(),

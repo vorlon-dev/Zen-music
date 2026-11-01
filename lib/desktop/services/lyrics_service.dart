@@ -1,4 +1,5 @@
-// ZenMusic Desktop — synced lyrics via LRCLIB + YouTube metadata cleaner.
+// ZenMusic Desktop — synced lyrics via LRCLIB + BetterLyrics word-sync +
+// YouTube metadata cleaner.
 //
 // PORTED FROM Echo Music (https://github.com/EchoMusicApp/Echo-Music),
 // modules: metadata/src/.../cleaner/MetadataCleaner.kt + CleanerRules.kt and
@@ -11,6 +12,23 @@
 //   * channel-junk scrub ("- Topic", "VEVO", " Records", " Official"),
 //     bracket-tag extraction (junk vs feat vs version), artist splitting
 //
+// SP-74: WORD-BY-WORD lyrics — models, parsers and orchestration ported
+// from LastWave-Desktop's lyrics backend (lib/features/lyrics/*):
+//   * LyricWord + LyricLine.durationMs/words (positional constructor kept —
+//     every existing call site compiles unchanged)
+//   * LrcParser now understands ENHANCED LRC (<mm:ss.xx> inline word
+//     stamps) and synthesizes proportional word timings for plain LRC so
+//     every synced line gets the karaoke wipe (LastWave
+//     interpolateLineSyllables parity)
+//   * TtmlParser: TTML <p begin end> lines with timed <span begin end>
+//     word runs (Apple-Music style documents), nested x-bg spans, ms/s/
+//     clock times, XML entity unescape
+//   * KaraokeParser: QQ rows `[lineStart,lineDur](wStart,wDur)word …`
+//   * BetterLyrics (lyrics-api.boidu.dev) races FIRST for word timing;
+//     its line-synced fallback document is kept as a last resort
+//   * cache v2: per-line word timings + durations serialized; v1 rows
+//     still load and are hydrated (durations + interpolated words)
+//
 // LRCLIB (https://lrclib.net) is a free, open, key-less lyrics database.
 // Politeness: descriptive User-Agent, bounded strategies, Hive cache,
 // inflight dedupe per track, session negative cache.
@@ -18,29 +36,75 @@
 // ZERO new pubspec deps (dart:io HttpClient, dart:convert, hive — all present).
 // R5 print policy: all debug prints use the [yt_lyrics] prefix.
 //
-// LEDGER: imports exactly ONE other ZenMusic file — kugou_lyrics.dart
-// (SP-68 fallback provider, one-way; that file never imports back).
+// LEDGER: imports exactly TWO other ZenMusic files — kugou_lyrics.dart
+// (SP-68 fallback provider) and better_lyrics.dart (SP-74 word-sync
+// provider), both one-way; neither imports back.
 // Nothing else needs editing for it to compile.
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:hive/hive.dart';
 
+import 'better_lyrics.dart'; // SP-74: word-sync provider (one-way dep)
 import 'kugou_lyrics.dart'; // SP-68: KuGou fallback provider (one-way dep)
 
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
 
-/// One timed lyric line (per-line timing for v1; word-sync is a v2 hook).
+/// One timed word inside a lyric line (SP-74 word-by-word sync).
+class LyricWord {
+  const LyricWord({
+    required this.timeMs,
+    required this.durationMs,
+    required this.text,
+  });
+
+  /// Word start in milliseconds.
+  final int timeMs;
+
+  /// Word duration in milliseconds (0 = unknown).
+  final int durationMs;
+
+  /// Word text (trailing spacing included where the source carries it).
+  final String text;
+}
+
+/// One timed lyric line. SP-74 adds [durationMs] and word timings; the
+/// positional 2-arg constructor is kept so every existing call site
+/// compiles unchanged.
 class LyricLine {
-  const LyricLine(this.timeMs, this.text);
+  const LyricLine(this.timeMs, this.text,
+      {this.durationMs = 0, this.words = const []});
 
   /// Line start in milliseconds (already includes the file's [offset:] tag).
   final int timeMs;
 
   final String text;
+
+  /// Line duration in milliseconds (0 = unknown — legacy cache rows;
+  /// [LyricsData.hydrate] fills it from the next line).
+  final int durationMs;
+
+  /// Word timings. REAL stamps when the source is word-synced (TTML
+  /// spans / karaoke rows / enhanced LRC); proportional interpolation
+  /// when the source is plain line-synced (karaoke wipe sugar); empty
+  /// only for legacy un-hydrated rows.
+  final List<LyricWord> words;
+
+  bool get hasWords => words.isNotEmpty;
+
+  /// End of the line's timed content in ms (words may run past text).
+  int get endMs {
+    var e = timeMs + durationMs;
+    for (final w in words) {
+      final we = w.timeMs + w.durationMs;
+      if (we > e) e = we;
+    }
+    return e;
+  }
 }
 
 /// Result of a lyrics lookup.
@@ -71,33 +135,59 @@ class LyricsData {
   bool get hasSynced => synced != null && synced!.isNotEmpty;
   bool get hasAny => hasSynced || (plain != null && plain!.trim().isNotEmpty);
 
+  /// True when any synced line carries REAL word timings.
+  bool get hasWordTimings => synced?.any((l) => l.hasWords) ?? false;
+
+  /// SP-74: fill legacy rows (v1 cache / bare lines) — line durations
+  /// from the next cue, interpolated word timings for the wipe. Returns
+  /// a new LyricsData when anything changed, else `this`.
+  LyricsData hydrate() {
+    if (synced == null || synced!.isEmpty) return this;
+    final lines = LrcParser.hydrateLines(synced!);
+    if (identical(lines, synced)) return this;
+    return LyricsData(
+      trackName: trackName,
+      artistName: artistName,
+      synced: lines,
+      plain: plain,
+      instrumental: instrumental,
+      wordSync: wordSync,
+    );
+  }
+
   Map<String, dynamic> toMap() => <String, dynamic>{
-    'v': 1,
+    'v': 2,
     'track': trackName,
     'artist': artistName,
     'synced': synced == null
         ? null
-        : synced!.map((l) => '${l.timeMs}\u0001${l.text}').join('\u0002'),
+        : synced!.map(_encodeLine).join('\u0002'),
     'plain': plain,
     'instrumental': instrumental,
     'wordSync': wordSync,
   };
 
+  /// v2 row: timeMs \u0001 durMs \u0001 wordSpec \u0001 text — wordSpec is
+  /// `start,dur,base64(text)` joined by `|` (empty when no words).
+  /// v1 rows (timeMs \u0001 text) still parse.
+  static String _encodeLine(LyricLine l) {
+    final spec = l.words
+        .map((w) => '${w.timeMs},${w.durationMs},'
+            '${base64Encode(utf8.encode(w.text))}')
+        .join('|');
+    return '${l.timeMs}\u0001${l.durationMs}\u0001$spec\u0001${l.text}';
+  }
+
   static LyricsData? fromMap(Map<dynamic, dynamic> m) {
     try {
-      if ((m['v'] ?? 0) != 1) return null;
+      final v = (m['v'] ?? 1);
+      if (v is! int || (v != 1 && v != 2)) return null;
       List<LyricLine>? synced;
       final raw = m['synced'] as String?;
       if (raw != null && raw.isNotEmpty) {
         synced = raw
             .split('\u0002')
-            .map((e) {
-          final i = e.indexOf('\u0001');
-          if (i <= 0) return null;
-          final ms = int.tryParse(e.substring(0, i));
-          if (ms == null) return null;
-          return LyricLine(ms, e.substring(i + 1));
-        })
+            .map(_decodeLine)
             .whereType<LyricLine>()
             .toList()
           ..sort((a, b) => a.timeMs.compareTo(b.timeMs));
@@ -114,6 +204,41 @@ class LyricsData {
     } catch (_) {
       return null;
     }
+  }
+
+  static LyricLine? _decodeLine(String e) {
+    final f = e.split('\u0001');
+    if (f.length >= 4) {
+      final ms = int.tryParse(f[0]);
+      if (ms == null) return null;
+      final dur = int.tryParse(f[1]) ?? 0;
+      final words = <LyricWord>[];
+      if (f[2].isNotEmpty) {
+        for (final ws in f[2].split('|')) {
+          final p = ws.split(',');
+          if (p.length != 3) continue;
+          final wStart = int.tryParse(p[0]);
+          final wDur = int.tryParse(p[1]);
+          if (wStart == null || wDur == null) continue;
+          try {
+            words.add(LyricWord(
+              timeMs: wStart,
+              durationMs: wDur,
+              text: utf8.decode(base64Decode(p[2])),
+            ));
+          } catch (_) {
+            continue;
+          }
+        }
+      }
+      return LyricLine(ms, f[3], durationMs: dur, words: words);
+    }
+    // v1 row: timeMs \u0001 text.
+    final i = e.indexOf('\u0001');
+    if (i <= 0) return null;
+    final ms = int.tryParse(e.substring(0, i));
+    if (ms == null) return null;
+    return LyricLine(ms, e.substring(i + 1));
   }
 }
 
@@ -454,12 +579,24 @@ class LrcParser {
 
   static final RegExp _wsRe = RegExp(r'\s+');
 
+  /// Enhanced-LRC inline word stamps: `<mm:ss.xx>`, `<mm:ss:xx>`.
+  static final RegExp _wordStampRe =
+      RegExp(r'<(\d{1,3}):(\d{2})[.:](\d{2,3})>');
+
   /// Parses an LRC file body into sorted [LyricLine]s.
   /// Handles: multiple timestamps per line, `mm:ss` / `mm:ss.xx` / `mm:ss.xxx`,
   /// and the `[offset:±ms]` metadata tag.
+  ///
+  /// SP-74 (LastWave parity):
+  ///   * ENHANCED LRC — inline `<mm:ss.xx>` word stamps become real
+  ///     [LyricWord]s (each stamped run ends at the next stamp, the next
+  ///     line, or +800 ms); stamps are stripped from the display text.
+  ///   * every plain line gets a computed duration (next cue, clamped
+  ///     80..20000 ms, else 4000) and PROPORTIONAL interpolated word
+  ///     timings so the karaoke wipe works on every synced line.
   static List<LyricLine> parse(String lrc) {
     var offsetMs = 0;
-    final out = <LyricLine>[];
+    final entries = <({int timeMs, String body})>[];
 
     for (var raw in lrc.split('\n')) {
       final line = raw.trim();
@@ -476,9 +613,9 @@ class LrcParser {
       final matches = _tsRe.allMatches(line).toList();
       if (matches.isEmpty) continue;
 
-      // Text = everything after the LAST timestamp on the line.
-      var text = line.substring(matches.last.end).trim();
-      text = text.replaceAll(_wsRe, ' ');
+      // Body = everything after the LAST [timestamp]; inline word
+      // stamps (<mm:ss.xx>) survive in the body for the word run pass.
+      var body = line.substring(matches.last.end).trim();
       for (final m in matches) {
         final min = int.parse(m.group(1)!);
         final sec = int.parse(m.group(2)!);
@@ -494,11 +631,475 @@ class LrcParser {
           }
         }
         final ms = min * 60000 + sec * 1000 + frac - offsetMs;
-        out.add(LyricLine(ms < 0 ? 0 : ms, text));
+        entries.add((timeMs: ms < 0 ? 0 : ms, body: body));
       }
     }
-    out.sort((a, b) => a.timeMs.compareTo(b.timeMs));
+    entries.sort((a, b) => a.timeMs.compareTo(b.timeMs));
+
+    final out = <LyricLine>[];
+    for (var i = 0; i < entries.length; i++) {
+      final e = entries[i];
+      final nextTime = i + 1 < entries.length ? entries[i + 1].timeMs : null;
+
+      // 1) real word stamps?
+      final words = _parseWordRuns(e.body, e.timeMs, nextTime);
+      if (words.isNotEmpty) {
+        final lineStart = math.min(e.timeMs, words.first.timeMs);
+        final dur = (nextTime != null
+                ? (nextTime - lineStart)
+                : 4000)
+            .clamp(80, 20000);
+        final display = e.body.replaceAll(_wordStampRe, '').trim();
+        final joined = words.map((w) => w.text).join(' ').trim();
+        out.add(LyricLine(
+          lineStart,
+          display.isNotEmpty && display.length >= joined.length
+              ? display
+              : joined,
+          durationMs: dur,
+          words: words,
+        ));
+        continue;
+      }
+
+      // 2) plain line — computed duration + interpolated word timings.
+      final text = e.body.replaceAll(_wordStampRe, '').trim();
+      if (text.isEmpty) continue;
+      final dur = (nextTime != null ? (nextTime - e.timeMs) : 4000)
+          .clamp(80, 20000);
+      out.add(LyricLine(
+        e.timeMs,
+        text.replaceAll(_wsRe, ' '),
+        durationMs: dur,
+        words: interpolateLineWords(
+          text: text,
+          startTimeMs: e.timeMs,
+          durationMs: dur,
+        ),
+      ));
+    }
     return out;
+  }
+
+  /// Enhanced-LRC word runs: each stamped run ends at the next stamp,
+  /// the next line, or +800 ms. Text before the first stamp carries no
+  /// timing (LastWave parity: it is not a syllable). Empty when the
+  /// body carries no stamps at all.
+  static List<LyricWord> _parseWordRuns(
+      String body, int lineStartMs, int? lineEndMs) {
+    final marks = _wordStampRe.allMatches(body).toList();
+    if (marks.isEmpty) return const <LyricWord>[];
+    final words = <LyricWord>[];
+    for (var i = 0; i < marks.length; i++) {
+      final mark = marks[i];
+      final until =
+          i + 1 < marks.length ? marks[i + 1].start : body.length;
+      final text = body.substring(mark.end, until).trim();
+      if (text.isEmpty) continue;
+      final startMs = _stampToMs(
+        mark.group(1)!,
+        mark.group(2)!,
+        mark.group(3)!,
+      );
+      final endMs = i + 1 < marks.length
+          ? _stampToMs(marks[i + 1].group(1)!, marks[i + 1].group(2)!,
+              marks[i + 1].group(3)!)
+          : (lineEndMs ?? (startMs + 800));
+      words.add(LyricWord(
+        timeMs: startMs.clamp(0, 1 << 31),
+        durationMs: (endMs - startMs).clamp(0, 1 << 31),
+        text: text,
+      ));
+    }
+    return words;
+  }
+
+  static int _stampToMs(String minRaw, String secRaw, String fracRaw) {
+    final min = int.tryParse(minRaw) ?? 0;
+    final sec = int.tryParse(secRaw) ?? 0;
+    var fracMs = 0;
+    if (fracRaw.length == 1) {
+      fracMs = (int.tryParse(fracRaw) ?? 0) * 100;
+    } else if (fracRaw.length == 2) {
+      fracMs = (int.tryParse(fracRaw) ?? 0) * 10;
+    } else if (fracRaw.length >= 3) {
+      fracMs = int.tryParse(fracRaw.substring(0, 3)) ?? 0;
+    }
+    return min * 60000 + sec * 1000 + fracMs;
+  }
+
+  /// SP-74: synthesize proportional word timings across a line's
+  /// duration for the smooth karaoke wipe on line-synced lyrics
+  /// (LastWave interpolateLineSyllables parity).
+  static List<LyricWord> interpolateLineWords({
+    required String text,
+    required int startTimeMs,
+    required int durationMs,
+  }) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return const <LyricWord>[];
+    final words = trimmed.split(_wsRe);
+    var totalChars = 0;
+    for (final w in words) {
+      totalChars += w.length;
+    }
+    if (totalChars <= 0) return const <LyricWord>[];
+
+    final safeDuration =
+        durationMs > 0 ? durationMs : math.max(1500, words.length * 350);
+    final syllables = <LyricWord>[];
+    var currentMs = startTimeMs;
+    for (var i = 0; i < words.length; i++) {
+      final word = words[i];
+      final isLast = i == words.length - 1;
+      final wordDur = math.max(
+        120,
+        ((word.length / totalChars) * safeDuration).round(),
+      );
+      syllables.add(LyricWord(
+        timeMs: currentMs,
+        durationMs: wordDur,
+        text: isLast ? word : '$word ',
+      ));
+      currentMs += wordDur;
+    }
+    return syllables;
+  }
+
+  /// SP-74: fill missing durations / word timings on any line list —
+  /// used by [LyricsData.hydrate] for v1 cache rows and by callers
+  /// that built lines without timing metadata. Returns the SAME list
+  /// when everything is already hydrated.
+  static List<LyricLine> hydrateLines(List<LyricLine> lines) {
+    var anyChanged = false;
+    final out = <LyricLine>[];
+    for (var i = 0; i < lines.length; i++) {
+      final l = lines[i];
+      final nextTime = i + 1 < lines.length ? lines[i + 1].timeMs : null;
+      var dur = l.durationMs;
+      var lineChanged = false;
+      if (dur <= 0) {
+        dur = (nextTime != null ? (nextTime - l.timeMs) : 4000)
+            .clamp(80, 20000);
+        lineChanged = true;
+      }
+      var words = l.words;
+      if (words.isEmpty && l.text.trim().isNotEmpty) {
+        words = interpolateLineWords(
+          text: l.text,
+          startTimeMs: l.timeMs,
+          durationMs: dur,
+        );
+        lineChanged = true;
+      }
+      out.add(lineChanged
+          ? LyricLine(l.timeMs, l.text, durationMs: dur, words: words)
+          : l);
+      if (lineChanged) anyChanged = true;
+    }
+    return anyChanged ? out : lines;
+  }
+
+  /// SP-74: duration plausibility for providers whose responses carry
+  /// no candidate identity (BetterLyrics): the lyric timeline must
+  /// roughly fit the track. Rejects timelines running 45 s+ past the
+  /// end, or covering under half of a track while missing 90 s+.
+  /// Lenient by design (LastWave parity).
+  static bool plausibleDuration(List<LyricLine> lines, int? durationMs) {
+    if (durationMs == null || durationMs <= 0) return true;
+    if (lines.length < 3) return true;
+    final expectedMs = durationMs;
+    if (expectedMs < 60000) return true;
+    var endMs = 0;
+    for (final l in lines) {
+      final e = l.endMs;
+      if (e > endMs) endMs = e;
+    }
+    if (endMs <= 0) return true;
+    if (endMs > expectedMs + 45000) return false;
+    if (endMs < expectedMs * 0.45 && expectedMs - endMs > 90000) {
+      return false;
+    }
+    return true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TTML parser (SP-74) — port of LastWave parseTtml.
+// ---------------------------------------------------------------------------
+
+/// One span located by the depth-aware scanner (SP-75): attribute string,
+/// inner XML, and the whitespace right after its matching close tag — the
+/// same three pieces the old flat regex captured, nesting-correct.
+class _SpanHit {
+  const _SpanHit(this.attrs, this.content, this.trailing);
+  final String attrs;
+  final String content;
+  final String trailing;
+}
+
+/// Parses TTML documents (`<p begin end>` lines, timed `<span begin end>`
+/// word runs, nested `<span ttm:role="x-bg">` backgrounds) into lines.
+/// Span-less TTML yields line-synced lines WITHOUT words (real word sync
+/// must come from timed spans — interpolation is applied elsewhere).
+/// SP-75: span extraction is depth-aware — the old flat regex closed a
+/// container span at the FIRST inner `</span>`, which swallowed the first
+/// word span of every x-bg-wrapped line.
+class TtmlParser {
+  TtmlParser._();
+
+  static final RegExp _pTag = RegExp(
+      r'<(?:[a-zA-Z0-9_-]+:)?p\b([^>]*?)>(.*?)</(?:[a-zA-Z0-9_-]+:)?p>',
+      dotAll: true,
+      caseSensitive: false);
+  static final RegExp _anySpanTag = RegExp(
+      r'<(/?)(?:[a-zA-Z0-9_-]+:)?span\b([^>]*?)(/?)>',
+      caseSensitive: false);
+  static final RegExp _xmlTag = RegExp(r'<[^>]+>');
+  static final RegExp _beginRe = RegExp(
+      r'''(?:begin|start|startTime|from)=["']([^"']+)["']''',
+      caseSensitive: false);
+  static final RegExp _endRe = RegExp(
+      r'''(?:end|endTime|to)=["']([^"']+)["']''',
+      caseSensitive: false);
+  static final RegExp _interSpanSpaces = RegExp(r'</span>\s+<span');
+
+  /// SP-75: depth-aware replacement for the old flat span regex. Returns
+  /// the spans DIRECTLY nested in [xml] (depth 1), each with its attribute
+  /// string, inner XML and the whitespace following its MATCHING close tag.
+  /// Self-closing and unbalanced spans are skipped (the old regex ignored
+  /// them too). Scanning is a simple span-tag stack — attributes never
+  /// contain `>` in the documents this serves (Apple TTML / boidu.dev).
+  static List<_SpanHit> _scanSpans(String xml) {
+    final hits = <_SpanHit>[];
+    final open = <(String, int)>[]; // (attrs, contentStart)
+    for (final m in _anySpanTag.allMatches(xml)) {
+      if (m.group(1) == '/') {
+        if (open.isEmpty) continue; // stray close tag
+        final (attrs, contentStart) = open.removeLast();
+        if (open.isNotEmpty) continue; // nested — the parent recursion owns it
+        var tEnd = m.end;
+        while (tEnd < xml.length &&
+            (xml.codeUnitAt(tEnd) == 0x20 ||
+                xml.codeUnitAt(tEnd) == 0x09 ||
+                xml.codeUnitAt(tEnd) == 0x0A ||
+                xml.codeUnitAt(tEnd) == 0x0D)) {
+          tEnd++;
+        }
+        hits.add(_SpanHit(
+            attrs, xml.substring(contentStart, m.start),
+            xml.substring(m.end, tEnd)));
+      } else if (m.group(3) == '/') {
+        continue; // self-closing: no content, ignored (parity with old regex)
+      } else {
+        open.add((m.group(2) ?? '', m.end));
+      }
+    }
+    return hits;
+  }
+
+  static List<LyricLine> parse(String ttml) {
+    var raw = ttml;
+    if (raw.contains(r'\n') && !raw.contains('\n')) {
+      raw = raw.replaceAll(r'\r\n', '\n').replaceAll(r'\n', '\n');
+    }
+    final lines = <LyricLine>[];
+
+    for (final p in _pTag.allMatches(raw)) {
+      final pAttrs = p.group(1) ?? '';
+      final inner = p.group(2) ?? '';
+      final start = _time(_beginRe.firstMatch(pAttrs)?.group(1) ?? '');
+      final end = _time(_endRe.firstMatch(pAttrs)?.group(1) ?? '');
+      final duration = (end - start).clamp(0, 1 << 31);
+      final spans = _scanSpans(inner);
+
+      if (spans.isEmpty) {
+        final text = _unescape(inner.replaceAll(_xmlTag, '').trim());
+        if (text.isEmpty) continue;
+        lines.add(LyricLine(
+          start,
+          text,
+          durationMs: duration > 0 ? duration : 4000,
+        ));
+        continue;
+      }
+
+      final words = <LyricWord>[];
+      final buf = StringBuffer();
+      final hasExplicitSpaces = _interSpanSpaces.hasMatch(inner);
+
+      void emit(List<_SpanHit> nodes, bool parentIsLast) {
+        for (var i = 0; i < nodes.length; i++) {
+          final n = nodes[i];
+          final isLast = parentIsLast && i == nodes.length - 1;
+          final beginMatch = _beginRe.firstMatch(n.attrs);
+          final endMatch = _endRe.firstMatch(n.attrs);
+
+          if (beginMatch == null || endMatch == null) {
+            // Untimed container span (e.g. <span ttm:role="x-bg">) —
+            // recurse into its directly nested spans.
+            emit(_scanSpans(n.content), isLast);
+            continue;
+          }
+
+          // Timed span that CONTAINS timed spans (timed x-bg wrapper
+          // around per-word spans): prefer the finer inner timing —
+          // collapsing it into one leaf word would kill word sync.
+          final nested = _scanSpans(n.content);
+          var nestedTimed = false;
+          for (final c in nested) {
+            if (_beginRe.firstMatch(c.attrs) != null &&
+                _endRe.firstMatch(c.attrs) != null) {
+              nestedTimed = true;
+              break;
+            }
+          }
+          if (nestedTimed) {
+            emit(nested, isLast);
+            continue;
+          }
+
+          // Leaf word.
+          final ws = _time(beginMatch.group(1) ?? '');
+          final we = _time(endMatch.group(1) ?? '');
+          final wt = _unescape(n.content.replaceAll(_xmlTag, ''));
+          final addSpace = hasExplicitSpaces
+              ? (wt.endsWith(' ') || n.trailing.isNotEmpty)
+              : (!isLast && !wt.endsWith(' '));
+          final sylText = addSpace ? '${wt.trimRight()} ' : wt.trim();
+          words.add(LyricWord(
+            timeMs: ws,
+            durationMs: (we - ws).clamp(0, 1 << 31),
+            text: sylText,
+          ));
+          buf.write(sylText);
+        }
+      }
+
+      emit(spans, true);
+
+      final text = buf.toString().trim();
+      if (text.isEmpty) continue;
+      lines.add(LyricLine(
+        start,
+        text,
+        durationMs: duration,
+        words: words,
+      ));
+    }
+    lines.sort((a, b) => a.timeMs.compareTo(b.timeMs));
+    return lines;
+  }
+
+  /// `<p begin="00:01:23.456">` / `12.3s` / `450ms` / `12.3` → ms.
+  static int _time(String s) {
+    var str = s.trim();
+    if (str.isEmpty) return 0;
+    try {
+      if (str.endsWith('ms')) {
+        final val = str.substring(0, str.length - 2).trim();
+        if (!val.contains(':')) {
+          return double.parse(val).round();
+        }
+        str = val;
+      } else if (str.endsWith('s')) {
+        str = str.substring(0, str.length - 1).trim();
+      }
+      if (str.contains(':')) {
+        final parts = str.split(':');
+        final nums = parts.map(double.parse).toList().reversed.toList();
+        var total = 0.0;
+        var mult = 1.0;
+        for (final n in nums) {
+          total += n * mult;
+          mult *= 60.0;
+        }
+        return (total * 1000).round();
+      }
+      return (double.parse(str) * 1000).round();
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static String _unescape(String s) => s
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&apos;', "'")
+      .replaceAll('&#39;', "'");
+}
+
+// ---------------------------------------------------------------------------
+// QQ karaoke parser (SP-74) — port of LastWave parseBetterKaraoke.
+// ---------------------------------------------------------------------------
+
+/// Parses QQ-karaoke rows: `[lineStart,lineDur](wStart,wDur[,?])word …`
+/// (milliseconds). Empty when the payload carries no karaoke rows.
+class KaraokeParser {
+  KaraokeParser._();
+
+  static final RegExp _lineRe = RegExp(r'^\[(\d{1,8}),(\d{1,8})](.*)$');
+  static final RegExp _wordRe =
+      RegExp(r'\((\d{1,8}),(\d{1,8})(?:,\d{1,8})?\)([^()]*)');
+  static final RegExp _timeRe = RegExp(r'\(\d{1,8},\d{1,8}(?:,\d{1,8})?\)');
+
+  static List<LyricLine> parse(String raw) {
+    if (!raw.contains('[') || !raw.contains('(')) return const <LyricLine>[];
+    final rows = <LyricLine>[];
+    for (final source in raw.split('\n')) {
+      final match = _lineRe.firstMatch(source.trim());
+      if (match == null) continue;
+      final lineStart = int.tryParse(match.group(1) ?? '');
+      final lineDuration = int.tryParse(match.group(2) ?? '') ?? 0;
+      if (lineStart == null) continue;
+      final body = match.group(3) ?? '';
+      final words = <LyricWord>[];
+      for (final w in _wordRe.allMatches(body)) {
+        final text = _decodeEntities(w.group(3) ?? '').trim();
+        if (text.isEmpty) continue;
+        final startMs = int.tryParse(w.group(1) ?? '');
+        if (startMs == null) continue;
+        final durMs = int.tryParse(w.group(2) ?? '') ?? 0;
+        words.add(LyricWord(
+          timeMs: startMs,
+          durationMs: durMs.clamp(0, 1 << 31),
+          text: text,
+        ));
+      }
+      if (words.isEmpty) continue;
+      final text = _decodeEntities(body.replaceAll(_timeRe, '')).trim();
+      if (text.isEmpty) continue;
+      rows.add(LyricLine(
+        math.min(lineStart, words.first.timeMs),
+        text,
+        durationMs: lineDuration.clamp(0, 1 << 31),
+        words: words,
+      ));
+    }
+    rows.sort((a, b) => a.timeMs.compareTo(b.timeMs));
+    return rows;
+  }
+
+  static String _decodeEntities(String raw) {
+    if (!raw.contains('&')) return raw;
+    var out = raw.replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'), (m) {
+      final code = int.tryParse(m.group(1)!, radix: 16);
+      return code == null ? m.group(0)! : String.fromCharCode(code);
+    });
+    out = out.replaceAllMapped(RegExp(r'&#(\d+);'), (m) {
+      final code = int.tryParse(m.group(1)!);
+      return code == null ? m.group(0)! : String.fromCharCode(code);
+    });
+    return out
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'")
+        .replaceAll('&#39;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&');
   }
 }
 
@@ -548,8 +1149,17 @@ class LyricsService {
     final key = 'v1|${clean.primaryArtist.toLowerCase()}|'
         '${clean.cleanTitle.toLowerCase()}|${album?.toLowerCase() ?? ''}';
     if (_inflight.containsKey(key)) return _inflight[key]!;
+    // BLOCK body on purpose — an arrow body `() => _inflight.remove(key)`
+    // implicitly RETURNS the removed Future (the `fut` being defined!),
+    // and whenComplete waits for a Future returned by its callback:
+    // the inflight future would wait for itself and NEVER complete —
+    // every lyrics lookup (cache hit or network) would hang forever.
+    // (SP-76 root cause of "no lyrics for any song"; LastWave's
+    // repository uses remove-as-statement for exactly this reason.)
     final fut = _lookupImpl(clean, key, durationMs, album, forceRefresh)
-        .whenComplete(() => _inflight.remove(key));
+        .whenComplete(() {
+      _inflight.remove(key);
+    });
     _inflight[key] = fut;
     return fut;
   }
@@ -568,11 +1178,72 @@ class LyricsService {
         if (cached is Map) {
           final d = LyricsData.fromMap(Map<String, dynamic>.from(cached));
           if (d != null) {
-            return d;
+            // SP-74: hydrate legacy v1 rows (durations + wipe words).
+            return d.hydrate();
           }
         }
       }
       if (_misses.contains(key)) return null;
+
+      // SP-74 stage 0: BetterLyrics word-sync race (Apple-Music style
+      // TTML with timed word spans / QQ karaoke rows / enhanced LRC).
+      // REAL word timing wins outright; a line-synced document is kept
+      // only as a last resort (LRCLIB's identity-checked matches are
+      // better for plain line sync).
+      LyricsData? betterLineSynced;
+      try {
+        final doc = await BetterLyrics.lookup(
+          title: clean.cleanTitle,
+          artist: clean.primaryArtist,
+          durationMs: durationMs,
+          album: album,
+        );
+        if (doc != null) {
+          final lines = doc.wordSynced
+              ? _parseWordDocument(doc.payload)
+              : const <LyricLine>[];
+          if (lines.isNotEmpty &&
+              LrcParser.plausibleDuration(lines, durationMs)) {
+            final data = LyricsData(
+              trackName: clean.cleanTitle,
+              artistName: clean.primaryArtist,
+              synced: lines,
+              plain: null,
+              instrumental: false,
+              wordSync: true,
+            );
+            final box = await _cache();
+            await box.put(key, data.toMap());
+            final wordLines = lines.where((l) => l.hasWords).length;
+            print('[yt_lyrics] word-sync resolved "${data.trackName}" — '
+                '${data.artistName} ($wordLines/${lines.length} word-timed '
+                'lines, ${doc.wordSynced ? "word-sync source" : "line source"})');
+            return data;
+          }
+          if (lines.isEmpty) {
+            // Line-synced (or unparseable) document — keep as last resort.
+            final fallback = LrcParser.parse(doc.payload);
+            if (fallback.isNotEmpty &&
+                LrcParser.plausibleDuration(fallback, durationMs)) {
+              betterLineSynced = LyricsData(
+                trackName: clean.cleanTitle,
+                artistName: clean.primaryArtist,
+                synced: fallback,
+                plain: null,
+                instrumental: false,
+                wordSync: false,
+              );
+              print('[yt_lyrics] better_lyrics line-synced document kept '
+                  'as last resort (${fallback.length} lines)');
+            }
+          } else {
+            print('[yt_lyrics] better_lyrics word document rejected by the '
+                'duration gate — falling through');
+          }
+        }
+      } catch (e) {
+        print('[yt_lyrics] better_lyrics stage failed: $e');
+      }
 
       // Echo's 5-stage fallback chain (+ final stage: raw paste as-is).
       final strategies = <Map<String, String>>[
@@ -652,6 +1323,17 @@ class LyricsService {
         print('[yt_lyrics] kugou fallback failed: $e');
       }
 
+      // SP-74: BetterLyrics line-synced document as the final resort —
+      // better than a miss when LRCLIB and KuGou both came up empty.
+      if (betterLineSynced != null && betterLineSynced.hasAny) {
+        final box = await _cache();
+        await box.put(key, betterLineSynced.toMap());
+        print('[yt_lyrics] resolved "${betterLineSynced.trackName}" from '
+            'the better_lyrics last resort (synced: '
+            '${betterLineSynced.hasSynced})');
+        return betterLineSynced;
+      }
+
       _misses.add(key);
       print('[yt_lyrics] no lyrics found for "${clean.cleanTitle}" / '
           '"${clean.primaryArtist}"');
@@ -662,13 +1344,41 @@ class LyricsService {
     }
   }
 
+  /// SP-74: parse a word-timed document through the right parser —
+  /// TTML spans first, QQ karaoke rows second (LastWave
+  /// parseBetterDocument parity, minus the plain-LRC tail which never
+  /// carries real word timing).
+  static List<LyricLine> _parseWordDocument(String payload) {
+    final lower = payload.toLowerCase();
+    if (lower.contains('<tt') ||
+        lower.contains('<p') ||
+        lower.contains('http://www.w3.org/ns/ttml')) {
+      final ttml = TtmlParser.parse(payload);
+      if (ttml.isNotEmpty && ttml.any((l) => l.hasWords)) return ttml;
+    }
+    final karaoke = KaraokeParser.parse(payload);
+    if (karaoke.isNotEmpty) return karaoke;
+    final enhanced = LrcParser.parse(payload);
+    if (enhanced.isNotEmpty && enhanced.any((l) => l.hasWords)) {
+      // Only genuine enhanced-LRC stamps count (plain rows are
+      // interpolated — those are display sugar, not word sync).
+      return enhanced;
+    }
+    return const <LyricLine>[];
+  }
+
   static Future<List<Map<String, dynamic>>> _search(
       Map<String, String> params) async {
     try {
       final uri = Uri.https(_host, '/api/search', params);
       final req = await _client.getUrl(uri);
       final res = await req.close().timeout(const Duration(seconds: 12));
-      if (res.statusCode != 200) return const <Map<String, dynamic>>[];
+      if (res.statusCode != 200) {
+        // Drain the error body — undrained responses pin the socket for
+        // the whole session (LRCLIB misses are routine).
+        await res.drain<void>().timeout(const Duration(seconds: 5));
+        return const <Map<String, dynamic>>[];
+      }
       final body = await res.transform(utf8.decoder).join();
       final decoded = jsonDecode(body);
       if (decoded is! List) return const <Map<String, dynamic>>[];

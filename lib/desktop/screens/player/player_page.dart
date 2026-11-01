@@ -15,6 +15,7 @@ import 'package:text_scroll/text_scroll.dart';
 import 'package:palette_generator/palette_generator.dart';
 
 import 'package:zenmusic/desktop/backdrop/windows_backdrop.dart';
+import 'package:zenmusic/desktop/backdrop/windows_backdrop_service.dart';
 import 'package:zenmusic/desktop/core/widgets/square_artwork.dart';
 import 'package:zenmusic/desktop/core/widgets/video_backdrop.dart';
 import 'package:zenmusic/desktop/screens/player/widgets/animated_gradient_bg.dart';
@@ -25,6 +26,7 @@ import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/innertubex_bridge.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_canvas.dart'; // SP-9
 import 'package:zenmusic/desktop/themes/colors.dart';
 import 'package:zenmusic/desktop/themes/dark.dart';
@@ -37,16 +39,19 @@ import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 import 'package:zenmusic/desktop/lossless/lossless_service.dart';
 
 // ════════════════════════════════════════════════════════════════════
-// ICON TABLE — every Fluent icon the page uses lives here.
+// ICON TABLE — every icon the page uses lives here.
 // ════════════════════════════════════════════════════════════════════
 class _Ic {
   _Ic._();
   static const chevronDown = FluentIcons.chevron_down_24_regular;
   static const queue = FluentIcons.text_bullet_list_ltr_24_regular;
-  static const lyrics = FluentIcons.text_quote_24_regular;
+  static const lyrics = FluentIcons.text_quote_24_regular; // empty-state only
+  static const lyricsBtn = Icons.lyrics_rounded; // LastWave lyrics button
+  static const hq = Icons.high_quality_rounded; // LastWave quality "HQ" badge
   static const heart = FluentIcons.heart_24_regular;
   static const heartFill = FluentIcons.heart_24_filled;
-  static const more = FluentIcons.more_horizontal_24_regular;
+  static const more = FluentIcons.more_vertical_24_regular; // mobile
+  static const moreH = FluentIcons.more_horizontal_24_regular; // desktop
   static const play = FluentIcons.play_24_filled;
   static const pause = FluentIcons.pause_24_filled;
   static const previous = FluentIcons.previous_24_filled;
@@ -62,6 +67,14 @@ class _Ic {
 const Color _kHeartRed = Color(0xFFFF4D6D);
 const Color _kFallbackTint = Color(0xFF5B3FD1);
 
+/// MOBILE (Android / iOS) uses the LastWave-style player.
+/// DESKTOP (Windows / macOS / Linux) keeps the original glass-dock player.
+/// Every method below is suffixed `Mobile` or `Desktop` accordingly.
+
+/// LastWave's player has no heart button (double-tap the artwork to like).
+/// Flip to `true` to put a heart button next to the lyrics button again.
+const bool _kShowHeartButton = false;
+
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, this.videoId});
   final String? videoId;
@@ -75,7 +88,7 @@ class _PlayerPageState extends State<PlayerPage> {
   final GlobalKey<SwipeArtworkStackState> _swipeKey =
   GlobalKey<SwipeArtworkStackState>();
   Color? color;
-  List<Color> paletteColors = [];
+  List<Color> paletteColors = []; // desktop gradient
   bool fetchedSong = false;
   late MediaItem? currentSong;
   bool _hasLyrics = false;
@@ -83,9 +96,29 @@ class _PlayerPageState extends State<PlayerPage> {
   bool _showLyrics = false; // narrow layout: swap artwork <-> lyrics
   final GlobalKey<State> _lyricsBoxKey = GlobalKey();
 
+  // Seek bar: live finger position while dragging (null = follow playback).
+  double? _seekDrag;
+
+  // Double-tap-to-like heart burst on the artwork.
+  bool _heartBurst = false;
+
   // Video backdrop: synchronized song-video behind the artwork.
   String? _videoBackdropUrl;
   Map<String, String> _videoHeaders = const {};
+
+  // SP-76: Spotify canvas state. [_isSpotifyCanvas] marks the current
+  // backdrop as a short canvas loop (looped whole, never sync-seeked);
+  // [_canvasReady] flips once its first frame is on screen and the still
+  // cover hands its pixels over — the canvas-hero contract: the cover is
+  // the placeholder while the video warms up, and it comes back the
+  // moment the canvas leaves (no canvas / error / next track).
+  bool _isSpotifyCanvas = false;
+  bool _canvasReady = false;
+
+  bool get _canvasOwnsScreen =>
+      _isSpotifyCanvas && _videoBackdropUrl != null && _canvasReady;
+
+  bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
   // ------------------------------------------------------------ lifecycle
 
@@ -119,33 +152,60 @@ class _PlayerPageState extends State<PlayerPage> {
           _lyricsLoading = true;
           _hasLyrics = false;
           _showLyrics = false;
+          _seekDrag = null;
           _videoBackdropUrl = null; // stale video must not linger
+          _isSpotifyCanvas = false; // stale canvas must not linger
+          _canvasReady = false; // cover returns until the next canvas renders
         });
       }
       _maybeLoadVideoBackdrop();
     }
   }
 
-  /// Android (YT video) + Windows/Desktop (Spotify Canvas) backdrop.
+  /// SP-76: Spotify canvas for every track while a Spotify session is up
+  /// (direct id when the song carries one, title/artist resolve otherwise),
+  /// else the stock behaviour — Android (YT video) backdrop. Anonymous
+  /// sessions never ask for a canvas, so not-logged-in looks exactly as
+  /// it did before.
   Future<void> _maybeLoadVideoBackdrop() async {
     if (!AppearancePrefs.canvasEnabled.value) return;
     final id = currentSong?.id ?? '';
-    final spUri = currentSong?.extras?['spotifyUri'] as String?;
+    final song = currentSong;
+    final spUri = song?.extras?['spotifyUri'] as String?;
 
     // 1. Spotify Canvas
-    if (spUri != null && spUri.isNotEmpty) {
-      final url = await SpotifyCanvas.instance.fetchCanvasUrl(spUri);
+    if (song != null && SpotifyAuth.instance.loggedIn.value) {
+      final directMs = song.duration?.inMilliseconds ?? 0;
+      final totalMs = directMs > 0
+          ? directMs
+          : GetIt.I<MediaPlayer>().progressBarState.value.total.inMilliseconds;
+      final url = await SpotifyCanvas.instance.resolveCanvasUrl(
+        spotifyUri: (spUri?.isNotEmpty ?? false) ? spUri : null,
+        title: song.title,
+        artist:
+            (song.artist ?? song.album ?? song.extras?['subtitle'] ?? '')
+                .toString(),
+        album: song.album,
+        durationMs: totalMs > 0 ? totalMs : null,
+      );
       if (!mounted || currentSong?.id != id) return;
       if (url != null) {
         setState(() {
           _videoBackdropUrl = url;
           _videoHeaders = const {};
+          _isSpotifyCanvas = true;
         });
+        if (Platform.isWindows) {
+          // The canvas owns the screen — ask the blurred Windows video
+          // backdrop to stand down for this track (media_player re-feeds
+          // it on the next track change).
+          WindowsBackdropService.instance.trackChanged(videoId: null);
+        }
+        return;
       }
-      return;
     }
 
-    // 2. YouTube Music video backdrop (Android only)
+    // 2. YouTube Music video backdrop (Android only) — unchanged.
     if (!Platform.isAndroid) return;
     if (id.length != 11) return;
 
@@ -155,13 +215,27 @@ class _PlayerPageState extends State<PlayerPage> {
       setState(() {
         _videoBackdropUrl = streams!.videoUrl;
         _videoHeaders = streams.headers;
+        _isSpotifyCanvas = false;
       });
     }
   }
 
+  /// The Windows video backdrop stood down while the canvas owned the
+  /// screen — hand this track back to it when the canvas fails. Spotify-
+  /// engine tracks never get the backdrop (media_player's guard), so they
+  /// are skipped here too.
+  void _giveWindowsBackdropBack() {
+    if (!Platform.isWindows) return;
+    final spUri = currentSong?.extras?['spotifyUri'] as String?;
+    if (spUri != null && spUri.isNotEmpty) return;
+    WindowsBackdropService.instance.trackChanged(videoId: currentSong?.id);
+  }
+
   String _formatMs(int ms) {
     final d = Duration(milliseconds: ms);
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final mm = d.inMinutes.remainder(60).toString();
+    // Mobile (LastWave style): 2:47.  Desktop: 02:47.
+    final m = (_isMobile && d.inHours == 0) ? mm : mm.padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return d.inHours > 0 ? '${d.inHours}:$m:$s' : '$m:$s';
   }
@@ -219,6 +293,25 @@ class _PlayerPageState extends State<PlayerPage> {
 
   Color get _tint => color ?? _kFallbackTint;
 
+  // ------------------------------------------------ LastWave colour roles
+  // LastWave derives a Material-You style scheme from the cover art:
+  // a pale accent (seek bar / play button / titles), a mid-dark tonal
+  // surface (prev / next) and a near-black surface (chips, bottom row).
+
+  HSLColor get _hsl => HSLColor.fromColor(_tint);
+
+  Color _role(double sat, double light) => _hsl
+      .withSaturation(_hsl.saturation.clamp(sat * 0.5, sat).toDouble())
+      .withLightness(light)
+      .toColor();
+
+  Color get _accent => _role(0.55, 0.83); // seek bar, play button, header
+  Color get _onAccent => _role(0.50, 0.13); // icon on the play button
+  Color get _tonal => _role(0.22, 0.27); // prev / next
+  Color get _tonalActive => _role(0.30, 0.31); // shuffle / repeat when on
+  Color get _accentSoft => Color.lerp(_accent, Colors.white, 0.45)!;
+  static final Color _surface = Colors.white.withValues(alpha: 0.075);
+
   // ---------------------------------------------------------- small actions
 
   void _seekBy(int seconds) {
@@ -254,6 +347,56 @@ class _PlayerPageState extends State<PlayerPage> {
       isScrollControlled: true,
       constraints: const BoxConstraints(maxWidth: 560),
       builder: (_) => _QualitySheet(info: _AudioQuality.of(song)),
+    );
+  }
+
+  Future<void> _toggleFavourite(MediaItem song) async {
+    final extras = song.extras;
+    final id = extras?['videoId'];
+    if (extras == null || id == null) return;
+    HapticFeedback.lightImpact();
+    final box = Hive.box('FAVOURITES');
+    if (box.get(id) == null) {
+      await box.put(id, {
+        ...extras,
+        'createdAt': DateTime.now().millisecondsSinceEpoch,
+      });
+    } else {
+      await box.delete(id);
+    }
+  }
+
+  /// Double-tap on the artwork = like (never un-likes by accident).
+  Future<void> _doubleTapLike(MediaItem song) async {
+    final extras = song.extras;
+    final id = extras?['videoId'];
+    if (extras != null && id != null) {
+      final box = Hive.box('FAVOURITES');
+      if (box.get(id) == null) {
+        HapticFeedback.lightImpact();
+        await box.put(id, {
+          ...extras,
+          'createdAt': DateTime.now().millisecondsSinceEpoch,
+        });
+      }
+    }
+    if (!mounted) return;
+    setState(() => _heartBurst = true);
+    await Future<void>.delayed(const Duration(milliseconds: 650));
+    if (mounted) setState(() => _heartBurst = false);
+  }
+
+  void _openMore(BuildContext buttonContext) {
+    final song = GetIt.I<MediaPlayer>().currentSongNotifier.value;
+    if (song?.extras == null) return;
+    final RenderBox renderBox = buttonContext.findRenderObject() as RenderBox;
+    final position = renderBox.localToGlobal(Offset.zero);
+    final size = renderBox.size;
+    Modals.showPlayerOptionsModal(
+      context,
+      song!.extras!,
+      buttonPosition: position,
+      buttonSize: size,
     );
   }
 
@@ -356,24 +499,53 @@ class _PlayerPageState extends State<PlayerPage> {
               ),
               body: Stack(
                 children: [
-                  // Animated palette gradient
-                  Positioned.fill(
-                    child: AnimatedGradientBackground(
-                      colors: paletteColors.isNotEmpty
-                          ? paletteColors
-                          : [
-                        Colors.deepPurple.shade900,
-                        Colors.deepPurple.shade700,
-                        Colors.purple.shade800,
-                        Colors.indigo.shade900,
-                      ],
+                  if (_isMobile)
+                  // LastWave look: near-black base, only a whisper of the
+                  // cover colour behind the artwork.
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: RepaintBoundary(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 700),
+                            decoration: BoxDecoration(
+                              gradient: RadialGradient(
+                                center: const Alignment(0, -0.30),
+                                radius: 1.0,
+                                colors: [
+                                  _tint.withValues(alpha: 0.16),
+                                  _tint.withValues(alpha: 0.05),
+                                  Colors.black,
+                                ],
+                                stops: const [0, 0.55, 1],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                  // Desktop: animated palette gradient (own repaint layer)
+                    Positioned.fill(
+                      child: RepaintBoundary(
+                        child: AnimatedGradientBackground(
+                          colors: paletteColors.isNotEmpty
+                              ? paletteColors
+                              : [
+                            Colors.deepPurple.shade900,
+                            Colors.deepPurple.shade700,
+                            Colors.purple.shade800,
+                            Colors.indigo.shade900,
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
 
                   // SP-33: Windows video backdrop (muted, 16:9, blurred)
                   const WindowsVideoBackdrop(),
 
-                  // Synchronized video backdrop (reacts to play/pause)
+                  // Video backdrop: a full-length YT music video locked to
+                  // the audio position — or, SP-76, a Spotify canvas that
+                  // loops as a short silent clip while it owns the screen.
                   if (_videoBackdropUrl != null)
                     Positioned.fill(
                       child: ValueListenableBuilder<ButtonState>(
@@ -381,63 +553,85 @@ class _PlayerPageState extends State<PlayerPage> {
                         builder: (context, state, _) => VideoBackdrop(
                           streamUrl: _videoBackdropUrl!,
                           playing: state == ButtonState.playing,
-                          synchronized: true,
-                          positionStream:
-                          mediaPlayerOf(context).player.positionStream,
+                          shortLoop: _isSpotifyCanvas,
+                          synchronized: !_isSpotifyCanvas,
+                          positionStream: _isSpotifyCanvas
+                              ? null
+                              : mediaPlayerOf(context).player.positionStream,
                           posterUrl: song.artUri?.toString(),
                           httpHeaders: _videoHeaders,
+                          onReadyChanged: (ready) {
+                            if (mounted && ready != _canvasReady) {
+                              setState(() => _canvasReady = ready);
+                            }
+                          },
                           onUnavailable: (_) {
                             if (mounted) {
-                              setState(() => _videoBackdropUrl = null);
+                              setState(() {
+                                _videoBackdropUrl = null;
+                                _isSpotifyCanvas = false;
+                                _canvasReady = false;
+                              });
+                              _giveWindowsBackdropBack();
                             }
                           },
                         ),
                       ),
                     ),
 
-                  // Cover-colour ambient wash (top-centre glow)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 700),
-                        decoration: BoxDecoration(
-                          gradient: RadialGradient(
-                            center: const Alignment(0, -0.45),
-                            radius: 1.05,
-                            colors: [
-                              _tint.withValues(alpha: 0.38),
-                              _tint.withValues(alpha: 0.0),
-                            ],
+                  // Desktop only: cover-colour ambient wash (top-centre glow)
+                  if (!_isMobile)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: RepaintBoundary(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 700),
+                            decoration: BoxDecoration(
+                              gradient: RadialGradient(
+                                center: const Alignment(0, -0.45),
+                                radius: 1.05,
+                                colors: [
+                                  _tint.withValues(alpha: 0.38),
+                                  _tint.withValues(alpha: 0.0),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
 
-                  // Legibility scrim: lighter at top, heavier behind controls
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.black.withValues(alpha: 0.12),
-                              Colors.black.withValues(alpha: 0.30),
-                              Colors.black.withValues(alpha: 0.72),
-                            ],
-                            stops: const [0, 0.45, 1],
+                  // Legibility scrim. Desktop: always. Mobile: only over video.
+                  if (!_isMobile || _videoBackdropUrl != null)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: _isMobile
+                                  ? [
+                                Colors.black.withValues(alpha: 0.25),
+                                Colors.black.withValues(alpha: 0.45),
+                                Colors.black.withValues(alpha: 0.80),
+                              ]
+                                  : [
+                                Colors.black.withValues(alpha: 0.12),
+                                Colors.black.withValues(alpha: 0.30),
+                                Colors.black.withValues(alpha: 0.72),
+                              ],
+                              stops: const [0, 0.45, 1],
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
 
                   SafeArea(
                     child: Column(
                       children: [
-                        _buildTopBar(song),
+                        _topBar(song),
                         Expanded(
                           child: LayoutBuilder(
                             builder: (context, box) => _buildBody(song, box),
@@ -456,8 +650,747 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   // -------------------------------------------------------------- top bar
+  // [ v ]        NOW PLAYING        [ ⋮ ]
+  //              <playlist/album>
 
-  Widget _buildTopBar(MediaItem song) {
+  Widget _topBar(MediaItem song) =>
+      _isMobile ? _buildTopBarMobile(song) : _buildTopBarDesktop(song);
+
+  Widget _playerColumn(MediaItem song, BoxConstraints box,
+      {required bool swap}) =>
+      _isMobile
+          ? _buildPlayerColumnMobile(song, box, swap: swap)
+          : _buildPlayerColumnDesktop(song, box, swap: swap);
+
+  Widget _buildTopBarMobile(MediaItem song) {
+    final subtitle = song.album;
+    final wide = MediaQuery.of(context).size.width >= 900;
+    return SizedBox(
+      height: 58,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 6, 20, 6),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _Squircle(
+                width: 46,
+                height: 46,
+                radius: 17,
+                color: _surface,
+                tooltip: 'Close',
+                onTap: () => context.pop(),
+                child: const Icon(_Ic.chevronDown,
+                    size: 26, color: Colors.white),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 112),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _key.currentState?.openEndDrawer(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'NOW PLAYING',
+                      style: TextStyle(
+                        fontSize: 13,
+                        letterSpacing: 0.9,
+                        fontWeight: FontWeight.w800,
+                        color: _accent,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: _accentSoft,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // The queue lives in the end drawer (Q / tap the title).
+                  // On wide desktop windows keep an explicit button too.
+                  if (wide) ...[
+                    _Squircle(
+                      width: 46,
+                      height: 46,
+                      radius: 17,
+                      color: _surface,
+                      tooltip: 'Queue (Q)',
+                      onTap: () => _key.currentState?.openEndDrawer(),
+                      child: const Icon(_Ic.queue,
+                          size: 24, color: Colors.white),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  Builder(
+                    builder: (buttonContext) => _Squircle(
+                      width: 46,
+                      height: 46,
+                      radius: 17,
+                      color: _surface,
+                      tooltip: 'More',
+                      onTap: () => _openMore(buttonContext),
+                      child: const Icon(_Ic.more,
+                          size: 24, color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ----------------------------------------------------------------- body
+
+  Widget _buildBody(MediaItem song, BoxConstraints box) {
+    final wide = box.maxWidth >= 900;
+
+    if (wide) {
+      return Row(
+        children: [
+          Expanded(
+            flex: 5,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(40, 8, 20, 28),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: LayoutBuilder(
+                    builder: (context, inner) =>
+                        _playerColumn(song, inner, swap: false),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 6,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 40, 28),
+              child: _buildLyricsPanel(song),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final hPad = box.maxWidth >= 600 ? 40.0 : (_isMobile ? 20.0 : 22.0);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(hPad, 4, hPad, 16),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: LayoutBuilder(
+            builder: (context, inner) =>
+                _playerColumn(song, inner, swap: true),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Artwork (or lyrics) + title/artist + seek + transport + bottom row.
+  /// Artwork takes the height that is left; if even the minimum does not
+  /// fit, the column scrolls instead of overflowing.
+  ///
+  /// Smooth swap: artwork and lyrics both stay mounted and cross-fade with
+  /// a slide-up (lyrics rise from below, artwork drifts up + shrinks).
+  Widget _buildPlayerColumnMobile(MediaItem song, BoxConstraints box,
+      {required bool swap}) {
+    const controlsH = 318.0; // info + seek + transport + bottom row + gaps
+    const gap = 26.0;
+    final room = box.maxHeight - controlsH - gap;
+    final side = room.clamp(150.0, min(box.maxWidth, 520.0)).toDouble();
+    final needsScroll = side + gap + controlsH > box.maxHeight + 0.5;
+    final lyricsVisible = swap && _showLyrics && _hasLyrics;
+    final mobile = Platform.isAndroid || Platform.isIOS;
+
+    final media = SizedBox(
+      width: box.maxWidth,
+      height: side,
+      child: Stack(
+        children: [
+          // Artwork stays mounted (keeps palette updates alive).
+          Positioned.fill(
+            child: _SlideFade(
+              show: !lyricsVisible,
+              dy: -0.04,
+              fromScale: 0.94,
+              child: Center(
+                child: RepaintBoundary(
+                  // SP-76: while the Spotify canvas is on screen the still
+                  // cover fades out in step with the video's fade-in and
+                  // hands the pixels over (canvas-hero handover). Opacity
+                  // only — swipes and double-tap-like keep working.
+                  child: AnimatedOpacity(
+                    opacity: _canvasOwnsScreen ? 0.0 : 1.0,
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOut,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onDoubleTap: () => _doubleTapLike(song),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 600),
+                        width: side,
+                        height: side,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(36),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _tint.withValues(alpha: 0.32),
+                              blurRadius: mobile ? 44 : 60,
+                              spreadRadius: -10,
+                              offset: const Offset(0, 24),
+                            ),
+                          ],
+                        ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            _buildArtwork(song, breathing: true),
+                            // Double-tap heart burst.
+                            IgnorePointer(
+                              child: Center(
+                                child: AnimatedScale(
+                                  scale: _heartBurst ? 1.0 : 0.4,
+                                  duration: const Duration(milliseconds: 280),
+                                  curve: Curves.easeOutBack,
+                                  child: AnimatedOpacity(
+                                    opacity: _heartBurst ? 1 : 0,
+                                    duration: const Duration(milliseconds: 220),
+                                    child: Icon(
+                                      _Ic.heartFill,
+                                      size: min(side * 0.34, 120),
+                                      color: Colors.white,
+                                      shadows: const [
+                                        Shadow(
+                                            color: Colors.black54,
+                                            blurRadius: 24),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // Narrow layout: one stable lyrics slot, never re-parented.
+          // Always real size so it does not collapse while fading out.
+          if (swap)
+            Positioned.fill(
+              child: _SlideFade(
+                show: lyricsVisible,
+                dy: 0.08,
+                child: _lyricsBox(song, Size(box.maxWidth, side)),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        media,
+        const SizedBox(height: gap),
+        _buildInfoRowMobile(song, swap: swap),
+        const SizedBox(height: 14),
+        _buildSeekBarMobile(),
+        const SizedBox(height: 14),
+        _buildTransportMobile(),
+        const SizedBox(height: 18),
+        _buildBottomRowMobile(song),
+      ],
+    );
+
+    if (needsScroll) {
+      return SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        child: content,
+      );
+    }
+    return Align(alignment: Alignment.center, child: content);
+  }
+
+  // -------------------------------------------------------------- artwork
+
+  /// Tinder-style swipeable artwork: swipe left = next song, right =
+  /// previous. [breathing] (classic layout only) shrinks the cover slightly
+  /// while paused and restores it on play. Skins call without it.
+  Widget _buildArtwork(MediaItem song, {bool breathing = false}) {
+    final items = List<MediaItem>.from(GetIt.I<MediaPlayer>()
+        .songList
+        .map((src) => src.tag)
+        .whereType<MediaItem>());
+    final idx = items.indexWhere((m) => m.id == song.id);
+    final next = (idx >= 0 && idx + 1 < items.length) ? items[idx + 1] : null;
+    final prev = (idx > 0) ? items[idx - 1] : null;
+
+    return ValueListenableBuilder<ButtonState>(
+      valueListenable: mediaPlayerOf(context).buttonState,
+      builder: (context, state, _) {
+        final active =
+            state == ButtonState.playing || state == ButtonState.loading;
+        final stack = SwipeArtworkStack(
+          key: _swipeKey,
+          current: song,
+          next: next,
+          previous: prev,
+          active: active,
+          onSwipeNext: () => GetIt.I<MediaPlayer>().skipNext(), // SP-5b
+          onSwipePrevious: () => GetIt.I<MediaPlayer>().skipPrevious(), // SP-5b
+          cardBuilder: (context, item, isFront) => SquareArtwork(
+            song: item.extras ?? {'videoId': item.id, 'title': item.title},
+            borderRadius: _isMobile ? 36 : 16,
+            onImageReady: isFront ? updateBackgroundColor : null,
+          ),
+        );
+        if (!breathing) return stack;
+        return AnimatedScale(
+          scale: active ? 1.0 : (_isMobile ? 0.9 : 0.93),
+          duration: const Duration(milliseconds: 520),
+          curve: Curves.easeOutCubic,
+          child: stack,
+        );
+      },
+    );
+  }
+
+  // --------------------------------------------------------------- lyrics
+
+  Widget _lyricsBox(MediaItem song, Size size) {
+    return LyricsBox(
+      key: _lyricsBoxKey,
+      currentSong: song,
+      size: size,
+      onLyricsFound: (found) {
+        if (mounted) {
+          setState(() {
+            _hasLyrics = found;
+            _lyricsLoading = false;
+            if (!found) _showLyrics = false;
+          });
+        }
+      },
+    );
+  }
+
+  /// WIDE layout: dark rounded panel on the right. Placeholder and lyrics
+  /// cross-fade; the lyrics box stays in ONE slot so it is never rebuilt.
+  Widget _buildLyricsPanel(MediaItem song) {
+    return _Glass(
+      radius: _isMobile ? 32 : 30,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final boxSize = Size(
+            max(0.0, c.maxWidth - 16),
+            max(0.0, c.maxHeight - 16),
+          );
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: _SlideFade(
+                  show: !_hasLyrics,
+                  dy: 0,
+                  fromScale: 0.96,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_lyricsLoading)
+                          const SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.2, color: Colors.white70),
+                          )
+                        else
+                          Icon(_Ic.lyrics,
+                              size: 44,
+                              color: Colors.white.withValues(alpha: 0.30)),
+                        const SizedBox(height: 14),
+                        Text(
+                          _lyricsLoading
+                              ? 'Looking for lyrics…'
+                              : 'No lyrics for this song',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: _SlideFade(
+                  show: _hasLyrics,
+                  dy: 0.05,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: _lyricsBox(song, boxSize),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------ info row
+  //  Odysseus                                   [ lyrics ]
+  //  [ Ludwig Göransson ]
+
+  Widget _buildInfoRowMobile(MediaItem song, {required bool swap}) {
+    final videoId = song.extras?['videoId'];
+    final artist =
+    (song.artist ?? song.album ?? song.extras?['subtitle'] ?? '').toString();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(left: 2),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextScroll(
+                  song.title,
+                  style: const TextStyle(
+                    fontSize: 31,
+                    height: 1.15,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    letterSpacing: -0.4,
+                  ),
+                  mode: TextScrollMode.endless,
+                ),
+                if (artist.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _role(0.30, 0.09),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Text(
+                      artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        color: _accentSoft,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        if (_kShowHeartButton)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ValueListenableBuilder(
+              valueListenable: Hive.box('FAVOURITES').listenable(),
+              builder: (context, value, child) {
+                final liked = value.get(videoId) != null;
+                return _Squircle(
+                  width: 48,
+                  height: 48,
+                  radius: 18,
+                  color: _surface,
+                  tooltip:
+                  liked ? 'Remove from favourites' : 'Add to favourites',
+                  onTap: () => _toggleFavourite(song),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    transitionBuilder: (child, anim) =>
+                        ScaleTransition(scale: anim, child: child),
+                    child: Icon(
+                      liked ? _Ic.heartFill : _Ic.heart,
+                      key: ValueKey(liked),
+                      size: 24,
+                      color: liked
+                          ? _kHeartRed
+                          : Colors.white.withValues(alpha: 0.85),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        // Wide layout already shows lyrics in the side panel.
+        if (swap)
+          Opacity(
+            opacity: _hasLyrics ? 1 : 0.4,
+            child: _Squircle(
+              width: 48,
+              height: 48,
+              radius: 18,
+              color: (_showLyrics && _hasLyrics) ? _accent : _surface,
+              tooltip: 'Lyrics (L)',
+              onTap: _hasLyrics ? _toggleLyrics : null,
+              child: Icon(
+                _Ic.lyricsBtn,
+                size: 26,
+                color: (_showLyrics && _hasLyrics)
+                    ? _onAccent
+                    : Colors.white.withValues(alpha: 0.92),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------- seek bar
+
+  Widget _buildSeekBarMobile() {
+    final mediaPlayer = mediaPlayerOf(context);
+    return ValueListenableBuilder(
+      valueListenable: mediaPlayer.progressBarState,
+      builder: (context, ProgressBarState value, child) {
+        final totalMs = value.total.inMilliseconds;
+        final posMs = value.current.inMilliseconds;
+        final playing = mediaPlayer.buttonState.value == ButtonState.playing;
+        final double live =
+        totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0).toDouble() : 0.0;
+        final double fraction = (_seekDrag ?? live).clamp(0.0, 1.0).toDouble();
+        final shownMs = _seekDrag != null ? (fraction * totalMs).round() : posMs;
+        final remainMs = max(0, totalMs - shownMs);
+        final labelStyle = TextStyle(
+          color: Colors.white.withValues(alpha: 0.85),
+          fontSize: 14.5,
+          fontWeight: FontWeight.w500,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
+
+        void commit(double v) {
+          if (totalMs > 0) {
+            mediaPlayer.seekTo(Duration(milliseconds: (v * totalMs).round()));
+          }
+          setState(() => _seekDrag = null);
+        }
+
+        return Column(
+          children: [
+            _ChunkySeekBar(
+              fraction: fraction,
+              enabled: totalMs > 0,
+              active: _accent,
+              inactive: Colors.white.withValues(alpha: 0.20),
+              onDrag: (v) => setState(() => _seekDrag = v),
+              onCommit: commit,
+              onCancel: () => setState(() => _seekDrag = null),
+            ),
+            const SizedBox(height: 2),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(_formatMs(shownMs), style: labelStyle),
+                  Text('\u2212${_formatMs(remainMs)}', style: labelStyle),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ------------------------------------------------------------ transport
+  //   [ |< ]  [  ||  ]  [ >| ]
+
+  Widget _buildTransportMobile() {
+    final mediaPlayer = mediaPlayerOf(context);
+    return SizedBox(
+      height: 74,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _Squircle(
+            width: 56,
+            height: 56,
+            radius: 19,
+            color: _tonal,
+            tooltip: 'Previous (Ctrl+←)',
+            pressScale: 0.85,
+            onTap: _skipPrevious,
+            child: Icon(_Ic.previous,
+                size: 28, color: Colors.white.withValues(alpha: 0.94)),
+          ),
+          const SizedBox(width: 16),
+          ValueListenableBuilder<ButtonState>(
+            valueListenable: mediaPlayer.buttonState,
+            builder: (context, state, _) {
+              final loading = state == ButtonState.loading;
+              final playing = state == ButtonState.playing;
+              return _Squircle(
+                width: 74,
+                height: 72,
+                radius: 28,
+                color: _accent,
+                tooltip: playing ? 'Pause (Space)' : 'Play (Space)',
+                pressScale: 0.9,
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  mediaPlayer.togglePlayPause(); // SP-5b
+                },
+                child: loading
+                    ? SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                      color: _onAccent, strokeWidth: 3),
+                )
+                    : AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  transitionBuilder: (child, anim) =>
+                      ScaleTransition(scale: anim, child: child),
+                  child: Icon(
+                    playing ? _Ic.pause : _Ic.play,
+                    key: ValueKey(playing),
+                    size: 34,
+                    color: _onAccent,
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 16),
+          _Squircle(
+            width: 56,
+            height: 56,
+            radius: 19,
+            color: _tonal,
+            tooltip: 'Next (Ctrl+→)',
+            pressScale: 0.85,
+            onTap: _skipNext,
+            child: Icon(_Ic.next,
+                size: 28, color: Colors.white.withValues(alpha: 0.94)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ----------------------------------------------------------- bottom row
+  //  [ shuffle ]  [ HQ  FLAC 24/96 ]  [ repeat ]
+
+  Widget _buildBottomRowMobile(MediaItem song) {
+    final mediaPlayer = mediaPlayerOf(context);
+    return SizedBox(
+      height: 46,
+      child: Row(
+        children: [
+          Expanded(
+            flex: 10,
+            child: StreamBuilder<bool>(
+              stream: mediaPlayer.player.shuffleModeEnabledStream,
+              initialData: false,
+              builder: (context, snap) {
+                final on = snap.data ?? false;
+                return _ModeBtn(
+                  icon: _Ic.shuffle,
+                  active: on,
+                  activeColor: _tonalActive,
+                  restColor: _surface,
+                  tooltip: on ? 'Shuffle on' : 'Shuffle off',
+                  onTap: () async {
+                    await mediaPlayer.player.setShuffleModeEnabled(!on);
+                    if (!on) await mediaPlayer.player.shuffle();
+                  },
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 13,
+            // Rebuilds when the lossless service reports a served tier.
+            child: ListenableBuilder(
+              listenable: LosslessService.servedRevision,
+              builder: (context, _) {
+                final q = _AudioQuality.of(song);
+                return _QualityPill(
+                  info: q,
+                  color: _surface,
+                  onTap: () => _openQuality(song),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 10,
+            child: ValueListenableBuilder(
+              valueListenable: mediaPlayer.loopMode,
+              builder: (context, value, child) {
+                return _ModeBtn(
+                  icon: value == LoopMode.one ? _Ic.repeatOne : _Ic.repeatAll,
+                  active: value != LoopMode.off,
+                  activeColor: _tonalActive,
+                  restColor: _surface,
+                  tooltip: switch (value) {
+                    LoopMode.one => 'Repeat one',
+                    LoopMode.all => 'Repeat all',
+                    _ => 'Repeat off',
+                  },
+                  onTap: () => mediaPlayer.changeLoopMode(),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // DESKTOP — original player (unchanged look)
+  // ════════════════════════════════════════════════════════════════
+
+  Widget _buildTopBarDesktop(MediaItem song) {
     final subtitle = song.album;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
@@ -510,59 +1443,7 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  // ----------------------------------------------------------------- body
-
-  Widget _buildBody(MediaItem song, BoxConstraints box) {
-    final wide = box.maxWidth >= 900;
-
-    if (wide) {
-      return Row(
-        children: [
-          Expanded(
-            flex: 5,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(40, 8, 20, 28),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 520),
-                  child: LayoutBuilder(
-                    builder: (context, inner) =>
-                        _buildPlayerColumn(song, inner, swap: false),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 6,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 40, 28),
-              child: _buildLyricsPanel(song),
-            ),
-          ),
-        ],
-      );
-    }
-
-    final hPad = box.maxWidth >= 600 ? 40.0 : 22.0;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(hPad, 4, hPad, 16),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: LayoutBuilder(
-            builder: (context, inner) =>
-                _buildPlayerColumn(song, inner, swap: true),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Artwork (or lyrics) + info + quality + glass dock (seek + transport).
-  /// Artwork takes the height that is left; if even the minimum does not
-  /// fit, the column scrolls instead of overflowing.
-  Widget _buildPlayerColumn(MediaItem song, BoxConstraints box,
+  Widget _buildPlayerColumnDesktop(MediaItem song, BoxConstraints box,
       {required bool swap}) {
     const controlsH = 352.0; // info + quality + dock + gaps
     const gap = 18.0;
@@ -577,35 +1458,49 @@ class _PlayerPageState extends State<PlayerPage> {
       child: Stack(
         children: [
           // Artwork stays mounted (keeps palette updates alive).
-          Offstage(
-            offstage: lyricsVisible,
-            child: Center(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 600),
-                width: side,
-                height: side,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _tint.withValues(alpha: 0.50),
-                      blurRadius: 64,
-                      spreadRadius: -8,
-                      offset: const Offset(0, 26),
+          Positioned.fill(
+            child: _SlideFade(
+              show: !lyricsVisible,
+              dy: -0.04,
+              fromScale: 0.94,
+              child: Center(
+                child: RepaintBoundary(
+                  // SP-76: same cover-to-canvas handover as the mobile
+                  // column — the still cover fades out while the looping
+                  // canvas behind owns the screen, and returns the moment
+                  // the canvas leaves.
+                  child: AnimatedOpacity(
+                    opacity: _canvasOwnsScreen ? 0.0 : 1.0,
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOut,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 600),
+                      width: side,
+                      height: side,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _tint.withValues(alpha: 0.50),
+                            blurRadius: 64,
+                            spreadRadius: -8,
+                            offset: const Offset(0, 26),
+                          ),
+                        ],
+                      ),
+                      child: _buildArtwork(song, breathing: true),
                     ),
-                  ],
+                  ),
                 ),
-                child: _buildArtwork(song, breathing: true),
               ),
             ),
           ),
-          // Narrow layout: one stable lyrics slot, never re-parented.
           if (swap)
-            Offstage(
-              offstage: !lyricsVisible,
-              child: _lyricsBox(
-                song,
-                lyricsVisible ? Size(box.maxWidth, side) : Size.zero,
+            Positioned.fill(
+              child: _SlideFade(
+                show: lyricsVisible,
+                dy: 0.08,
+                child: _lyricsBox(song, Size(box.maxWidth, side)),
               ),
             ),
         ],
@@ -618,11 +1513,11 @@ class _PlayerPageState extends State<PlayerPage> {
       children: [
         media,
         const SizedBox(height: gap),
-        _buildInfoRow(song),
+        _buildInfoRowDesktop(song),
         const SizedBox(height: 8),
-        _buildQualityRow(song, swap: swap),
+        _buildQualityRowDesktop(song, swap: swap),
         const SizedBox(height: 12),
-        _buildDock(),
+        _buildDockDesktop(),
       ],
     );
 
@@ -636,7 +1531,7 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   /// Frosted dock holding the seek bar and the transport row.
-  Widget _buildDock() {
+  Widget _buildDockDesktop() {
     return _Glass(
       radius: 30,
       child: Padding(
@@ -644,133 +1539,16 @@ class _PlayerPageState extends State<PlayerPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildSeekBar(),
+            _buildSeekBarDesktop(),
             const SizedBox(height: 6),
-            _buildTransport(),
+            _buildTransportDesktop(),
           ],
         ),
       ),
     );
   }
 
-  // -------------------------------------------------------------- artwork
-
-  /// Tinder-style swipeable artwork: swipe left = next song, right =
-  /// previous. [breathing] (classic layout only) shrinks the cover slightly
-  /// while paused and restores it on play. Skins call without it.
-  Widget _buildArtwork(MediaItem song, {bool breathing = false}) {
-    final items = List<MediaItem>.from(GetIt.I<MediaPlayer>()
-        .songList
-        .map((src) => src.tag)
-        .whereType<MediaItem>());
-    final idx = items.indexWhere((m) => m.id == song.id);
-    final next = (idx >= 0 && idx + 1 < items.length) ? items[idx + 1] : null;
-    final prev = (idx > 0) ? items[idx - 1] : null;
-
-    return ValueListenableBuilder<ButtonState>(
-      valueListenable: mediaPlayerOf(context).buttonState,
-      builder: (context, state, _) {
-        final active =
-            state == ButtonState.playing || state == ButtonState.loading;
-        final stack = SwipeArtworkStack(
-          key: _swipeKey,
-          current: song,
-          next: next,
-          previous: prev,
-          active: active,
-          onSwipeNext: () => GetIt.I<MediaPlayer>().skipNext(), // SP-5b
-          onSwipePrevious: () => GetIt.I<MediaPlayer>().skipPrevious(), // SP-5b
-          cardBuilder: (context, item, isFront) => SquareArtwork(
-            song: item.extras ?? {'videoId': item.id, 'title': item.title},
-            borderRadius: 16,
-            onImageReady: isFront ? updateBackgroundColor : null,
-          ),
-        );
-        if (!breathing) return stack;
-        return AnimatedScale(
-          scale: active ? 1.0 : 0.93,
-          duration: const Duration(milliseconds: 520),
-          curve: Curves.easeOutCubic,
-          child: stack,
-        );
-      },
-    );
-  }
-
-  // --------------------------------------------------------------- lyrics
-
-  Widget _lyricsBox(MediaItem song, Size size) {
-    return LyricsBox(
-      key: _lyricsBoxKey,
-      currentSong: song,
-      size: size,
-      onLyricsFound: (found) {
-        if (mounted) {
-          setState(() {
-            _hasLyrics = found;
-            _lyricsLoading = false;
-            if (!found) _showLyrics = false;
-          });
-        }
-      },
-    );
-  }
-
-  /// WIDE layout: frosted panel on the right.
-  Widget _buildLyricsPanel(MediaItem song) {
-    return _Glass(
-      radius: 30,
-      child: LayoutBuilder(
-        builder: (context, c) {
-          if (_hasLyrics) {
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              child: _lyricsBox(song, Size(c.maxWidth - 16, c.maxHeight - 16)),
-            );
-          }
-          return Stack(
-            children: [
-              Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_lyricsLoading)
-                      const SizedBox(
-                        width: 26,
-                        height: 26,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.2, color: Colors.white70),
-                      )
-                    else
-                      Icon(_Ic.lyrics,
-                          size: 44,
-                          color: Colors.white.withValues(alpha: 0.30)),
-                    const SizedBox(height: 14),
-                    Text(
-                      _lyricsLoading
-                          ? 'Looking for lyrics…'
-                          : 'No lyrics for this song',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white.withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Hidden probe so lyrics can be discovered.
-              Offstage(child: _lyricsBox(song, Size.zero)),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // ------------------------------------------------------------ info row
-
-  Widget _buildInfoRow(MediaItem song) {
+  Widget _buildInfoRowDesktop(MediaItem song) {
     final mediaPlayer = mediaPlayerOf(context);
     final videoId = song.extras?['videoId'];
     return SizedBox(
@@ -847,7 +1625,7 @@ class _PlayerPageState extends State<PlayerPage> {
           ),
           Builder(
             builder: (buttonContext) => _IconBtn(
-              icon: _Ic.more,
+              icon: _Ic.moreH,
               tooltip: 'More',
               onPressed: () {
                 final RenderBox renderBox =
@@ -868,9 +1646,7 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  // ---------------------------------------------------------- quality row
-
-  Widget _buildQualityRow(MediaItem song, {required bool swap}) {
+  Widget _buildQualityRowDesktop(MediaItem song, {required bool swap}) {
     return SizedBox(
       height: 36,
       child: Row(
@@ -897,9 +1673,7 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  // ------------------------------------------------------------- seek bar
-
-  Widget _buildSeekBar() {
+  Widget _buildSeekBarDesktop() {
     final mediaPlayer = mediaPlayerOf(context);
     return ValueListenableBuilder(
       valueListenable: mediaPlayer.progressBarState,
@@ -940,9 +1714,7 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  // ------------------------------------------------------------ transport
-
-  Widget _buildTransport() {
+  Widget _buildTransportDesktop() {
     final mediaPlayer = mediaPlayerOf(context);
     return SizedBox(
       height: 84,
@@ -1062,17 +1834,31 @@ class _AudioQuality {
     _Tier.unknown => const Color(0xFFB4B4C0),
   };
 
-  /// Short detail for the chip: bitrate, else sample rate, else codec.
+  /// Short detail: bitrate, else sample rate, else codec.
   String? get chipDetail {
     if (bitrateKbps != null) return '$bitrateKbps kbps';
     if (sampleRateHz != null) return _khz(sampleRateHz!);
     return codec;
   }
 
-  static String _khz(int hz) {
-    final k = hz / 1000;
-    return '${k == k.roundToDouble() ? k.toInt() : k.toStringAsFixed(1)} kHz';
+  /// LastWave-style badge text: "FLAC 24/96", "AAC 128", "MP3 320".
+  String get pillText {
+    final c = codec;
+    if (c != null && bitDepth != null && sampleRateHz != null) {
+      return '$c $bitDepth/${_khzNum(sampleRateHz!)}';
+    }
+    if (c != null && bitrateKbps != null) return '$c $bitrateKbps';
+    if (bitrateKbps != null) return '$bitrateKbps kbps';
+    if (c != null) return c;
+    return label;
   }
+
+  static String _khzNum(int hz) {
+    final k = hz / 1000;
+    return k == k.roundToDouble() ? '${k.toInt()}' : k.toStringAsFixed(1);
+  }
+
+  static String _khz(int hz) => '${_khzNum(hz)} kHz';
 
   String get sampleRateLabel => _khz(sampleRateHz!);
 
@@ -1273,80 +2059,46 @@ class _AudioQuality {
   }
 }
 
-class _QualityChip extends StatefulWidget {
-  const _QualityChip({required this.info, required this.onTap});
+/// Centre pill of the bottom row: [HQ]  FLAC 24/96
+class _QualityPill extends StatelessWidget {
+  const _QualityPill({
+    required this.info,
+    required this.color,
+    required this.onTap,
+  });
   final _AudioQuality info;
+  final Color color;
   final VoidCallback onTap;
 
   @override
-  State<_QualityChip> createState() => _QualityChipState();
-}
-
-class _QualityChipState extends State<_QualityChip> {
-  bool _hover = false;
-
-  @override
   Widget build(BuildContext context) {
-    final q = widget.info;
-    final detail = q.chipDetail;
-    return Tooltip(
-      message: 'Audio quality',
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: q.accent.withValues(alpha: _hover ? 0.20 : 0.12),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: q.accent.withValues(alpha: 0.42)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(_Ic.speaker, size: 16, color: q.accent),
-                const SizedBox(width: 7),
-                Text(
-                  q.label,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
-                    color: q.accent,
-                  ),
+    return _Squircle(
+      height: 46,
+      radius: 20,
+      color: color,
+      tooltip: 'Audio quality',
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(_Ic.hq,
+                  size: 22, color: Colors.white.withValues(alpha: 0.92)),
+              const SizedBox(width: 8),
+              Text(
+                info.pillText,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white.withValues(alpha: 0.95),
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
-                if (detail != null) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    width: 3,
-                    height: 3,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: q.accent.withValues(alpha: 0.6),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    detail,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.white.withValues(alpha: 0.72),
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-                const SizedBox(width: 6),
-                Icon(_Ic.info,
-                    size: 14, color: Colors.white.withValues(alpha: 0.45)),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1468,35 +2220,85 @@ class _QualitySheet extends StatelessWidget {
 // SHARED WIDGETS
 // ════════════════════════════════════════════════════════════════════
 
-/// Frosted panel.
-class _Glass extends StatelessWidget {
-  const _Glass({required this.child, this.radius = 24, this.blur = 22});
+/// Fade + slide + scale in one go. Keeps the child mounted (state and
+/// GlobalKeys survive) and blocks touches while hidden.
+class _SlideFade extends StatelessWidget {
+  const _SlideFade({
+    required this.show,
+    required this.child,
+    this.dy = 0.06,
+    this.fromScale = 1.0,
+    this.ms = 480,
+  });
+
+  final bool show;
   final Widget child;
-  final double radius;
-  final double blur;
+  final double dy; // hidden offset as a fraction of the child's height
+  final double fromScale;
+  final int ms;
 
   @override
   Widget build(BuildContext context) {
-    final r = BorderRadius.circular(radius);
-    return ClipRRect(
-      borderRadius: r,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.07),
-            borderRadius: r,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+    final d = Duration(milliseconds: ms);
+    const c = Curves.easeOutCubic;
+    return IgnorePointer(
+      ignoring: !show,
+      child: AnimatedOpacity(
+        opacity: show ? 1 : 0,
+        duration: d,
+        curve: c,
+        child: AnimatedSlide(
+          offset: show ? Offset.zero : Offset(0, dy),
+          duration: d,
+          curve: c,
+          child: AnimatedScale(
+            scale: show ? 1 : fromScale,
+            duration: d,
+            curve: c,
+            child: child,
           ),
-          child: child,
         ),
       ),
     );
   }
 }
 
-/// Icon button with hover ring (desktop), press scale, tooltip, disabled
-/// state. Either [icon] or a custom [child].
+/// Dark rounded panel (wide-layout lyrics). Lighter blur on phones
+/// (BackdropFilter is the most expensive thing on the page) and isolated
+/// into its own repaint layer.
+class _Glass extends StatelessWidget {
+  const _Glass({required this.child, this.radius = 24, double? blur})
+      : _blur = blur;
+  final Widget child;
+  final double radius;
+  final double? _blur;
+
+  @override
+  Widget build(BuildContext context) {
+    final mobile = Platform.isAndroid || Platform.isIOS;
+    final blur = _blur ?? (mobile ? 12.0 : 22.0);
+    final r = BorderRadius.circular(radius);
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: r,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: mobile ? 0.06 : 0.07),
+              borderRadius: r,
+              border: Border.all(
+                  color: Colors.white.withValues(alpha: mobile ? 0.08 : 0.12)),
+            ),
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Circular icon button (only the quality sheet's close button uses it now).
 class _IconBtn extends StatefulWidget {
   const _IconBtn({
     this.icon,
@@ -1567,6 +2369,355 @@ class _IconBtnState extends State<_IconBtn> {
       btn = Tooltip(message: widget.tooltip!, child: btn);
     }
     return btn;
+  }
+}
+
+/// LastWave's building block: a rounded-square ("squircle") button with
+/// press-scale, hover lift (desktop) and tooltip. Leave [width] null to
+/// fill the parent's width (inside an Expanded).
+class _Squircle extends StatefulWidget {
+  const _Squircle({
+    required this.child,
+    required this.onTap,
+    required this.color,
+    required this.height,
+    this.width,
+    this.radius = 18,
+    this.tooltip,
+    this.pressScale = 0.92,
+  });
+
+  final Widget child;
+  final VoidCallback? onTap;
+  final Color color;
+  final double height;
+  final double? width;
+  final double radius;
+  final String? tooltip;
+  final double pressScale;
+
+  @override
+  State<_Squircle> createState() => _SquircleState();
+}
+
+class _SquircleState extends State<_Squircle> {
+  bool _hover = false;
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onTap != null;
+    final bg = _hover && enabled
+        ? Color.alphaBlend(Colors.white.withValues(alpha: 0.07), widget.color)
+        : widget.color;
+
+    Widget btn = MouseRegion(
+      cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: enabled ? (_) => setState(() => _down = true) : null,
+        onTapUp: enabled ? (_) => setState(() => _down = false) : null,
+        onTapCancel: enabled ? () => setState(() => _down = false) : null,
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _down ? widget.pressScale : 1.0,
+          duration: const Duration(milliseconds: 110),
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            width: widget.width,
+            height: widget.height,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(widget.radius),
+            ),
+            child: widget.child,
+          ),
+        ),
+      ),
+    );
+    if (widget.tooltip != null) {
+      btn = Tooltip(message: widget.tooltip!, child: btn);
+    }
+    return btn;
+  }
+}
+
+/// Shuffle / repeat button: dark rounded rectangle, tinted + dot when on.
+class _ModeBtn extends StatelessWidget {
+  const _ModeBtn({
+    required this.icon,
+    required this.active,
+    required this.activeColor,
+    required this.restColor,
+    required this.onTap,
+    this.tooltip,
+  });
+
+  final IconData icon;
+  final bool active;
+  final Color activeColor;
+  final Color restColor;
+  final VoidCallback onTap;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Squircle(
+      height: 46,
+      radius: 20,
+      color: active ? activeColor : restColor,
+      tooltip: tooltip,
+      onTap: onTap,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Icon(icon,
+              size: 22,
+              color: Colors.white.withValues(alpha: active ? 1 : 0.85)),
+          Positioned(
+            bottom: 5,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 4,
+              height: 4,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: active ? Colors.white : Colors.transparent,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// LastWave seek bar: thick rounded capsule that stops short of a tall
+/// vertical thumb, then a thick inactive capsule and a tiny end marker.
+class _ChunkySeekBar extends StatelessWidget {
+  const _ChunkySeekBar({
+    required this.fraction,
+    required this.enabled,
+    required this.active,
+    required this.inactive,
+    required this.onDrag,
+    required this.onCommit,
+    required this.onCancel,
+  });
+
+  final double fraction;
+  final bool enabled;
+  final Color active;
+  final Color inactive;
+  final ValueChanged<double> onDrag;
+  final ValueChanged<double> onCommit;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final w = c.maxWidth;
+        double at(Offset p) => w <= 0 ? 0 : (p.dx / w).clamp(0.0, 1.0);
+        return MouseRegion(
+          cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: enabled ? (d) => onCommit(at(d.localPosition)) : null,
+            onHorizontalDragStart:
+            enabled ? (d) => onDrag(at(d.localPosition)) : null,
+            onHorizontalDragUpdate:
+            enabled ? (d) => onDrag(at(d.localPosition)) : null,
+            onHorizontalDragEnd: enabled
+                ? (_) => onCommit(fraction)
+                : null,
+            onHorizontalDragCancel: enabled ? onCancel : null,
+            child: SizedBox(
+              height: 44,
+              width: double.infinity,
+              child: CustomPaint(
+                painter: _SeekPainter(
+                  fraction: fraction,
+                  active: active,
+                  inactive: inactive,
+                  dim: !enabled,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SeekPainter extends CustomPainter {
+  _SeekPainter({
+    required this.fraction,
+    required this.active,
+    required this.inactive,
+    required this.dim,
+  });
+
+  final double fraction;
+  final Color active;
+  final Color inactive;
+  final bool dim;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final width = size.width;
+    final centerY = size.height / 2;
+    const trackH = 14.0;
+    const thumbW = 5.0;
+    const thumbH = 38.0;
+    const clearance = 9.0;
+    final r = const Radius.circular(trackH / 2);
+
+    final fg = dim ? active.withValues(alpha: 0.5) : active;
+
+    final rawX = fraction * width;
+    final thumbCx = width > thumbW
+        ? rawX.clamp(thumbW / 2, width - thumbW / 2).toDouble()
+        : width / 2;
+    final activeEnd = (thumbCx - clearance).clamp(0.0, width).toDouble();
+    final inactiveStart = (thumbCx + clearance).clamp(0.0, width).toDouble();
+
+    // Active capsule.
+    if (activeEnd > 0) {
+      canvas.drawRRect(
+        RRect.fromLTRBR(0, centerY - trackH / 2, activeEnd,
+            centerY + trackH / 2, r),
+        Paint()..color = fg,
+      );
+    }
+
+    // Inactive capsule.
+    if (inactiveStart < width) {
+      canvas.drawRRect(
+        RRect.fromLTRBR(inactiveStart, centerY - trackH / 2, width,
+            centerY + trackH / 2, r),
+        Paint()..color = inactive,
+      );
+    }
+
+    // End-of-track marker.
+    final endX = width - trackH / 2;
+    if (inactiveStart < endX) {
+      canvas.drawCircle(
+          Offset(endX, centerY), 2, Paint()..color = fg.withValues(alpha: 0.9));
+    }
+
+    // Thumb: soft dark halo for separation + the pill itself.
+    final thumbRect = RRect.fromLTRBR(
+      thumbCx - thumbW / 2,
+      centerY - thumbH / 2,
+      thumbCx + thumbW / 2,
+      centerY + thumbH / 2,
+      const Radius.circular(thumbW / 2),
+    );
+    canvas.drawRRect(
+      thumbRect.inflate(1),
+      Paint()..color = Colors.black.withValues(alpha: 0.35),
+    );
+    canvas.drawRRect(thumbRect, Paint()..color = fg);
+  }
+
+  @override
+  bool shouldRepaint(_SeekPainter o) =>
+      o.fraction != fraction ||
+          o.active != active ||
+          o.inactive != inactive ||
+          o.dim != dim;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+// DESKTOP-ONLY WIDGETS (original player)
+// ════════════════════════════════════════════════════════════════════
+
+class _QualityChip extends StatefulWidget {
+  const _QualityChip({required this.info, required this.onTap});
+  final _AudioQuality info;
+  final VoidCallback onTap;
+
+  @override
+  State<_QualityChip> createState() => _QualityChipState();
+}
+
+class _QualityChipState extends State<_QualityChip> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final q = widget.info;
+    final detail = q.chipDetail;
+    return Tooltip(
+      message: 'Audio quality',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            height: 32,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: q.accent.withValues(alpha: _hover ? 0.20 : 0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: q.accent.withValues(alpha: 0.42)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(_Ic.speaker, size: 16, color: q.accent),
+                const SizedBox(width: 7),
+                Text(
+                  q.label,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                    color: q.accent,
+                  ),
+                ),
+                if (detail != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    width: 3,
+                    height: 3,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: q.accent.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    detail,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white.withValues(alpha: 0.72),
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 6),
+                Icon(_Ic.info,
+                    size: 14, color: Colors.white.withValues(alpha: 0.45)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1698,7 +2849,7 @@ class _PlayButtonState extends State<_PlayButton> {
   }
 }
 
-/// Small rounded action pill (lyrics toggle on narrow layouts).
+/// Small rounded action pill (lyrics toggle on narrow desktop layouts).
 class _Pill extends StatelessWidget {
   const _Pill({
     required this.icon,
