@@ -44,6 +44,7 @@
 - [FAQ](#faq)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
+- [Support the Project](#support-the-project)
 - [Special Thanks](#special-thanks)
 - [Contributors](#contributors)
 - [Legal](#legal)
@@ -547,6 +548,20 @@ Yes. ZenMusic supports source extensions.
 - Run `flutter analyze` and fix warnings in the files you changed.
 - Match the existing code style and naming.
 - When reporting a bug, include your platform, app version, steps to reproduce, and logs or screenshots if possible.
+
+<div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
+
+<div align="center">
+
+## Support the Project
+
+ZenMusic is free and open source, and it is built in spare time. If you enjoy it and want to help keep it improving, you can buy me a chai. It is completely optional, and starring the repo or sharing the app helps just as much.
+
+<a href="https://www.buymeachai.in/pratam" target="_blank">
+  <img src="https://img.shields.io/badge/Buy%20Me%20A%20Chai-pratam-D4944A?style=for-the-badge" alt="Buy Me A Chai" height="34" />
+</a>
+
+</div>
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
