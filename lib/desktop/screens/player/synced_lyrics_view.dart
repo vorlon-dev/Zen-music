@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -40,7 +42,6 @@ class SyncedLyricsView extends StatefulWidget {
 
 class _SyncedLyricsViewState extends State<SyncedLyricsView>
     with TickerProviderStateMixin {
-  // --- tuning knobs ---------------------------------------------------------
   static const Duration _lead = Duration(milliseconds: 220);
   static const int _interludeMinMs = 6000;
   static const int _interludeAfterMs = 1800;
@@ -143,7 +144,6 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
     super.dispose();
   }
 
-  // --- position → active line ----------------------------------------------
 
   int get _lines => widget.lyrics?.synced?.length ?? 0;
 
@@ -268,7 +268,6 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
     );
   }
 
-  // --- build ----------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -387,7 +386,6 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
     );
   }
 
-  // --- one row -------------------------------------------------------------
 
   TextStyle _lineStyle(BuildContext context) => _base(context).copyWith(
     fontSize: _baseSize * widget.textScale,
@@ -576,9 +574,6 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
           .withOpacity(alpha.clamp(0.0, 1.0));
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Row effects (scale / opacity / blur / y) animated as ONE value.
-// ════════════════════════════════════════════════════════════════════
 
 class _Fx {
   const _Fx(
@@ -616,9 +611,6 @@ class _FxTween extends Tween<_Fx> {
   _Fx lerp(double t) => _Fx.lerp(begin!, end!, t);
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Glow: blurred copy of the very same text, cached in its own layer.
-// ════════════════════════════════════════════════════════════════════
 
 class _Glow extends StatelessWidget {
   const _Glow({required this.text, required this.style});
@@ -641,9 +633,6 @@ class _Glow extends StatelessWidget {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Karaoke line: feathered wipe + syllable lift, one painter, no rebuilds.
-// ════════════════════════════════════════════════════════════════════
 
 class _KaraokeLine extends StatefulWidget {
   const _KaraokeLine({
@@ -944,9 +933,6 @@ class _KaraokePainter extends CustomPainter {
       old.dim != dim || old.bright != bright || old.rects != rects;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Pulsing "♪ ♪ ♪"
-// ════════════════════════════════════════════════════════════════════
 
 class _Breath extends StatefulWidget {
   const _Breath({required this.color, this.scale = 1.0});

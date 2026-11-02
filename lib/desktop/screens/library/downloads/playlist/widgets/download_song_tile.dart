@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'package:expandable_text/expandable_text.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';

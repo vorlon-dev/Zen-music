@@ -1,15 +1,4 @@
-// SP-78 — the in-app YouTube section (nav tab between Search and Saved).
-//
-// Cross-platform by construction: every platform browses and searches
-// through the app's own InnerTube client (YTMusic — the same client the
-// home feed and search run on), so no platform-specific fetcher lives in
-// this file. Playback ALWAYS goes through the watch page (/video):
-//   • Android resolves streams through the app's native InnerTube
-//     resolver first (InnertubexBridge), falling back to pure Dart;
-//   • Windows uses the pure-Dart pipeline (YtVideoEngine).
-// The user's ask: mobile = the InnerTube the app already has, Windows =
-// Dart. The split lives in video_watch_page.dart's stream cache; this page
-// only ever hands over a videoId.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -248,13 +237,7 @@ class _YouTubePageState extends State<YouTubePage> {
   }
 }
 
-// ─── data holders ───────────────────────────────────────────────────────
 
-/// SP-78: public so the smoke test can pin the mapping contract. Maps
-/// InnerTube shelf items (browse + search) to plain
-/// {videoId, title, subtitle, art} maps — lenient by design: non-video
-/// items, missing ids and malformed rows are dropped, duplicates
-/// collapsed, art falls back to i.ytimg.com.
 List<Map<String, String>> ytVideoCardMaps(List contents) {
   final out = <Map<String, String>>[];
   final seen = <String>{};
@@ -329,7 +312,6 @@ class _Shelf {
   final List<_VideoCard> items;
 }
 
-// ─── widgets ────────────────────────────────────────────────────────────
 
 class _ShelfRow extends StatelessWidget {
   const _ShelfRow({required this.shelf, required this.onTap});

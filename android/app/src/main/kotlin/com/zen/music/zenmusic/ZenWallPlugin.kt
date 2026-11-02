@@ -1,15 +1,7 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic
 
-// SP-78: ZenWall — the playing song as the Android wallpaper.
-//
-// Dart (ZenWallService) decides WHAT goes on the wall and pushes a URL:
-//   • fromCanvas=true  → a Spotify canvas mp4; the frame is grabbed here
-//     with MediaMetadataRetriever (a static frame is all a wallpaper can
-//     hold — live video wallpaper needs a WallpaperService engine).
-//   • fromCanvas=false → the song's album art image.
-// Either way the bitmap is centre-cropped to the display and set as the
-// HOME wallpaper (never the lock screen). Runs on its own thread; the
-// channel answer is posted back on the main thread exactly once.
 
 import android.app.WallpaperManager
 import android.graphics.Bitmap

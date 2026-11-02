@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -15,12 +17,12 @@ import 'package:zenmusic/desktop/screens/offline/offline_cache_page.dart';
 import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/screens/settings/cubit/settings_system_cubit.dart';
 import 'package:zenmusic/desktop/screens/settings/seek_bar_page.dart';
-import 'package:zenmusic/desktop/core/widgets/brand_logos.dart'; // SP-62
+import 'package:zenmusic/desktop/core/widgets/brand_logos.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/lyrics_overlay_bridge.dart';
 import 'package:zenmusic/desktop/services/mini_player_bridge.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
-import 'package:zenmusic/desktop/ytmusic/ytm_auth.dart'; // SP-62
+import 'package:zenmusic/desktop/ytmusic/ytm_auth.dart';
 import 'package:zenmusic/desktop/themes/text_styles.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:zenmusic/desktop/utils/zen_icons.dart';
@@ -45,7 +47,6 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-// ── Data ─────────────────────────────────────────────────────────────
 
 class _Entry {
   const _Entry({
@@ -96,7 +97,6 @@ class _Group {
   final List<_Entry> entries;
 }
 
-// ── Body ─────────────────────────────────────────────────────────────
 
 class _SettingsBody extends StatefulWidget {
   const _SettingsBody();
@@ -125,7 +125,6 @@ class _SettingsBodyState extends State<_SettingsBody> {
           keywords: const ['equalizer', 'eq', 'audio', 'playback'],
           onTap: () => context.go('/settings/player'),
         ),
-        // SP-30: moved from the Saved page (crossfade_page.dart).
         _Entry(
           icon: Icons.compare_arrows,
           title: 'Crossfade',
@@ -135,8 +134,6 @@ class _SettingsBodyState extends State<_SettingsBody> {
             MaterialPageRoute(builder: (_) => const CrossfadePage()),
           ),
         ),
-        // SP-40: the lossless song quality picker (own page in
-        // lib/desktop/lossless/). Applies to YTM + JioSaavn streams.
         _Entry(
           icon: Icons.high_quality,
           title: 'Song quality',
@@ -173,9 +170,6 @@ class _SettingsBodyState extends State<_SettingsBody> {
         ),
       ]),
       _Group('Personalization', [
-        // SP-78: the launcher-icon slots — changes the app icon OUTSIDE the
-        // app (home screen / launcher), the thing the earlier in-app logo
-        // work got wrong. Android only; other platforms never render it.
         if (Platform.isAndroid)
           _Entry(
             icon: Icons.image_outlined,
@@ -239,10 +233,6 @@ class _SettingsBodyState extends State<_SettingsBody> {
           ),
         ),
       ]),
-      // SP-30: window features moved from the Saved page. Windows only —
-      // the mini player and lyrics overlay are desktop_multi_window
-      // windows and the video backdrop is the Windows canvas layer
-      // (hidden on mobile the same way the battery card is Android-only).
       if (Platform.isWindows)
         _Group('Desktop', [
           _Entry(
@@ -272,9 +262,6 @@ class _SettingsBodyState extends State<_SettingsBody> {
           ),
         ]),
       _Group('Services', [
-        // SP-62: brand-logo YouTube Music tile — login via the embedded
-        // webview (device-code OAuth), cookies saved like Spotify; once
-        // connected the home feed follows the account's listening taste.
         const _Entry(
           title: 'YouTube Music',
           subtitle: 'Account, region and content',
@@ -302,7 +289,6 @@ class _SettingsBodyState extends State<_SettingsBody> {
           keywords: ['spotify', 'login', 'account', 'cookie'],
           builder: _spotifyBuilder,
         ),
-        // SP-30: moved from the Saved page (lastfm_page.dart).
         _Entry(
           icon: Icons.graphic_eq,
           title: 'Last.fm',
@@ -328,7 +314,6 @@ class _SettingsBodyState extends State<_SettingsBody> {
           keywords: const ['history', 'data'],
           onTap: () => context.go('/settings/privacy'),
         ),
-        // SP-30: moved from the Saved page (offline_cache_page.dart).
         _Entry(
           icon: Icons.offline_pin_outlined,
           title: 'Offline cache',
@@ -369,7 +354,6 @@ class _SettingsBodyState extends State<_SettingsBody> {
 
   static Widget _spotifyBuilder(BuildContext context) => const _SpotifyTile();
 
-  // SP-62
   static Widget _ytmBuilder(BuildContext context) => const _YtmTile();
 
   @override
@@ -481,11 +465,6 @@ class _NoResults extends StatelessWidget {
   }
 }
 
-// ── Spotify ──────────────────────────────────────────────────────────
-// Same logic as before: "Log in" opens the embedded login page
-// (/spotify-login); the cookie paste is the advanced fallback.
-// SP-30: while connected, tapping the row opens your Spotify library
-// (the card that used to sit on the Saved page).
 
 class _SpotifyTile extends StatefulWidget {
   const _SpotifyTile();
@@ -551,7 +530,6 @@ class _SpotifyTileState extends State<_SpotifyTile> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ZenRow(
-              // SP-62: real Spotify mark (dimmed while not connected).
               icon: ZenIcons.connected,
               leading: Opacity(
                 opacity: loggedIn ? 1.0 : 0.4,
@@ -675,13 +653,6 @@ class _SpotifyTileState extends State<_SpotifyTile> {
   }
 }
 
-// ── YouTube Music (SP-62, login flow reworked by SP-65) ──────────────
-// Mirrors the Spotify tile: "Log in" opens the YouTube Music sign-in
-// (/ytm-login — an app-hosted webview captures the session cookies of a
-// signed-in music.youtube.com visit; Google removed OAuth support from the
-// YTM API, so cookies are the only working mechanism), and a cookie paste
-// stays as the advanced fallback. Once connected, the home feed follows
-// the account's YouTube Music listening taste.
 
 class _YtmTile extends StatefulWidget {
   const _YtmTile();
@@ -747,7 +718,6 @@ class _YtmTileState extends State<_YtmTile> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ZenRow(
-              // SP-62: real YouTube Music mark (dimmed while not connected).
               icon: ZenIcons.connected,
               leading: Opacity(
                 opacity: loggedIn ? 1.0 : 0.4,

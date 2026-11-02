@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.videoplayer
 
 import android.content.Context
@@ -85,8 +87,6 @@ class ZenVideoPlayerView(
         channel.setMethodCallHandler(this)
     }
 
-    // ── Player construction (LibreTube PlayerHelper.createPlayer
-    //    parity, minimal — no track selector, no text renderers) ──
 
     private fun buildPlayer(): ExoPlayer {
         val audioAttributes = AudioAttributes.Builder()
@@ -204,7 +204,6 @@ class ZenVideoPlayerView(
         player = null
     }
 
-    // ── Method channel ──
 
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
@@ -297,7 +296,6 @@ class ZenVideoPlayerView(
         }
     }
 
-    // ── PlatformView ──
 
     override fun getView(): View = container
 

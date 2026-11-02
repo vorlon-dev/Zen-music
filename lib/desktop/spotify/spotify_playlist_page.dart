@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,11 +20,6 @@ class SpotifyPlaylistPage extends StatefulWidget {
     this.title,
   });
 
-  /// Full Spotify URI (spotify:playlist:...) or the liked-songs collection
-  /// URI (spotify:user:USER:collection). Passed to fetchPlaylistTracks.
-  /// SP-39: spotify:album:… URIs branch to fetchAlbumTracks (getAlbum
-  /// persisted query) so the Spotify home shelves' album cards open here
-  /// too.
   final String playlistId;
   final String? title;
 
@@ -51,7 +48,6 @@ class _SpotifyPlaylistPageState extends State<SpotifyPlaylistPage> {
   Future<void> _load() async {
     final List<Map<String, dynamic>> res;
     if (_isAlbum) {
-      // SP-39: album shelf cards from the Spotify home feed land here.
       res = await SpotifyLibrary.instance
           .fetchAlbumTracks(widget.playlistId, limit: 100);
     } else {
@@ -62,11 +58,6 @@ class _SpotifyPlaylistPageState extends State<SpotifyPlaylistPage> {
     setState(() => _songs = res);
   }
 
-  /// Playlist / album cover via public oEmbed (SP-38-proven endpoint).
-  /// SP-39e: albums resolve through the same endpoint — a real album
-  /// cover beats the first-track approximation. The liked-songs
-  /// collection paints its gradient in _buildCover; any failure here
-  /// just leaves the fallback chain in charge.
   Future<void> _loadCover() async {
     if (_isLikedCollection) return;
     final String kind;

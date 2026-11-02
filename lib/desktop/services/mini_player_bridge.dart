@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' show Offset, PlatformDispatcher, Rect, Size;
@@ -31,7 +33,6 @@ class MiniPlayerBridge {
   static const double _barWidth = 420;
   static const double _barHeight = 170;
 
-  // ── main-window side state ──────────────────────────────────────────
   int? _miniWindowId; // live mini window id (0 is the main window — ours is >0)
   bool _opening = false;
   bool _mainArmed = false;
@@ -45,7 +46,6 @@ class MiniPlayerBridge {
   /// 'toggle' | 'next' | 'previous'. Wired by media_player.dart.
   void Function(String cmd)? onCommand;
 
-  // ── mini-window side state (only used inside the mini engine) ───────
   final ValueNotifier<MiniTrack?> miniTrack = ValueNotifier<MiniTrack?>(null);
   final ValueNotifier<bool> miniPlaying = ValueNotifier<bool>(false);
   final ValueNotifier<Duration> miniPosition =
@@ -59,9 +59,6 @@ class MiniPlayerBridge {
   bool get isMiniWindow => _miniMode;
   bool get isWindowOpen => _miniWindowId != null;
 
-  // ═══════════════════════════════════════════════════════════════════
-  // MAIN WINDOW SIDE
-  // ═══════════════════════════════════════════════════════════════════
 
   /// Arms the receiver for commands coming back from mini windows.
   /// Called once from MediaPlayer's `_initMiniPlayer()`.
@@ -169,7 +166,6 @@ class MiniPlayerBridge {
     } catch (_) {}
   }
 
-  // ── state pushes (wired to the MediaPlayer notifiers) ───────────────
 
   void pushTrack(MiniTrack? track) {
     if (_miniMode) return;
@@ -236,9 +232,6 @@ class MiniPlayerBridge {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // MINI WINDOW SIDE (runs inside the second engine)
-  // ═══════════════════════════════════════════════════════════════════
 
   /// Entry for the mini engine — called from lib/desktop/main.dart when
   /// main() receives the plugin's ['multi_window', windowId, …] args.

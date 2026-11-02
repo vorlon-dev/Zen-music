@@ -1,8 +1,4 @@
-// ZenMusic Desktop — mobile square artwork. FRESH widget (not a port):
-// guarantees a perfect 1:1 artwork box from any thumbnail URL — upgrades
-// the source via getEnhancedImage (regex size normalization) and paints
-// BoxFit.cover inside a fixed square. Optional onImageReady replays the
-// resolved ImageProvider so screens can keep palette extraction alive.
+// ZenMusic · vorlon-dev
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';

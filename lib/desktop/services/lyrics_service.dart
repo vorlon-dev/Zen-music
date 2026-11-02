@@ -1,45 +1,4 @@
-// ZenMusic Desktop — synced lyrics via LRCLIB + BetterLyrics word-sync +
-// YouTube metadata cleaner.
-//
-// PORTED FROM Echo Music (https://github.com/EchoMusicApp/Echo-Music),
-// modules: metadata/src/.../cleaner/MetadataCleaner.kt + CleanerRules.kt and
-// lrclib/src/main/kotlin/com/music/lrclib/LrcLib.kt. Dart port, faithful to
-// the original strategies:
-//   * 5-stage fallback search (cleaned title+primary artist → full artist →
-//     title only → "artist title" query → title-only query → raw paste)
-//   * ±5 s duration gate for synced picks (relaxed), similarity scoring
-//     (contains → 0.8, else Levenshtein ratio), synced preferred over plain
-//   * channel-junk scrub ("- Topic", "VEVO", " Records", " Official"),
-//     bracket-tag extraction (junk vs feat vs version), artist splitting
-//
-// SP-74: WORD-BY-WORD lyrics — models, parsers and orchestration ported
-// from LastWave-Desktop's lyrics backend (lib/features/lyrics/*):
-//   * LyricWord + LyricLine.durationMs/words (positional constructor kept —
-//     every existing call site compiles unchanged)
-//   * LrcParser now understands ENHANCED LRC (<mm:ss.xx> inline word
-//     stamps) and synthesizes proportional word timings for plain LRC so
-//     every synced line gets the karaoke wipe (LastWave
-//     interpolateLineSyllables parity)
-//   * TtmlParser: TTML <p begin end> lines with timed <span begin end>
-//     word runs (Apple-Music style documents), nested x-bg spans, ms/s/
-//     clock times, XML entity unescape
-//   * KaraokeParser: QQ rows `[lineStart,lineDur](wStart,wDur)word …`
-//   * BetterLyrics (lyrics-api.boidu.dev) races FIRST for word timing;
-//     its line-synced fallback document is kept as a last resort
-//   * cache v2: per-line word timings + durations serialized; v1 rows
-//     still load and are hydrated (durations + interpolated words)
-//
-// LRCLIB (https://lrclib.net) is a free, open, key-less lyrics database.
-// Politeness: descriptive User-Agent, bounded strategies, Hive cache,
-// inflight dedupe per track, session negative cache.
-//
-// ZERO new pubspec deps (dart:io HttpClient, dart:convert, hive — all present).
-// R5 print policy: all debug prints use the [yt_lyrics] prefix.
-//
-// LEDGER: imports exactly TWO other ZenMusic files — kugou_lyrics.dart
-// (SP-68 fallback provider) and better_lyrics.dart (SP-74 word-sync
-// provider), both one-way; neither imports back.
-// Nothing else needs editing for it to compile.
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 import 'dart:io';
@@ -47,14 +6,10 @@ import 'dart:math' as math;
 
 import 'package:hive/hive.dart';
 
-import 'better_lyrics.dart'; // SP-74: word-sync provider (one-way dep)
-import 'kugou_lyrics.dart'; // SP-68: KuGou fallback provider (one-way dep)
+import 'better_lyrics.dart';
+import 'kugou_lyrics.dart';
 
-// ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
 
-/// One timed word inside a lyric line (SP-74 word-by-word sync).
 class LyricWord {
   const LyricWord({
     required this.timeMs,
@@ -72,9 +27,6 @@ class LyricWord {
   final String text;
 }
 
-/// One timed lyric line. SP-74 adds [durationMs] and word timings; the
-/// positional 2-arg constructor is kept so every existing call site
-/// compiles unchanged.
 class LyricLine {
   const LyricLine(this.timeMs, this.text,
       {this.durationMs = 0, this.words = const []});
@@ -138,9 +90,6 @@ class LyricsData {
   /// True when any synced line carries REAL word timings.
   bool get hasWordTimings => synced?.any((l) => l.hasWords) ?? false;
 
-  /// SP-74: fill legacy rows (v1 cache / bare lines) — line durations
-  /// from the next cue, interpolated word timings for the wipe. Returns
-  /// a new LyricsData when anything changed, else `this`.
   LyricsData hydrate() {
     if (synced == null || synced!.isEmpty) return this;
     final lines = LrcParser.hydrateLines(synced!);
@@ -242,9 +191,6 @@ class LyricsData {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Metadata cleaner — port of Echo's MetadataCleaner (Kotlin) to Dart.
-// ---------------------------------------------------------------------------
 
 /// Result of cleaning a raw YouTube title/artist pair.
 class CleanedMetadata {
@@ -324,7 +270,6 @@ class MetadataCleaner {
     ' x ',
   ];
 
-  /// Port of [MetadataCleaner.clean].
   static CleanedMetadata clean(String rawTitle, [String rawArtist = '']) {
     final junkTags = <String>[];
     final featured = <String>[];
@@ -366,7 +311,6 @@ class MetadataCleaner {
     );
   }
 
-  // --- stages --------------------------------------------------------------
 
   static String _sanitizeUnicode(String input) {
     var text = input
@@ -567,9 +511,6 @@ class MetadataCleaner {
   }
 }
 
-// ---------------------------------------------------------------------------
-// LRC text parser
-// ---------------------------------------------------------------------------
 
 class LrcParser {
   LrcParser._();
@@ -583,17 +524,6 @@ class LrcParser {
   static final RegExp _wordStampRe =
       RegExp(r'<(\d{1,3}):(\d{2})[.:](\d{2,3})>');
 
-  /// Parses an LRC file body into sorted [LyricLine]s.
-  /// Handles: multiple timestamps per line, `mm:ss` / `mm:ss.xx` / `mm:ss.xxx`,
-  /// and the `[offset:±ms]` metadata tag.
-  ///
-  /// SP-74 (LastWave parity):
-  ///   * ENHANCED LRC — inline `<mm:ss.xx>` word stamps become real
-  ///     [LyricWord]s (each stamped run ends at the next stamp, the next
-  ///     line, or +800 ms); stamps are stripped from the display text.
-  ///   * every plain line gets a computed duration (next cue, clamped
-  ///     80..20000 ms, else 4000) and PROPORTIONAL interpolated word
-  ///     timings so the karaoke wipe works on every synced line.
   static List<LyricLine> parse(String lrc) {
     var offsetMs = 0;
     final entries = <({int timeMs, String body})>[];
@@ -681,10 +611,6 @@ class LrcParser {
     return out;
   }
 
-  /// Enhanced-LRC word runs: each stamped run ends at the next stamp,
-  /// the next line, or +800 ms. Text before the first stamp carries no
-  /// timing (LastWave parity: it is not a syllable). Empty when the
-  /// body carries no stamps at all.
   static List<LyricWord> _parseWordRuns(
       String body, int lineStartMs, int? lineEndMs) {
     final marks = _wordStampRe.allMatches(body).toList();
@@ -728,9 +654,6 @@ class LrcParser {
     return min * 60000 + sec * 1000 + fracMs;
   }
 
-  /// SP-74: synthesize proportional word timings across a line's
-  /// duration for the smooth karaoke wipe on line-synced lyrics
-  /// (LastWave interpolateLineSyllables parity).
   static List<LyricWord> interpolateLineWords({
     required String text,
     required int startTimeMs,
@@ -766,10 +689,6 @@ class LrcParser {
     return syllables;
   }
 
-  /// SP-74: fill missing durations / word timings on any line list —
-  /// used by [LyricsData.hydrate] for v1 cache rows and by callers
-  /// that built lines without timing metadata. Returns the SAME list
-  /// when everything is already hydrated.
   static List<LyricLine> hydrateLines(List<LyricLine> lines) {
     var anyChanged = false;
     final out = <LyricLine>[];
@@ -800,11 +719,6 @@ class LrcParser {
     return anyChanged ? out : lines;
   }
 
-  /// SP-74: duration plausibility for providers whose responses carry
-  /// no candidate identity (BetterLyrics): the lyric timeline must
-  /// roughly fit the track. Rejects timelines running 45 s+ past the
-  /// end, or covering under half of a track while missing 90 s+.
-  /// Lenient by design (LastWave parity).
   static bool plausibleDuration(List<LyricLine> lines, int? durationMs) {
     if (durationMs == null || durationMs <= 0) return true;
     if (lines.length < 3) return true;
@@ -824,13 +738,7 @@ class LrcParser {
   }
 }
 
-// ---------------------------------------------------------------------------
-// TTML parser (SP-74) — port of LastWave parseTtml.
-// ---------------------------------------------------------------------------
 
-/// One span located by the depth-aware scanner (SP-75): attribute string,
-/// inner XML, and the whitespace right after its matching close tag — the
-/// same three pieces the old flat regex captured, nesting-correct.
 class _SpanHit {
   const _SpanHit(this.attrs, this.content, this.trailing);
   final String attrs;
@@ -838,13 +746,6 @@ class _SpanHit {
   final String trailing;
 }
 
-/// Parses TTML documents (`<p begin end>` lines, timed `<span begin end>`
-/// word runs, nested `<span ttm:role="x-bg">` backgrounds) into lines.
-/// Span-less TTML yields line-synced lines WITHOUT words (real word sync
-/// must come from timed spans — interpolation is applied elsewhere).
-/// SP-75: span extraction is depth-aware — the old flat regex closed a
-/// container span at the FIRST inner `</span>`, which swallowed the first
-/// word span of every x-bg-wrapped line.
 class TtmlParser {
   TtmlParser._();
 
@@ -864,12 +765,6 @@ class TtmlParser {
       caseSensitive: false);
   static final RegExp _interSpanSpaces = RegExp(r'</span>\s+<span');
 
-  /// SP-75: depth-aware replacement for the old flat span regex. Returns
-  /// the spans DIRECTLY nested in [xml] (depth 1), each with its attribute
-  /// string, inner XML and the whitespace following its MATCHING close tag.
-  /// Self-closing and unbalanced spans are skipped (the old regex ignored
-  /// them too). Scanning is a simple span-tag stack — attributes never
-  /// contain `>` in the documents this serves (Apple TTML / boidu.dev).
   static List<_SpanHit> _scanSpans(String xml) {
     final hits = <_SpanHit>[];
     final open = <(String, int)>[]; // (attrs, contentStart)
@@ -1031,9 +926,6 @@ class TtmlParser {
       .replaceAll('&#39;', "'");
 }
 
-// ---------------------------------------------------------------------------
-// QQ karaoke parser (SP-74) — port of LastWave parseBetterKaraoke.
-// ---------------------------------------------------------------------------
 
 /// Parses QQ-karaoke rows: `[lineStart,lineDur](wStart,wDur[,?])word …`
 /// (milliseconds). Empty when the payload carries no karaoke rows.
@@ -1103,9 +995,6 @@ class KaraokeParser {
   }
 }
 
-// ---------------------------------------------------------------------------
-// LRCLIB client — port of Echo's LrcLib object.
-// ---------------------------------------------------------------------------
 
 class LyricsService {
   LyricsService._();
@@ -1149,13 +1038,6 @@ class LyricsService {
     final key = 'v1|${clean.primaryArtist.toLowerCase()}|'
         '${clean.cleanTitle.toLowerCase()}|${album?.toLowerCase() ?? ''}';
     if (_inflight.containsKey(key)) return _inflight[key]!;
-    // BLOCK body on purpose — an arrow body `() => _inflight.remove(key)`
-    // implicitly RETURNS the removed Future (the `fut` being defined!),
-    // and whenComplete waits for a Future returned by its callback:
-    // the inflight future would wait for itself and NEVER complete —
-    // every lyrics lookup (cache hit or network) would hang forever.
-    // (SP-76 root cause of "no lyrics for any song"; LastWave's
-    // repository uses remove-as-statement for exactly this reason.)
     final fut = _lookupImpl(clean, key, durationMs, album, forceRefresh)
         .whenComplete(() {
       _inflight.remove(key);
@@ -1178,18 +1060,12 @@ class LyricsService {
         if (cached is Map) {
           final d = LyricsData.fromMap(Map<String, dynamic>.from(cached));
           if (d != null) {
-            // SP-74: hydrate legacy v1 rows (durations + wipe words).
             return d.hydrate();
           }
         }
       }
       if (_misses.contains(key)) return null;
 
-      // SP-74 stage 0: BetterLyrics word-sync race (Apple-Music style
-      // TTML with timed word spans / QQ karaoke rows / enhanced LRC).
-      // REAL word timing wins outright; a line-synced document is kept
-      // only as a last resort (LRCLIB's identity-checked matches are
-      // better for plain line sync).
       LyricsData? betterLineSynced;
       try {
         final doc = await BetterLyrics.lookup(
@@ -1290,9 +1166,6 @@ class LyricsService {
         }
       }
 
-      // SP-68: KuGou fallback — the Chinese/Asian long tail LRCLIB
-      // misses. Same cache box, same parser; a miss here finally lands
-      // in the session negative cache below.
       try {
         final lrc = await KugouLyrics.lookup(
           title: clean.cleanTitle,
@@ -1323,8 +1196,6 @@ class LyricsService {
         print('[yt_lyrics] kugou fallback failed: $e');
       }
 
-      // SP-74: BetterLyrics line-synced document as the final resort —
-      // better than a miss when LRCLIB and KuGou both came up empty.
       if (betterLineSynced != null && betterLineSynced.hasAny) {
         final box = await _cache();
         await box.put(key, betterLineSynced.toMap());
@@ -1344,10 +1215,6 @@ class LyricsService {
     }
   }
 
-  /// SP-74: parse a word-timed document through the right parser —
-  /// TTML spans first, QQ karaoke rows second (LastWave
-  /// parseBetterDocument parity, minus the plain-LRC tail which never
-  /// carries real word timing).
   static List<LyricLine> _parseWordDocument(String payload) {
     final lower = payload.toLowerCase();
     if (lower.contains('<tt') ||

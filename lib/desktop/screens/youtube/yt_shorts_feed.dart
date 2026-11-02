@@ -1,10 +1,4 @@
-// ZenMusic — YouTube Shorts feed (SP-79).
-//
-// One shared media_kit player drives the vertical snap feed: swiping loads
-// the next short through the SAME YtVideoEngine the watch page uses (local
-// byte proxy, client priority chain), the next URL is resolved in the
-// background while the current short plays, and every short loops until the
-// user swipes on. Full watch page stays one tap away via the expand button.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 
@@ -75,7 +69,6 @@ class _YtShortsFeedState extends State<YtShortsFeed>
     super.dispose();
   }
 
-  // ───────────────────────────────────────────────── feed data
 
   Future<void> _reload() async {
     setState(() {
@@ -96,8 +89,6 @@ class _YtShortsFeedState extends State<YtShortsFeed>
       }
       setState(() {
         _ids.addAll(ids);
-        // SP-80: the shorts engine now reports its own follow-up token
-        // ("#shorts" search pages); remember it for the next page.
         _continuation = YtBrowse.lastShortsContinuation;
         _loading = false;
       });
@@ -131,7 +122,6 @@ class _YtShortsFeedState extends State<YtShortsFeed>
     }
   }
 
-  // ───────────────────────────────────────────────── playback
 
   Future<String?> _resolveUrl(String id) async {
     if (_urlCache.containsKey(id)) return _urlCache[id]?.videoUrl;
@@ -213,7 +203,6 @@ class _YtShortsFeedState extends State<YtShortsFeed>
     }
   }
 
-  // ─────────────────────────────────────────────────────── UI
 
   @override
   Widget build(BuildContext context) {

@@ -1,33 +1,4 @@
-// ZenMusic Desktop — services/smtc_bridge.dart (GPL-3.0).
-//
-// SP-22 — Windows System Media Transport Controls (SMTC) bridge.
-// SP-22b — adapted to the REAL smtc_windows 1.1.0 API (verified against
-//          the package's generated Dart source, not its stale README):
-//          PlaybackStatus constants are lowercase (playing/paused/stopped),
-//          SMTCConfig requires all 7 flags incl. fastForwardEnabled and
-//          rewindEnabled (off here — ZenMusic binds no seek keys), and
-//          WidgetsFlutterBinding needs package:flutter/widgets.dart.
-// SP-22c — traced version: init() and the playback-driven pushes print one
-//          [smtc] line each in the debug console, so a "media card not
-//          showing" report carries its own diagnosis. Playback behavior is
-//          unchanged from SP-22b.
-//
-// What this gives ZenMusic on Windows:
-//  • Media keys: play/pause, next, previous work from the keyboard even
-//    when the app window is not focused.
-//  • The Windows volume flyout / Quick Settings (Win+A) and the lock
-//    screen show the current track: title, artist, album, artwork and a
-//    live progress bar.
-//  • The overlay's own play/pause/next/previous buttons control ZenMusic.
-//
-// Design rules:
-//  • This is the ONLY ZenMusic file that imports package:smtc_windows.
-//    Every other file talks through SmtcTrack / SmtcButton and the methods
-//    below, so the smtc package API surface stays inside one small file.
-//  • Hard no-op off Windows and on any init failure — media_player.dart can
-//    call these methods unconditionally from any platform, in any state.
-//  • Every native call is fire-and-swallow: a bridge problem can never take
-//    audio playback down with it.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:io';
@@ -131,7 +102,6 @@ class SmtcBridge {
     }
   }
 
-  // ── Playback status ──
 
   void playing() {
     _fire(() => _smtc!.setPlaybackStatus(PlaybackStatus.playing));
@@ -148,7 +118,6 @@ class SmtcBridge {
     });
   }
 
-  // ── Track metadata ──
 
   void updateTrack(SmtcTrack track) {
     _fire(() async {
@@ -165,7 +134,6 @@ class SmtcBridge {
     });
   }
 
-  // ── Timeline (progress bar in the Windows volume flyout) ──
 
   static const Duration _minPushInterval = Duration(milliseconds: 950);
   DateTime _lastPush = DateTime.fromMillisecondsSinceEpoch(0);
@@ -205,7 +173,6 @@ class SmtcBridge {
         )));
   }
 
-  // ── Internals ──
 
   /// Runs a native call, swallowing every error. Also guards !_ready so the
   /// call sites above can stay one-liners.

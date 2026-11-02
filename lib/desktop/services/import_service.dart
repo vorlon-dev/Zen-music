@@ -1,7 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), services/import_service.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// R8d: spotify branch restored verbatim now that spotify.dart is vendored.
+// ZenMusic · vorlon-dev
 
 import 'package:get_it/get_it.dart';
 

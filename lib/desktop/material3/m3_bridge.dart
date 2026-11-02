@@ -1,13 +1,4 @@
-// SP-58: Material 3 token bridge.
-//
-// On Android the M3 design tokens live NATIVELY — declared in
-// android/app/src/main/res/values/material3_tokens.xml and served by
-// Material3Tokens.kt over the `zen/material3_tokens` channel. Dart pulls
-// them once at boot so a native-side palette tweak (XML edit + Gradle
-// rebuild) re-skins the theme without touching Dart. Everything is
-// failure-soft: if the channel is missing (Windows, or an APK built
-// before SP-58) the Dart fallbacks in m3_palette.dart are used — they
-// are the same values.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 

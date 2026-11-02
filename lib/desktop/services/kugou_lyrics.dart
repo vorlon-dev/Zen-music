@@ -1,29 +1,4 @@
-// ZenMusic — SP-68: KuGou lyrics — synced-LRC fallback after LRCLIB.
-//
-// LRCLIB misses most of the Chinese/Asian long tail; KuGou's public
-// lyrics library (mobileservice.kugou.com + lyrics.kugou.com, no keys,
-// no auth) covers it well. This provider ports the proven three-hop
-// pipeline used by PixelMusic-class clients (originally the ViMusic
-// KuGou module family):
-//
-//   1. song search      GET /api/v3/search/song  (top 8, keyword =
-//                       "title - artist [album]") → song hash + duration
-//   2. duration gate    ±8 s against the playing track (skipped when
-//                       the duration is unknown)
-//   3. lyrics search    GET lyrics.kugou.com/search by hash, then by
-//                       keyword+duration → candidates {id, accesskey}
-//   4. download         GET lyrics.kugou.com/download?fmt=lrc →
-//                       Base64(utf8 LRC)
-//   5. normalize        keep timed lines only; strip the credit block
-//                       ("作词/作曲/Lyrics/Composer…" lines) that KuGou
-//                       pads onto the head and tail of the file
-//
-// The provider returns the NORMALIZED LRC TEXT; the caller (lyrics_service)
-// parses it through the standard LrcParser → LyricsData path, so it is
-// cached in the same Hive box as LRCLIB results and rendered by the same
-// synced view. This file must NOT import lyrics_service.dart — the
-// dependency stays one-way (the service imports this file).
-// ZERO new pubspec deps (dart:io HttpClient + dart:convert).
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 import 'dart:io';
@@ -83,7 +58,6 @@ class KugouLyrics {
     }
   }
 
-  // ── keyword building (CJK-aware title/artist normalization) ──────────
 
   static String _searchQuery(String title, String artist, String? album) {
     final q = StringBuffer('${_normTitle(title)} - ${_normArtist(artist)}');
@@ -111,7 +85,6 @@ class KugouLyrics {
       .replaceAll(RegExp(r'\(.*\)'), '')
       .replaceAll(RegExp(r'（.*）'), '');
 
-  // ── the three KuGou endpoints ────────────────────────────────────────
 
   static Future<List<({String hash, num duration})>> _searchSongs(
       String query) async {
@@ -200,7 +173,6 @@ class KugouLyrics {
     }
   }
 
-  // ── LRC hygiene — port of the KuGou normalizer ───────────────────────
 
   static final RegExp _acceptedRe =
       RegExp(r'\[(\d\d):(\d\d)\.(\d{2,3})\].*');

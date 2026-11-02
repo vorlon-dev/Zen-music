@@ -1,14 +1,4 @@
-// ZenMusic — YouTube section home (SP-79). Cross-platform.
-//
-// Three tabs inside one branch page:
-//   • Home     → signed-out recommendations (browse FEwhat_to_watch)
-//   • Trending → browse FEtrending, with the response's OWN filter chips
-//                (Now / Music / Gaming / Movies — harvested, never hardcoded)
-//   • Shorts   → the vertical shorts feed (YtShortsFeed)
-//
-// Every video opens in the existing VideoWatchPage (the SP-proven
-// media_kit player with quality/speed/related/ambient), keeping ONE
-// playback engine in the app.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 
@@ -117,7 +107,6 @@ class _YtHomePageState extends State<YtHomePage> {
   }
 }
 
-// ────────────────────────────────────────────────────── shared feed logic
 
 class _FeedBox {
   final List<YtFeedVideo> items = [];
@@ -268,7 +257,6 @@ class _YtFeedTabState extends State<_YtFeedTab>
   }
 }
 
-// ─────────────────────────────────────────────────────────── trending
 
 class _YtTrendingTab extends StatefulWidget {
   const _YtTrendingTab();

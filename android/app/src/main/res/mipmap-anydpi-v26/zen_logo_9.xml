@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+<!-- ZenMusic · vorlon-dev -->
+
+<!-- ZenMusic · vorlon-dev --><adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/zen_logo_9_bg"/>
     <foreground android:drawable="@mipmap/zen_logo_9_foreground"/>
 </adaptive-icon>

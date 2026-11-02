@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -38,7 +40,6 @@ class AppearancePage extends StatelessWidget {
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
                   children: [
-                    // ── Theme ──
                     ZenSection(title: 'Theme', children: [
                       ZenRow(
                         icon: ZenIcons.themeMode,
@@ -90,12 +91,6 @@ class AppearancePage extends StatelessWidget {
                             .read<AppearanceCubit>()
                             .setDynamicColors(v),
                       ),
-                      // SP-62.2: whole-app UI theme — Classic / Liquid
-                      // Glass / Material 3. Restores the SP-58 switch that
-                      // the repo baseline never carried: without this row
-                      // (and the SettingsManager members behind it) the
-                      // app was stuck on whatever UI_THEME Hive held and
-                      // there was NO way to reach the other designs.
                       ZenRow(
                         icon: ZenIcons.themeMode,
                         title: 'UI theme',
@@ -118,7 +113,6 @@ class AppearancePage extends StatelessWidget {
                       ),
                     ]),
 
-                    // ── Player ──
                     ZenSection(title: 'Player', children: [
                       ValueListenableBuilder<String>(
                         valueListenable: PlayerSkinPrefs.skin,
@@ -169,9 +163,6 @@ class AppearancePage extends StatelessWidget {
                           );
                         },
                       ),
-                      // SP-33: crossfade entry (full slider + explainer
-                      // cards live in crossfade_page.dart, same as the
-                      // Settings → General row).
                       ZenRow(
                         icon: Icons.compare_arrows,
                         title: 'Crossfade',
@@ -192,9 +183,6 @@ class AppearancePage extends StatelessWidget {
                           value: on,
                           onChanged: (v) {
                             AppearancePrefs.setCanvasEnabled(v);
-                            // SP-33: on Windows this is also the video
-                            // backdrop service's master power, so both
-                            // togglers stay in sync.
                             if (Platform.isWindows) {
                               WindowsBackdropService.instance.setEnabled(v);
                             }
@@ -212,7 +200,6 @@ class AppearancePage extends StatelessWidget {
                       ),
                     ]),
 
-                    // ── Desktop (Windows only) — SP-33 ──
                     if (Platform.isWindows)
                       ZenSection(title: 'Desktop', children: [
                         ZenRow(
@@ -233,7 +220,6 @@ class AppearancePage extends StatelessWidget {
                         ),
                       ]),
 
-                    // ── Lyrics ──
                     ZenSection(title: 'Lyrics', children: [
                       ValueListenableBuilder<double>(
                         valueListenable: AppearancePrefs.lyricsTextSize,
@@ -286,7 +272,6 @@ class AppearancePage extends StatelessWidget {
                       ),
                     ]),
 
-                    // ── Feedback ──
                     ZenSection(title: 'Feedback', children: [
                       ValueListenableBuilder<bool>(
                         valueListenable: AppearancePrefs.haptics,

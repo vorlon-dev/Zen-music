@@ -1,22 +1,7 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.liquid
 
-// SP-54: Liquid Glass — Kotlin-side theme engine.
-//
-// This is the Android half of the liquid glass theme. The UI of the glass
-// layer is drawn 100% natively in Kotlin (LiquidGlassBackdropView +
-// LiquidGlassSurfaceView) because native rendering stays smooth on low-end
-// phones. This object is the bridge brain:
-//   • registers the `zenmusic/liquid_glass` MethodChannel,
-//   • stores the current theme state (enabled / dark / accent),
-//   • computes a device performance tier (low / mid / high) once at boot
-//     from ActivityManager signals so the renderers can degrade cheaply.
-//
-// Tier policy (smoothness on low-end mobile is a hard requirement):
-//   low  → isLowRamDevice == true, OR API < 28, OR small heap class.
-//          Renderers go static: no animator, no platform-view panels —
-//          Dart falls back to a plain translucent frost instead.
-//   mid  → everything else: gradient glass, animator at ~40 fps.
-//   high → API ≥ 33 and large heap: full animation at native vsync.
 
 import android.app.Activity
 import android.app.ActivityManager

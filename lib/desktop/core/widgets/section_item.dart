@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:io';
 import 'dart:math';
 
@@ -29,14 +31,6 @@ class SectionItem extends StatefulWidget {
 
 class _SectionItemState extends State<SectionItem> {
   final ScrollController horizontalScrollController = ScrollController();
-  // SP-42: created once so paged shelves keep their position across parent
-  // rebuilds (pagination, load-more) instead of snapping back to page 0.
-  // SP-45: PageController.viewportFraction is FINAL — assignable only in the
-  // constructor. The one case that genuinely needs a new fraction is a
-  // window RESIZE: rebuild the controller then (width actually changed),
-  // put the shelf back on the page it was showing, and dispose the old
-  // controller only after the frame has handed it over. Ordinary rebuilds
-  // (width unchanged) never touch the shelf's scroll position.
   PageController? _pageController;
   double? _pageControllerWidth;
   PageController get horizontalPageController {
@@ -93,10 +87,6 @@ class _SectionItemState extends State<SectionItem> {
 
   @override
   Widget build(BuildContext context) {
-    // SP-45: no per-build writes to viewportFraction — it is final on
-    // PageController and can only be set in the constructor.
-    // horizontalPageController handles the resize case (width changed) by
-    // rebuilding the controller, and ignores width-less rebuilds entirely.
     return widget.section['contents'].isEmpty
         ? const SizedBox()
         : Column(
@@ -240,7 +230,6 @@ class SongList extends StatefulWidget {
 class _SongListState extends State<SongList> {
   late int num;
   late int pages;
-  // SP-42: one shared glide state for this shelf's pages.
   final ShelfWheelMomentum _momentum = ShelfWheelMomentum();
 
   @override
@@ -266,7 +255,6 @@ class _SongListState extends State<SongList> {
       itemBuilder: (context, index) {
         int start = index * num;
         int end = start + num;
-        // SP-42: wheel over a paged shelf glides it horizontally.
         return SmoothShelfWheel(
           controller: widget.controller,
           momentum: _momentum,
@@ -305,9 +293,6 @@ class SongTile extends StatelessWidget {
   final Map song;
   final VoidCallback? onTap;
 
-  /// DEVIATION (marked): Echo assumes every thumbnail entry has 'width'.
-  /// History entries created by the playback harness (and any malformed
-  /// data) may not — null-safe pick with fallback.
   String _pickThumbnailUrl(List thumbnails) {
     for (final el in thumbnails) {
       final w = el['width'];
@@ -355,9 +340,6 @@ class SongTile extends StatelessWidget {
           } else {
             await GetIt.I<MediaPlayer>().playSong(Map.from(song));
 
-            // final s = GetIt.I<HttpServer>();
-            // await get(Uri.parse(
-            //     'http://${s.address.host}:${s.port}/stream?videoId=${song['videoId']}'));
           }
         },
         onSecondaryTap: () {
@@ -449,7 +431,6 @@ class ItemList extends StatefulWidget {
 }
 
 class _ItemListState extends State<ItemList> {
-  // SP-42: one shared glide state for this shelf's items.
   ShelfWheelMomentum? _momentum;
 
   @override
@@ -479,7 +460,6 @@ class _ItemListState extends State<ItemList> {
           itemBuilder: (context, index) {
             double width = height * (widget.items[index]?['aspectRatio'] ?? 1);
             String? subtitle = _buildSubtitle(widget.items[index]);
-            // SP-42: wheel over a shelf card glides the shelf horizontally.
             final card = Adaptivecard(
               elevation: 0,
               borderRadius: BorderRadius.circular(8),

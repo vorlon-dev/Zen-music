@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.dsp.controller
 
 import com.zen.music.zenmusic.dsp.core.models.FilterType

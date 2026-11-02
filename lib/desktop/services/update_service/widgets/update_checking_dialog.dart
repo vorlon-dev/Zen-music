@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'package:flutter/material.dart';
 
 class UpdateCheckingDialog extends StatelessWidget {

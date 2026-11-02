@@ -1,8 +1,4 @@
-// ZenMusic Desktop — ported from the retired mobile stack's
-// jiosaavn_service.dart. ZenMusic remains GPL-3.0.
-// PORT: Song/Collection models -> desktop song maps (videoId = JioSaavn id,
-// jiosaavnStreamUrl carries the 320kbps URL — the player's JioSaavn branch
-// plays it directly). Playlists/albums emit maps for a future browse round.
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -14,7 +10,6 @@ class JioSaavnService {
   static const _baseUrl = 'https://jiosaavn-api.vorlon-revora.workers.dev';
   final _client = http.Client();
 
-  // ── SONG SEARCH ──
 
   Future<List<Map<String, dynamic>>> search(String query,
       {int limit = 15}) async {
@@ -68,7 +63,6 @@ class JioSaavnService {
     }
   }
 
-  // ── PLAYLISTS ──
 
   Future<List<Map<String, dynamic>>> searchPlaylists(String query,
       {int limit = 10}) async {
@@ -120,7 +114,6 @@ class JioSaavnService {
     }
   }
 
-  // ── ALBUMS ──
 
   Future<List<Map<String, dynamic>>> searchAlbums(String query,
       {int limit = 10}) async {
@@ -172,7 +165,6 @@ class JioSaavnService {
     }
   }
 
-  // ── PARSERS ──
 
   /// Desktop-shape song map. videoId carries the JioSaavn id (opaque queue
   /// key for the whole UI); jiosaavnStreamUrl routes the player's
@@ -289,7 +281,6 @@ class JioSaavnService {
     return out;
   }
 
-  // ── CLIENT-SIDE FILTERING (song search only) ──
 
   List<Map<String, dynamic>> _filterRelevant(
       List<Map<String, dynamic>> songs, String query) {

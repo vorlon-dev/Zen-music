@@ -1,22 +1,7 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.liquid
 
-// SP-54: Liquid Glass — the app-wide backdrop, drawn natively in Kotlin.
-//
-// A single fullscreen View mounted BEHIND all Flutter content (the Flutter
-// side hosts it as platform view "zen_liquid_glass" with kind:"backdrop").
-// It paints a slowly drifting aurora of soft colour orbs; all the glass
-// panels in the app read their "liquid" feel from this layer.
-//
-// PERFORMANCE CONTRACT (low-end mobile first):
-//   • Gradient-only painting. RadialGradients are inherently soft, so no
-//     RenderEffect/blur pass is ever needed — that's why this stays 60fps
-//     on phones where a real gaussian pass would crawl.
-//   • high tier: animator at native vsync (~60fps).
-//   • mid tier : animator gated to ~40fps (frame skipping in the updater).
-//   • low tier : NO animator at all — one static frame is drawn, then the
-//     view goes silent (zero GPU/CPU until the theme changes).
-//   • The animator stops when the view is detached or the window loses
-//     visibility, so the theme costs nothing while backgrounded.
 
 import android.animation.ValueAnimator
 import android.content.Context
@@ -96,12 +81,12 @@ class LiquidGlassBackdropView(context: Context) : View(context) {
             addUpdateListener {
                 phase = it.animatedValue as Float
                 if (frameIntervalMs == 0L) {
-                    postInvalidateOnAnimation() // SP-54.2: member call — the View static (View) overload is Java-only
+                    postInvalidateOnAnimation()
                 } else {
                     val now = System.nanoTime() / 1_000_000L
                     if (now - lastFrameMs >= frameIntervalMs) {
                         lastFrameMs = now
-                        postInvalidateOnAnimation() // SP-54.2: member call — the View static (View) overload is Java-only
+                        postInvalidateOnAnimation()
                     }
                 }
             }

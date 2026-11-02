@@ -1,6 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), ytmusic/mixins/library.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/foundation.dart' show debugPrint;
 
@@ -9,13 +7,6 @@ import '../client.dart';
 import '../helpers.dart';
 import 'utils.dart';
 
-// SP-71: the library shelves are parsed with hard `List x = nav(...)`
-// casts that threw "type 'Null' is not a subtype of type 'List<dynamic>'"
-// whenever YouTube Music answered with an empty/limited library page
-// (musicNotifierShelfRenderer instead of music shelves, grid without
-// items, fresh session with no history). Every hop used by the account
-// section (getHistory / getLibrarySongs / getLibraryPlaylists) is now
-// null-guarded and reports what it actually saw under [ytm-lib].
 
 mixin LibraryMixin on YTClient {
   Future<Map> getLibrarySongs({String? continuationParams}) async {
@@ -54,7 +45,6 @@ mixin LibraryMixin on YTClient {
     if (continuation != null) {
       continuation = getContinuationString(continuation);
     }
-    // SP-71: null-guarded — empty shelves answer without contents.
     final List contents =
         (nav(outerContents, ['contents']) as List?) ?? const [];
 
@@ -180,9 +170,6 @@ mixin LibraryMixin on YTClient {
     if (continuation != null) {
       continuation = getContinuationString(continuation);
     }
-    // SP-71: null-guarded + length-guarded. The first grid slot is the
-    // "New playlist" create-card (dropped here); a page without items
-    // (empty library / notifier shelf) must yield [] not a cast crash.
     List items = (nav(outerContents, ['items']) as List?) ?? const [];
     if (continuationParams == null && items.length > 1) {
       items = items.sublist(1);
@@ -260,11 +247,6 @@ mixin LibraryMixin on YTClient {
     Map<String, dynamic> body = {'browseId': 'FEmusic_history'};
     var response = await sendRequest('browse', body);
 
-    // SP-71: null-guarded walk. An account with an empty/off history gets
-    // a musicNotifierShelfRenderer section instead of music shelves — the
-    // old `List allContents = nav(...)` / `List contents = nav(...)` casts
-    // turned that into "type 'Null' is not a subtype of type
-    // 'List<dynamic>'" and the whole tier was skipped.
     final allContents = (nav(response, [
       'contents',
       'singleColumnBrowseResultsRenderer',

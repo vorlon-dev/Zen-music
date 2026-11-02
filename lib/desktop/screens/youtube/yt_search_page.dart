@@ -1,9 +1,4 @@
-// ZenMusic — YouTube search (SP-79).
-//
-// One query, four result scopes (All / Videos / Channels / Playlists)
-// through the vendored youtube_explode SearchClient. Results paginate with
-// the list's own nextPage(); videos open in the shared watch page, channels
-// and playlists open their SP-79 pages.
+// ZenMusic · vorlon-dev
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';

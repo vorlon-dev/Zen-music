@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:expandable_text/expandable_text.dart';
 import 'package:flutter/material.dart';

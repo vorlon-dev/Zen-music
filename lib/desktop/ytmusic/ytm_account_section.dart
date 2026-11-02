@@ -1,22 +1,4 @@
-// ZenMusic — SP-68: the signed-in YouTube Music account as a Home section.
-//
-// When a cookie session is connected (YtmAuth), Home grows a set of
-// taste shelves built from the user's OWN library — the same surfaces
-// the YouTube Music app shows in its Library tab:
-//   * "Listen again"   — FEmusic_history (recently played tracks)
-//   * "Liked music"    — FEmusic_liked_videos (thumbs-upped songs/videos)
-//   * "Your playlists" — FEmusic_liked_playlists (the user's playlists)
-//
-// The personalized quick-picks in the feed below come from FEmusic_home
-// with the merged auth headers (SP-65); THIS section adds the library
-// shelves that the home browse does not contain. Everything renders
-// through the stock SectionItem shelf widget, so track taps play via
-// playSong and playlist taps open /browse exactly like the rest of Home.
-//
-// Failure doctrine (same as the Spotify section): every tier is isolated
-// — a dead shelf disappears quietly with a "[ytm-account]" log line and
-// must never break the sections below it. Logged out, the section
-// collapses to a slim connect banner that opens the sign-in flow.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -104,8 +86,6 @@ class YtmAccountSectionState extends State<YtmAccountSection> {
           'contents': contents.take(24).toList(),
         });
       }
-      // SP-71: count even when empty — "0 day-shelves" in the log means
-      // the account answered (empty/off history), not that parsing died.
       debugPrint('[ytm-account] history: ${history.length} day-shelves -> '
           '${contents.length} playable rows');
     } catch (e) {
@@ -177,8 +157,6 @@ class YtmAccountSectionState extends State<YtmAccountSection> {
           );
         }
         if (_shelves.isEmpty) {
-          // SP-71: a fresh/quiet library used to render nothing at all,
-          // which read as "the feature is broken". Say what fills it.
           return const Padding(
             padding: EdgeInsets.fromLTRB(8, 4, 8, 8),
             child: Text(
@@ -200,7 +178,6 @@ class YtmAccountSectionState extends State<YtmAccountSection> {
   }
 }
 
-// ── logged out ─────────────────────────────────────────────────────────
 
 class _YtmConnectBanner extends StatelessWidget {
   const _YtmConnectBanner();

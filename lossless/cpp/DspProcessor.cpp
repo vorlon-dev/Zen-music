@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 #include "DspProcessor.h"
 
 #include <algorithm>

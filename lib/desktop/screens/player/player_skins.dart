@@ -1,26 +1,4 @@
-// ZenMusic Desktop — full-screen player layouts ("skins").
-//
-// Classic is the app's default player page (this file draws nothing for it).
-// Each skin below is a COMPLETE, separate screen modelled on a real player.
-// Every skin has its own phone layout and its own wide (desktop) layout:
-//
-//   appleMusic  Apple Music — drag handle, art shrinks on pause, thick bar,
-//               volume. Desktop: the player centred on the blurred colour.
-//   lastWave    LastWave (github.com/Clash-Projects/LastWave-Native) —
-//               Material 3 Expressive "liquid glass": frosted glass panels
-//               floating on a colourful artwork-tinted backdrop, wavy
-//               progress bar, big morphing expressive play button.
-//   bitChord    BitChord (github.com/kushagrasinghx/BitChord) — Apple-style
-//               layout with a breathing album canvas, dynamic artwork
-//               theming and a floating frosted-glass control bar.
-//   echo        Echo Music (github.com/EchoMusicApp/Echo-Music) — clean
-//               Material 3 player: tonal squircle buttons, FAB-style play,
-//               dot slider, pill actions, dynamic colour from the artwork.
-//   archiveTune ArchiveTune (github.com/rukamori/ArchiveTune) — Material You
-//               "cute": extra-rounded cards, thick big-thumb slider, tonal
-//               chips, saturated dynamic accents.
-//
-// All buttons drive the real engine (MediaPlayer via GetIt) and PlayerCtx.
+// ZenMusic · vorlon-dev
 
 import 'dart:io' show Platform;
 import 'dart:math' as math;
@@ -40,9 +18,6 @@ import 'package:zenmusic/desktop/utils/bottom_modals.dart';
 import 'package:zenmusic/desktop/utils/zen_icons.dart';
 import 'package:zenmusic/desktop/utils/zen_settings_kit.dart';
 
-// ════════════════════════════════════════════════════════════════════
-// SKIN LIST + CONTEXT
-// ════════════════════════════════════════════════════════════════════
 
 enum PlayerSkin {
   classic('Classic', 'The standard Zen layout', Icons.music_note_outlined),
@@ -143,9 +118,6 @@ class PlayerSkinView extends StatelessWidget {
   };
 }
 
-// ════════════════════════════════════════════════════════════════════
-// SHARED: icons + engine hooks
-// ════════════════════════════════════════════════════════════════════
 
 class _Ic {
   _Ic._();
@@ -312,9 +284,6 @@ Widget _media(PlayerCtx x, Size size,
   );
 }
 
-// ════════════════════════════════════════════════════════════════════
-// SHARED: layout + colour helpers
-// ════════════════════════════════════════════════════════════════════
 
 bool _isWide(BoxConstraints c) =>
     c.maxWidth >= 820 && c.maxWidth > c.maxHeight * 1.15;
@@ -348,8 +317,6 @@ Widget _shell(Widget bg, Widget child) => Material(
   ]),
 );
 
-/// Frosted "liquid glass" panel (LastWave / BitChord): blurs whatever is
-/// behind it and lays a translucent wash + hairline border on top.
 Widget _glass(Widget child,
     {double r = 24, double blur = 22, Color? bg, Color? border}) =>
     ClipRRect(
@@ -368,7 +335,6 @@ Widget _glass(Widget child,
       ),
     );
 
-/// Circular glass icon button (LastWave / BitChord).
 Widget _gbtn(IconData i, VoidCallback? t, String tip,
     {double size = 20, Color c = Colors.white}) =>
     Opacity(
@@ -524,9 +490,6 @@ Widget _seekRow(Color ink, Color on, Color off,
       ]);
     });
 
-// ════════════════════════════════════════════════════════════════════
-// SHARED: small widgets
-// ════════════════════════════════════════════════════════════════════
 
 class _Tap extends StatefulWidget {
   const _Tap({required this.child, required this.onTap, this.tip});
@@ -825,8 +788,6 @@ Widget _vol(Color a, Color i) => StreamBuilder<double>(
   },
 );
 
-/// Material 3 Expressive wavy progress (LastWave). The wave undulates
-/// continuously — [anim] supplies both the phase and the repaint signal.
 class _WavyPainter extends CustomPainter {
   _WavyPainter(this.f, this.on, this.off, this.anim) : super(repaint: anim);
   final double f;
@@ -880,8 +841,6 @@ class _WavyPainter extends CustomPainter {
   bool shouldRepaint(_WavyPainter o) => f != o.f || on != o.on || off != o.off;
 }
 
-/// Owns the repeating ticker that keeps the LastWave wave moving —
-/// the phase loops every 1.6 s so the bar truly undulates.
 class _WavyBar extends StatefulWidget {
   const _WavyBar(this.on, this.off);
   final Color on, off;
@@ -913,8 +872,6 @@ class _WavyBarState extends State<_WavyBar>
       );
 }
 
-/// Dynamic Material palette derived from the artwork tint
-/// (LastWave / Echo / ArchiveTune).
 class _Pal {
   const _Pal(this.prim, this.onPrim, this.surf, this.tonal);
   factory _Pal.of(Color t) {
@@ -926,9 +883,6 @@ class _Pal {
   final Color prim, onPrim, surf, tonal;
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 1. APPLE MUSIC
-// ════════════════════════════════════════════════════════════════════
 
 class _Apple extends StatelessWidget {
   const _Apple(this.x);
@@ -1046,10 +1000,6 @@ class _Apple extends StatelessWidget {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 2. LASTWAVE — Liquid Glass + Material 3 Expressive
-//    Modelled on github.com/Clash-Projects/LastWave-Native
-// ════════════════════════════════════════════════════════════════════
 
 class _LastWave extends StatelessWidget {
   const _LastWave(this.x);
@@ -1223,10 +1173,6 @@ class _LastWave extends StatelessWidget {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 3. BITCHORD — Apple-style layout, breathing album canvas, frosted bar
-//    Modelled on github.com/kushagrasinghx/BitChord
-// ════════════════════════════════════════════════════════════════════
 
 class _BitChord extends StatelessWidget {
   const _BitChord(this.x);
@@ -1416,10 +1362,6 @@ class _BitChord extends StatelessWidget {
   ]);
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 4. ECHO MUSIC — clean Material 3 player
-//    Modelled on github.com/EchoMusicApp/Echo-Music
-// ════════════════════════════════════════════════════════════════════
 
 class _Echo extends StatelessWidget {
   const _Echo(this.x);
@@ -1637,10 +1579,6 @@ class _Echo extends StatelessWidget {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════
-// 5. ARCHIVETUNE — Material You "cute": extra rounded, colourful
-//    Modelled on github.com/rukamori/ArchiveTune
-// ════════════════════════════════════════════════════════════════════
 
 class _ArchiveTune extends StatelessWidget {
   const _ArchiveTune(this.x);
@@ -1768,9 +1706,6 @@ class _ArchiveTune extends StatelessWidget {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════
-// SETTINGS PICKER PAGE  (opened with Navigator.push from Settings)
-// ════════════════════════════════════════════════════════════════════
 
 class PlayerSkinPage extends StatelessWidget {
   const PlayerSkinPage({super.key});

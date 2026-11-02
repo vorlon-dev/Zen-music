@@ -1,29 +1,4 @@
-// ZenMusic Desktop — SP-20: LRCLIB-synced lyrics upgrade for LyricsBox.
-//
-// SAME WIDGET CONTRACT as before (currentSong / size / onLyricsFound) —
-// player_page.dart and player_skins.dart need ZERO changes. Only the
-// internals changed:
-//
-//   BEFORE: SpotifyLyrics → old LyricsService (lrcnet_api) → hand-rolled
-//           ScrollablePositionedList renderer.
-//   AFTER:  SpotifyLyrics (SP-10 kept, converted to LRC) → SP-15 LRCLIB
-//           LyricsService.lookup (metadata cleaning + duration gate +
-//           Hive cache) → SP-15 SyncedLyricsView (auto-follow, tap-to-seek,
-//           interlude "♪ ♪ ♪", plain-text fallback).
-//
-// Preserved verbatim from the old file:
-//   * LyricsBox widget signature + onLyricsFound contract
-//   * Spotify Color Lyrics path (SP-10) — LRC string building
-//   * Wakelock while playing with lyrics loaded
-//   * AppearancePrefs.load() hydration + lyricsTextSize → text scale
-//   * ShaderMask top/bottom fade
-//
-// NOTE: this file imports services/lyrics_service.dart (NEW, static API).
-// The OLD services/lyrics.dart ALSO declares a class named LyricsService —
-// never import both in the same file. The old service itself is untouched
-// and stays on disk for anything else that references it.
-//
-// ZERO new pubspec deps. R5 print policy: nothing printed here.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 
@@ -110,10 +85,6 @@ class _LyricsBoxState extends State<LyricsBox> {
     if (!mounted) return;
     setState(() {
       _lyricsLoaded = false;
-      // SP-53: absolute cap for the UI. Covers every fetch layer (Spotify
-      // color lyrics, LRCLIB strategy chain, caches). After 40 s the panel
-      // always resolves — worst case to the "No lyrics" state — it can never
-      // sit on "Looking for lyrics…" forever again.
       _fetchLyricsFuture = _loadLyricsInternal().timeout(
         const Duration(seconds: 40),
         onTimeout: () => null,
@@ -139,7 +110,6 @@ class _LyricsBoxState extends State<LyricsBox> {
           d.instrumental);
 
   Future<LyricsData?> _loadLyricsInternal() async {
-    // 1. Spotify Color Lyrics (SP-10 path kept) → LRC → parsed lines.
     final spUri = widget.currentSong.extras?['spotifyUri'] as String?;
     if (spUri != null && spUri.isNotEmpty) {
       final coverUrl = widget.currentSong.artUri?.toString();
@@ -162,7 +132,6 @@ class _LyricsBoxState extends State<LyricsBox> {
       }
     }
 
-    // 2. LRCLIB (SP-15): cleaned metadata, ±5 s duration gate, Hive cache.
     return LyricsService.lookup(
       title: widget.currentSong.title,
       artist: widget.currentSong.artist ?? '',
@@ -195,10 +164,6 @@ class _LyricsBoxState extends State<LyricsBox> {
 
   @override
   Widget build(BuildContext context) {
-    // SP-61: under Material 3 the lyrics take the theme's own colors —
-    // SyncedLyricsView falls back to colorScheme.primary (active line,
-    // interlude ♪, instrumental breath) and translucent onSurface (dim
-    // lines) when the overrides below are null. Classic keeps white.
     final m3 = GetIt.I<SettingsManager>().isMaterial3;
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -238,7 +203,6 @@ class _LyricsBoxState extends State<LyricsBox> {
                           .value
                           .current,
                       onSeek: (d) => GetIt.I<MediaPlayer>().seekTo(d),
-                      // SP-61: M3 → theme-driven (null = view defaults).
                       accentColor: m3 ? null : Colors.white,
                       inactiveColor: m3 ? null : Colors.white,
                       // AppearancePrefs.lyricsTextSize is the user's base

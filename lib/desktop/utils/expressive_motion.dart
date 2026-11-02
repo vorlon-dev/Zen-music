@@ -1,16 +1,4 @@
-// ZenMusic — expressive motion helpers.
-// Port of the Material 3 Expressive motion language used by LastWave-Native
-// (ui/common/ExpressiveMotion.kt): spatial springs overshoot slightly, effect
-// springs do not. Concept port only — no code was copied; ZenMusic remains
-// GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-//
-// The curve below is the closed-form response of the same underdamped spring
-// Compose evaluates numerically:
-//   spring(dampingRatio = 0.8, stiffness = 650)  — "spatialDefault"
-// ≈ 280 ms to settle with a tiny (~1.5%) overshoot, which reads as the
-// snappy-but-fluid full-player entrance. Evaluating the analytic form as a
-// Curve lets go_router's CustomTransitionPage drive it from the plain
-// 0→1 route animation without an extra AnimationController.
+// ZenMusic · vorlon-dev
 
 import 'dart:math' as math;
 

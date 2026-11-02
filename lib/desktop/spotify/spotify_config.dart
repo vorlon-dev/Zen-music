@@ -1,7 +1,4 @@
-// ZenMusic — spotify Web Player protocol constants.
-// Ported from Stopify (MIT License) — Copyright (c) Shashwat.
-// ZenMusic remains GPL-3.0. Protocol reference:
-// https://github.com/Anattana-Labs/Stopify (Web Player reverse engineering).
+// ZenMusic · vorlon-dev
 
 class SpotifyConfig {
   SpotifyConfig._();
@@ -50,10 +47,6 @@ class SpotifyConfig {
   // Endpoints
   static const pathfinderUrl =
       'https://api-partner.spotify.com/pathfinder/v2/query';
-  // SP-71: official Web API — used for the user's liked songs, which the
-  // pathfinder libraryV3 query answers with an empty LikedSongs node for
-  // many accounts. The Bearer minted from sp_dc carries the
-  // user-library-read scope, so /v1/me/tracks answers reliably.
   static const restApiBase = 'https://api.spotify.com/v1';
   static const serverTimeUrl = 'https://open.spotify.com/api/server-time';
   static const tokenUrlBase =

@@ -1,4 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
+// ZenMusic · vorlon-dev
 
 import 'package:bloc/bloc.dart';
 import 'package:hive_flutter/hive_flutter.dart';

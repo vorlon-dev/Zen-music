@@ -1,15 +1,4 @@
-// ZenMusic — SP-68: the Song DNA sheet.
-//
-// Opened from the song options bottom modal ("Song DNA" entry): a compact
-// card that unfurls the track's backstory — the release it belongs to, a
-// short extract about the song, and a short artist biography. The fetch
-// runs through SongDna (public Genius + Wikipedia endpoints, no keys) and
-// every strand degrades to its own friendly placeholder, so the dialog
-// always renders something useful even fully offline.
-//
-// Signature detail: the title's color slowly pulses between the theme's
-// primary and tertiary while the strands resolve — the "reading a living
-// thing" cue.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 

@@ -1,8 +1,4 @@
-// ZenMusic Desktop — route stubs. Saved / Settings sub-pages / Chart details
-// are under development (R8e+). Carries the user-requested notice: solo-dev
-// project, repo visit / star call-to-action. Browse/Chip stubs retired
-// (real pages, R8). SubPageStub is public — router uses it for settings
-// sub-routes until their real screens land.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';

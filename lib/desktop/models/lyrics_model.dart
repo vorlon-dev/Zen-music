@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:developer';
 enum LyricsProvider {
   lrcnet,

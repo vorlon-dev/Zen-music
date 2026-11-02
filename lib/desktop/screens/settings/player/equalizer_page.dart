@@ -1,7 +1,4 @@
-// ZenMusic Desktop — FRESH equalizer screen (not ported): device-band EQ
-// via the MediaPlayer's Android session EQ. Windows/other platforms show
-// an honest notice (desktop EQ = mpv arc, later). Gains persist in Hive
-// (EQ_ENABLED / EQ_BANDS) and restore on every launch.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';

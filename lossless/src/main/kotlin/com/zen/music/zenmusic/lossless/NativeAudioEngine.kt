@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.lossless
 
 import android.util.Log
@@ -11,21 +13,6 @@ enum class NativePcmEncoding(internal val nativeValue: Int, internal val bytesPe
     PCM_FLOAT(3, 4),
 }
 
-/**
- * Process-wide owner of the C++17 DSP engine. Ported from LastWave
- * (GPL-3.0); modified for ZenMusic: plain singleton instead of DI,
- * Dart-driven state instead of preference collectors.
- *
- * Two serving paths:
- *  - Media path (configureMediaProcessor / processMediaPcm): decoded PCM in,
- *    processed Float32 out. This is the path the audio pipeline round uses.
- *  - Oboe path (start / writePcm): the engine owns its own output stream.
- *    Reserved for a later round.
- *
- * Every call degrades gracefully when the library is missing or a JNI
- * symbol mismatches: withHandle kills the handle and returns the fallback.
- * Native must never crash playback.
- */
 class NativeAudioEngine() : Closeable {
 
     private val handleLock = Any()

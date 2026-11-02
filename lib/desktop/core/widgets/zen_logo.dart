@@ -1,9 +1,4 @@
-// ZenMusic — the app's brand mark (SP-79).
-//
-// One widget everywhere the app shows its logo. The user can pick a
-// favorite logo on mobile (Settings ▸ Logo — see logo_picker_page.dart);
-// the choice is persisted through AppearancePrefs.customLogo and applied
-// wherever ZenLogo is used. No pick → the built-in assets/icon/logo.png.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 

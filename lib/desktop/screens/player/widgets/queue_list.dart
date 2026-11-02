@@ -1,14 +1,4 @@
-// ZenMusic — queue drawer. SP-6: switches source based on who owns
-// playback. Engine-owned tracks render from MediaPlayer.queueSnapshot (the
-// section the user tapped); just_audio-owned tracks render from the player
-// sequence as before. Engine tiles are read-only (no reorder/dismiss) but
-// tappable — tapping plays that item from the snapshot.
-//
-// SP-39d (field log): the drawer's shell Container paints a background
-// color, which hides ListTile's own Material background + ink splashes
-// ("ListTile background color or ink splashes may be invisible"). Both
-// tile types are now wrapped in their own transparent Material — the
-// shell blur/tint is untouched, taps ripple properly again.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 import 'dart:ui';
@@ -94,9 +84,6 @@ class _Shell extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        // SP-61: under M3 the scaffold background is transparent, so the
-        // drawer shell takes a real M3 surface container (blur still reads
-        // through); classic keeps the translucent scaffold tint.
         color: GetIt.I<SettingsManager>().isMaterial3
             ? Theme.of(context)
                 .colorScheme
@@ -134,7 +121,6 @@ class _Shell extends StatelessWidget {
                           children: [
                             TextButton.icon(
                               style: ButtonStyle(
-                                // SP-61: M3 — container/onContainer pairing.
                                 backgroundColor: WidgetStatePropertyAll(
                                   shuffle
                                       ? (GetIt.I<SettingsManager>().isMaterial3
@@ -207,7 +193,6 @@ class _EngineQueueTile extends StatelessWidget {
         title: Text(
           song['title']?.toString() ?? '',
           maxLines: 1,
-          // SP-61: M3 — the playing tile takes the theme primary.
           style: isCurrent && GetIt.I<SettingsManager>().isMaterial3
               ? TextStyle(
                   color: Theme.of(context).colorScheme.primary,
@@ -292,7 +277,6 @@ class QueueTile extends StatelessWidget {
           title: Text(
             song.title,
             maxLines: 1,
-            // SP-61: M3 — the playing tile takes the theme primary.
             style: isCurrent && GetIt.I<SettingsManager>().isMaterial3
                 ? TextStyle(
                     color: Theme.of(context).colorScheme.primary,

@@ -1,16 +1,4 @@
-// ZenMusic — SP-4 SPIKE v2.5 (temporary). Full EME pipeline verification on
-// desktop_webview_window 0.3.2, all-bridge-via-evaluateJavaScript.
-// PROVEN: cdm ok; /media proxy defeats CORS; MSE parses the file (appended
-// 213.6 s); 83 B CENC init extracted; CDM emitted challenge #1 = 2 bytes
-// hex 0804 = SignedMessage{type:4} = SERVICE_CERTIFICATE_REQUEST (the
-// standard Widevine privacy flow: cert first, then the real license
-// request — same license URL, generic loop handles it).
-// v2.5 fixes: (a) challenge transport without JSON.stringify (v2.4.1
-// crashed on double-encoded quotes — FormatException on "CAQ="), values
-// sanitized to the base64 alphabet; (b) 'appended' counts as healthy (the
-// +2 s safety kick used to restart a healthy pipeline and caused the
-// sourceclose/genreq-failed noise); kick only fires in phase 'boot'.
-// Markers: [SP4S].
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';

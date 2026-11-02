@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 // ZenMusic — ZenDurationAdapter (Hive persistence fix).
 //
 // Symptom: "HiveError: Cannot write, unknown type: Duration. Did you forget

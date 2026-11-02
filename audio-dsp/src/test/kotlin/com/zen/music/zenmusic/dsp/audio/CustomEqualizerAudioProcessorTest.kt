@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.dsp.audio
 
 import androidx.media3.common.C

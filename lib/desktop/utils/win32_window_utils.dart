@@ -1,17 +1,4 @@
-// ZenMusic Desktop — utils/win32_window_utils.dart (GPL-3.0).
-//
-// SP-28: tiny user32 helpers used by lyrics_overlay_bridge.dart.
-// desktop_multi_window 0.2.1 has no always-on-top API — but a lyrics
-// overlay is only useful floating ABOVE other apps, so we ask user32
-// directly via dart:ffi:
-//     FindWindowW(NULL, <title>)             → the overlay window's HWND
-//     SetWindowPos(HWND_TOPMOST / NOTOPMOST) → pin / unpin
-//     ShowWindow + SetForegroundWindow       → bring to front (future use)
-//
-// Windows-only: every public method no-ops silently on other platforms and
-// user32.dll is only opened lazily from inside a Windows guard. A failed
-// call just means the window behaves as a normal window — nothing else is
-// affected. Zero playback involvement.
+// ZenMusic · vorlon-dev
 
 import 'dart:ffi';
 import 'dart:io';

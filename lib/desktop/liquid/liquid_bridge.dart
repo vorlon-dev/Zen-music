@@ -1,14 +1,4 @@
-// SP-54: Liquid Glass — Dart ⇄ Kotlin bridge.
-//
-// Android renders the liquid glass layer NATIVELY in Kotlin
-// (com.zen.music.zenmusic.liquid). This file is the only contact point:
-//   • `sync()` pushes the current theme state (on/off, dark, accent) to
-//     ZenLiquidGlassEngine over the `zenmusic/liquid_glass` channel.
-//   • `tier` exposes the Kotlin-computed device tier (low / mid / high)
-//     so Dart-side widgets can degrade gracefully on low-end phones.
-//
-// On Windows/desktop everything here is a cheap no-op — the desktop glass
-// path is pure Flutter (liquid_glass_widgets), no platform channel traffic.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 
@@ -74,7 +64,6 @@ class LiquidGlassBridge {
     } on PlatformException catch (_) {
       // Older APK without the Kotlin module — glass falls back gracefully.
     } on MissingPluginException catch (_) {
-      // Same — native side not registered (should not happen post SP-54).
     }
   }
 

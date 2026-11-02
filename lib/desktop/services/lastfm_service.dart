@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -72,9 +74,6 @@ class LastfmService {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // AUTH
-  // ═══════════════════════════════════════════════════════════════════
 
   /// Starts the browser login. Returns a human-readable status for the
   /// setup page. When the local callback server catches the redirect the
@@ -99,9 +98,6 @@ class LastfmService {
       return 'Last.fm did not return a login token — try again.';
     }
 
-    // Local catch server for the post-approval redirect. Optional: if the
-    // port is taken (or bound too slowly) the manual token paste on the
-    // setup page completes the login instead.
     HttpServer? server;
     try {
       server = await HttpServer.bind(
@@ -214,9 +210,6 @@ class LastfmService {
     server?.close(force: true).catchError((_) {});
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // PLAYER WIRING (called from media_player.dart, all platforms)
-  // ═══════════════════════════════════════════════════════════════════
 
   /// A track became current. Sends "now playing" and arms the scrobble
   /// candidacy for the client-rules check in [progress].
@@ -251,9 +244,6 @@ class LastfmService {
     _fire(() => _scrobble(c));
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // API CALLS
-  // ═══════════════════════════════════════════════════════════════════
 
   Future<void> _updateNowPlaying(_Candidate c) async {
     if (!isConnected) return;
@@ -343,7 +333,6 @@ class LastfmService {
     }
   }
 
-  // ── Transport ──
 
   /// Signed Last.fm write call. Signs every parameter except format
   /// (alphabetical name+value concat + secret, md5 hex), then posts the

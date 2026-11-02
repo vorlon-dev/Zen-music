@@ -1,7 +1,4 @@
-// ZenMusic Desktop — FRESH implementation (not ported): Echo's
-// dropdown_button.dart was never provided; API surface inferred from
-// AppearancePage usage (AdaptiveDropdownButton<T> + AdaptiveDropdownMenuItem).
-// Replace with a port if the Echo source surfaces later.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 

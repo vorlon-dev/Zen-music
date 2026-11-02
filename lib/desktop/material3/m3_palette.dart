@@ -1,12 +1,4 @@
-// SP-58: Material 3 theme — exact PixelMusic palette.
-//
-// Extracted 1:1 from PixelMusic (github.com/ianshulyadav/PixelMusic),
-// ui/theme/Color.kt + Theme.kt. ZenMusic keeps its own name/branding;
-// only the DESIGN SYSTEM is adopted. Single source of truth on Android is
-// res/values/material3_tokens.xml (read by Material3Tokens.kt and fetched
-// over the zen/material3_tokens channel — see m3_bridge.dart); the values
-// below are the identical Dart fallback so Windows and pre-rebuild builds
-// render the same theme.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 

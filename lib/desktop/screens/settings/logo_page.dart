@@ -1,19 +1,10 @@
-// SP-78 — Logo page: change the app's LAUNCHER icon (the icon the phone's
-// home screen shows), not anything inside the app UI.
-//
-// * 11 slots (Default, Zen 1..Zen 9, Mandala) rendered as code-drawn
-//   previews that mirror the shipped mipmap launcher PNGs.
-// * Tap a slot -> the native zen/launcher_logo channel flips the matching
-//   <activity-alias> in the manifest; the launcher refreshes the icon.
-// * On installs whose APK predates the alias manifest every non-default
-//   slot reports unavailable — the page explains the one-time
-//   rebuild + reinstall that unlocks them (the old "slot not available"
-//   dead end is replaced with a working flow).
+// ZenMusic · vorlon-dev
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/launcher_logo.dart';
 
 class LogoPage extends StatefulWidget {
@@ -73,6 +64,13 @@ class _LogoPageState extends State<LogoPage> {
     });
     try {
       await LauncherLogo.setSlot(slot.id);
+      // Mirror the pick onto the in-app brand mark (about page, headers)
+      // so the whole app follows the launcher icon.
+      await AppearancePrefs.setCustomLogo(switch (slot.preview) {
+        null => '',
+        'assets/icon/logo.png' => '',
+        final p => p,
+      });
       if (!mounted) return;
       setState(() {
         _current = slot.id;
@@ -116,9 +114,8 @@ class _LogoPageState extends State<LogoPage> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
                 const Text(
-                  'Changes the app icon OUTSIDE the app — on your home '
-                  'screen and in the launcher. Nothing inside the app '
-                  'changes.',
+                  'Changes the app icon on your home screen and refreshes '
+                  'the logo shown inside the app.',
                   style: TextStyle(fontSize: 13.5),
                 ),
                 const SizedBox(height: 16),
@@ -199,11 +196,24 @@ class _SlotTile extends StatelessWidget {
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(3),
-                        child: _LogoArt(
-                          bg: slot.bg,
-                          fg: slot.fg,
-                          mandala: slot.mandala,
-                        ),
+                        child: slot.preview != null
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: Image.asset(
+                                  slot.preview!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => _LogoArt(
+                                    bg: slot.bg,
+                                    fg: slot.fg,
+                                    mandala: slot.mandala,
+                                  ),
+                                ),
+                              )
+                            : _LogoArt(
+                                bg: slot.bg,
+                                fg: slot.fg,
+                                mandala: slot.mandala,
+                              ),
                       ),
                     ),
                   ),

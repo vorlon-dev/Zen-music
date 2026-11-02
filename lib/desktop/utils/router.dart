@@ -1,15 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
-// PORT: /browse and /chip are TOP-LEVEL (marked deviation). R8e complete:
-// backup_storage/about/downloads/privacy/player/ytmusic/appearance routes live.
-// /listen = Listen Together. /video = mobile video watch (native bridge).
-// /settings/player/equalizer = device EQ. /chart_details = REAL page.
-// SP-6: /saved/spotify_library and /saved/spotify_playlist added.
-// SP-77: /artist = LastWave-style artist page; /player entrance on mobile is
-// now the expressive spring (slide 85% + scale 0.85 bottom-anchored + fade),
-// matching the reference player sheet. Windows keeps the plain slide.
-// SP-79: /youtube is a 3rd shell branch (Home / Trending / Shorts feed);
-// /yt_search, /yt_channel, /yt_playlist are pushed pages above the shell.
-// Watch playback itself keeps using /video's VideoWatchPage engine.
+// ZenMusic · vorlon-dev
 
 import 'dart:io' show Platform;
 
@@ -25,6 +14,7 @@ import 'package:zenmusic/desktop/screens/browse/browse_page.dart';
 import 'package:zenmusic/desktop/screens/chip/chip_page.dart';
 import 'package:zenmusic/desktop/screens/video/video_watch_page.dart';
 import 'package:zenmusic/desktop/screens/settings/settings_page.dart';
+import 'package:zenmusic/desktop/screens/settings/logo_page.dart';
 import 'package:zenmusic/desktop/screens/settings/backup_storage/backup_storage_page.dart';
 import 'package:zenmusic/desktop/screens/settings/about/about_page.dart';
 import 'package:zenmusic/desktop/screens/settings/privacy/privacy_page.dart';
@@ -41,25 +31,18 @@ import 'package:zenmusic/desktop/screens/library/downloads/downloading/downloadi
 import 'package:zenmusic/desktop/screens/library/downloads/playlist/download_playlist_page.dart';
 import 'package:zenmusic/desktop/screens/library/spotify/spotify_library_page.dart';
 import 'package:zenmusic/desktop/screens/library/spotify/spotify_playlist_page.dart';
-// SP-83: the Jam route is BACK. SP-79's router rewrite accidentally fell
-// back to the pre-SP-77 self-hosted Listen Together page (which SP-77
-// deleted) — SP-80/SP-82 inherited that. /listen opens the LastWave-style
-// JamPage again (rooms compatible with LastWave clients and the hosted
-// Jam server).
 import 'package:zenmusic/desktop/screens/listen_together/jam_page.dart';
 import 'package:zenmusic/desktop/screens/chart/chart_details_page.dart';
 import 'package:zenmusic/desktop/services/chart_model.dart';
-import 'package:zenmusic/desktop/screens/youtube/yt_home_page.dart'; // SP-79
-import 'package:zenmusic/desktop/screens/youtube/yt_search_page.dart'; // SP-79
-import 'package:zenmusic/desktop/screens/youtube/yt_channel_page.dart'; // SP-79
-import 'package:zenmusic/desktop/screens/youtube/yt_playlist_page.dart'; // SP-79
+import 'package:zenmusic/desktop/screens/youtube/yt_home_page.dart';
+import 'package:zenmusic/desktop/screens/youtube/yt_search_page.dart';
+import 'package:zenmusic/desktop/screens/youtube/yt_channel_page.dart';
+import 'package:zenmusic/desktop/screens/youtube/yt_playlist_page.dart';
 import 'package:zenmusic/desktop/screens/shell/app_shell.dart';
-// SP-80: the LastWave-style mobile shell (phones only — Windows keeps the
-// desktop AppShell untouched, as requested).
 import 'package:zenmusic/mobile/shell/zen_mobile_shell.dart';
 import 'package:zenmusic/desktop/spotify/spotify_login_page.dart';
 import 'package:zenmusic/desktop/utils/expressive_motion.dart';
-import 'package:zenmusic/desktop/ytmusic/ytm_login_page.dart'; // SP-62
+import 'package:zenmusic/desktop/ytmusic/ytm_login_page.dart';
 
 
 final router = GoRouter(
@@ -70,9 +53,6 @@ final router = GoRouter(
       routes: [
         StatefulShellRoute(
           branches: branches,
-          // SP-80: phones get the reference-style mobile shell (floating
-          // dock, hide-on-scroll chrome); Windows keeps the desktop
-          // AppShell exactly as it is (5 destinations, SP-79 order).
           builder: (context, state, navigationShell) =>
               ZenMobileShell.applies()
                   ? ZenMobileShell(navigationShell: navigationShell)
@@ -81,9 +61,6 @@ final router = GoRouter(
               MyPageView(
                 currentIndex: navigationShell.currentIndex,
                 children: children,
-                // SP-82: swiping left/right moves between the 5 tabs and
-                // the dock pill follows once the swipe settles — the
-                // reference shell's HorizontalPager behaviour.
                 onPageSettled: (i) {
                   if (i != navigationShell.currentIndex) {
                     navigationShell.goBranch(i, initialLocation: false);
@@ -98,11 +75,6 @@ final router = GoRouter(
             final mobile = Platform.isAndroid || Platform.isIOS;
             return CustomTransitionPage(
               key: state.pageKey,
-              // SP-77 mobile: the reference player-sheet entrance — the
-              // sheet slides up the last 15% while scaling 0.85 → 1.0 from
-              // a bottom-anchored origin and fading in, all on the same
-              // expressive spring (≈280 ms, ~1.5% overshoot). Reverse on
-              // pop is the same curve mirrored by the route animation.
               transitionDuration: mobile
                   ? const Duration(milliseconds: 460)
                   : const Duration(milliseconds: 300),
@@ -164,7 +136,6 @@ final router = GoRouter(
             );
           },
         ),
-        // SP-77: LastWave-style artist page.
         GoRoute(
           path: '/artist',
           builder: (context, state) {
@@ -174,6 +145,10 @@ final router = GoRouter(
               browseId: args['browseId'] as String?,
             );
           },
+        ),
+        GoRoute(
+          path: '/logo',
+          builder: (context, state) => const LogoPage(),
         ),
         GoRoute(
           path: '/browse',
@@ -207,7 +182,6 @@ final router = GoRouter(
           path: '/spotify-login',
           builder: (context, state) => const SpotifyLoginPage(),
         ),
-        // SP-62: embedded YouTube Music login (device-code OAuth webview).
         GoRoute(
           path: '/ytm-login',
           builder: (context, state) => const YtmLoginPage(),
@@ -230,7 +204,6 @@ final router = GoRouter(
             return ChartDetailsPage(chart: chart);
           },
         ),
-        // ── SP-79: YouTube browse pages ────────────────────────────────
         GoRoute(
           path: '/yt_search',
           builder: (context, state) =>
@@ -298,8 +271,6 @@ List<StatefulShellBranch> branches = [
       ),
     ],
   ),
-  // SP-79: the YouTube section is the 3rd shell branch (rail / bottom-bar
-  // index 2 — app_shell.dart destinations must stay in this order).
   StatefulShellBranch(
     routes: [
       GoRoute(
@@ -350,7 +321,6 @@ List<StatefulShellBranch> branches = [
               );
             },
           ),
-          // SP-6: Spotify account library routes.
           GoRoute(
             path: 'spotify_library',
             builder: (context, state) => const SpotifyLibraryPage(),
@@ -413,19 +383,8 @@ class MyPageView extends StatefulWidget {
   final int currentIndex;
   final List<Widget> children;
 
-  /// SP-82: fired when a USER swipe left/right settles on a different
-  /// tab — the shell then goBranches so the route, branch state and the
-  /// dock pill follow the swipe. Deliberately driven from the SETTLED
-  /// page (ScrollEndNotification), not onPageChanged: the reference
-  /// shell notes that currentPage flips MID-drag and re-triggering the
-  /// dock animation while the pager is still moving makes them fight
-  /// ("settledPage on swipe keeps one clean transition").
   final ValueChanged<int>? onPageSettled;
 
-  /// SP-82: horizontal swipe between tabs (the reference's
-  /// HorizontalPager). Mobile only — desktop keeps mouse navigation;
-  /// both slide horizontally on destination taps now (the old vertical
-  /// PageView slide is gone).
   final bool swipeable;
 
   MyPageView(
@@ -474,8 +433,6 @@ class MyPageViewViewState extends State<MyPageView> {
     return NotificationListener<ScrollNotification>(
       onNotification: _onScrollNotification,
       child: PageView(
-        // SP-82: horizontal — the tabs sit side by side and slide
-        // left/right, exactly like the reference shell.
         scrollDirection: Axis.horizontal,
         physics: widget.swipeable
             ? const PageScrollPhysics()

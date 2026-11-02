@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 // ZenMusic — platform icon table.
 // One name per concept, resolved to the icon family that belongs to the
 // platform: Cupertino on iOS/macOS, Fluent on Windows, Material elsewhere.

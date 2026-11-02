@@ -1,28 +1,4 @@
-// ZenMusic — spotify login (SP-1b; Windows path rebuilt in SP-66).
-// HISTORY:
-//   SP-1b — embedded InAppWebView + native CookieManager harvest (sp_dc is
-//     an HttpOnly cookie, so document.cookie can NEVER see it — the native
-//     CookieManager can). Bearer fetch-hook stays as a degraded fallback.
-//   SP-63 — the Windows build ships an EMPTY in_app_webview platform impl
-//     (pubspec override flutter_inappwebview_windows_fx ->
-//     windows_webview_stub), so the embedded path crashed there and this
-//     page degraded to the "Embedded sign-in is not available on Windows"
-//     card. GUI sign-in died on Windows.
-//   SP-66 — Windows gets a REAL sign-in window again, via
-//     desktop_webview_window — the same plugin the playback engine
-//     (webview2-zen-engine) and the SP-65 YTM login already run. sp_dc is
-//     captured with Webview.getAllCookies(), implemented in the plugin's
-//     Windows code through ICoreWebView2CookieManager::GetCookies — the
-//     only API in this stack that reads HttpOnly cookies. Flow mirrors the
-//     YTM login: sign in inside the window; the page detects the session,
-//     validates it by minting a token (SpotifyAuth.login), and closes the
-//     window by itself.
-//
-// Capture tiers on Windows (first hit wins):
-//   1. Webview.getAllCookies() — HttpOnly-safe, the real path.
-//   2. document.cookie         — belt-and-suspenders for exotic runtimes.
-//   3. Bearer fetch hook       — short-lived token only (no refresh).
-// Non-Windows keeps the proven embedded flow untouched.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';
@@ -111,7 +87,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
     super.dispose();
   }
 
-  // ── Windows: WebView2 sign-in window ─────────────────────────────────
 
   Future<void> _openSignInWindow() async {
     if (_done || _windowOpen) return;
@@ -139,9 +114,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
       // Tier-3 net before launch: hook fetch so the first document is
       // covered (register-then-launch order matters).
       wv.addScriptToExecuteOnDocumentCreated(_kFetchHook);
-      // launch() returns void on desktop_webview_window 0.3.x — a bare
-      // call, exactly like the engine's. Awaiting it is a compile error
-      // ("expression has type 'void'") — the SP-65.1 lesson.
       wv.launch(_spotifyLaunchUrl);
       _poll ??= Timer.periodic(
           const Duration(seconds: 2), (_) => _harvestWindows());
@@ -197,16 +169,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
         }
       } catch (_) {}
 
-      // Tier 3: Bearer token stashed by the fetch hook. No sp_dc -> no
-      // refresh; ~1 h of playable tokens. Kept for parity with the
-      // embedded flow's fallback.
-      //
-      // WebView2's ExecuteScript returns the JS value JSON-ENCODED, so
-      // JSON.stringify's string arrives double-wrapped ('"{\"token\":…}"').
-      // Unwrap once, then decode — and GUARD the whole tier: an unguarded
-      // cast here crashed every poll tick ("String is not a subtype of
-      // Map"), killed the loop, and the window could never auto-close
-      // (SP-66.1). A tier failing must never take the poll down.
       try {
         var tokensJson = await wv.evaluateJavaScript(
             'JSON.stringify(window.__zenTokens || {})') as String?;
@@ -255,7 +217,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
     }
   }
 
-  // ── Other platforms: embedded webview harvest (unchanged since SP-1b) ─
 
   /// HttpOnly-safe: reads the cookie jar natively, not via JavaScript.
   Future<String?> _readSpDc() async {
@@ -314,7 +275,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
     }
   }
 
-  // ── Shared: validate + store + finish ────────────────────────────────
 
   Future<void> _finishLogin(String spDcCookie) async {
     final err = await SpotifyAuth.instance.login(spDcCookie);
@@ -338,8 +298,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
     _poll = null;
     if (Platform.isWindows) {
       if (_windowOpen) {
-        // Window alive: RESTART the poll, not a one-shot check — a single
-        // shot starves the loop after any early error (SP-66.1).
         _poll = Timer.periodic(
             const Duration(seconds: 2), (_) => _harvestWindows());
         _harvestWindows();
@@ -352,7 +310,6 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
     }
   }
 
-  // ── UI ───────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {

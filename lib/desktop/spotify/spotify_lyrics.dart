@@ -1,7 +1,4 @@
-// ZenMusic — Spotify Color Lyrics (SP-10).
-// Fetches native Spotify lyrics (including custom background/highlight colors)
-// from the color-lyrics/v2 endpoint. Ported from Stopify's SpotifyLyricsService.
-// Reuses the web-player access token and client-token.
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 

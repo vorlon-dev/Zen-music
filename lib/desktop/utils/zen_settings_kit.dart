@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 // ZenMusic — shared building blocks for settings screens.
 //
 // Look: inset grouped lists like the host platform's own Settings app.
@@ -69,7 +71,6 @@ class ZenRow extends StatelessWidget {
   const ZenRow({
     super.key,
     required this.icon,
-    // SP-62: optional brand-logo slot — overrides [icon] when set.
     this.leading,
     required this.title,
     this.subtitle,
@@ -82,7 +83,6 @@ class ZenRow extends StatelessWidget {
 
   final IconData icon;
 
-  /// SP-62: fully custom leading widget (Spotify / YouTube Music logos).
   final Widget? leading;
 
   final String title;
@@ -105,7 +105,6 @@ class ZenRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             children: [
-              // SP-62: brand logos (or any custom widget) take the icon slot.
               if (leading != null)
                 leading!
               else

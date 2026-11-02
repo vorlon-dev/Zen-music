@@ -1,7 +1,4 @@
-// ZenMusic Desktop — FRESH screen (not ported): Billboard / spotify chart
-// detail page. Driven by ChartURL from the home "Browse Charts" section;
-// data via ChartsService (scraped track lists), playback via the standard
-// isChart search-and-play path already in SongTile. ZenMusic remains GPL-3.0.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';

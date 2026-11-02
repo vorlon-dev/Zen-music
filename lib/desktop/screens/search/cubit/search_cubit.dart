@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'package:bloc/bloc.dart';
 import 'package:hive/hive.dart';
 import 'package:meta/meta.dart';
@@ -49,13 +51,6 @@ class SearchCubit extends Cubit<SearchState> {
     if (endpoint != null) {
       search('');
     } else {
-      // SP-42 FIX (field report: "on search page that loader spin only no
-      // data come ... deta should come ok like trending on search"). The
-      // landing page never fetched anything: with endpoint == null the
-      // constructor skipped search('') and the state stayed SearchLoading
-      // forever — the page showed an eternal spinner (see screenshot).
-      // The landing now loads the YTM home feed (the same trending shelves
-      // the Home tab shows) so there is real data from the first paint.
       fetchTrending();
     }
   }
@@ -95,8 +90,6 @@ class SearchCubit extends Cubit<SearchState> {
   }
 
   Future<void> search(String query, {bool saveHistory = true}) async {
-    // SP-42: an empty query on the landing page re-loads the trending feed
-    // instead of hitting the search endpoint with no query.
     if (endpoint == null && query.trim().isEmpty) {
       await fetchTrending();
       return;
@@ -111,7 +104,6 @@ class SearchCubit extends Cubit<SearchState> {
       }
       if (endpoint == null) _query = query;
 
-      // ---- Videos chip: YouTube videos only -------------------------
       if (endpoint == null && _filter == SearchFilter.videos) {
         final page = await YouTubeVideoSearch.instance.search(query);
         _videoToken = page.token;
@@ -125,7 +117,6 @@ class SearchCubit extends Cubit<SearchState> {
         return;
       }
 
-      // ---- All chip -------------------------------------------------
       final feed = await _ytmusic.search(query, endpoint: endpoint);
 
       if (endpoint == null) {

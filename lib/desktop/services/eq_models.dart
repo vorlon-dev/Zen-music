@@ -1,5 +1,6 @@
-﻿// ZenMusic Desktop — EQ parameter models (Android session EQ).
-// ZenMusic remains GPL-3.0.
+// ZenMusic · vorlon-dev
+
+
 
 class EqBand {
   const EqBand({required this.centerHz, required this.gain});

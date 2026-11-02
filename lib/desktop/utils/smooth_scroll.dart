@@ -1,41 +1,4 @@
-// ZenMusic Desktop — SP-42: smooth wheel scrolling for Windows.
-// Ported from Echo Music (GPL-3.0) project conventions. ZenMusic remains
-// GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-//
-// FIELD REPORT this fixes:
-//   "when we scroll up it go directly down ... on home page and almost
-//    wherever needed scroll all side should be smooth scroll"
-//
-// WHY IT HAPPENED
-// Flutter desktop applies every mouse-wheel notch as an INSTANT
-// `position.pointerScroll()` jump — there is no animation at all. On long
-// feeds the page teleports notch by notch, and when a jump lands exactly on
-// the bottom edge the pagination listener fires and the feed grows under the
-// cursor, so the view can even read as "it jumped the wrong way". Every page
-// (home, search, browse) shares this, hence "almost wherever".
-//
-// HOW THE FIX WORKS (one mechanism, two widgets)
-// A PointerScrollEvent is offered to every Listener along the hit-test path,
-// and the PointerSignalResolver hands the event to the FIRST listener that
-// registered (documented: "the first registered callback is called").
-// RenderObjects register children-first, so an INNER Listener beats the
-// Scrollable's own instant-jump handler. Both widgets below therefore sit
-// INSIDE a scrollable (wrapping its content), register first, suppress the
-// native teleport and drive the same ScrollPosition with a short
-// easeOutCubic `animateTo` — one smooth glide per wheel burst, correct
-// direction guaranteed, deltas accumulated while the wheel keeps rolling.
-//
-//   - SmoothScroll      vertical pages (home / search / browse):
-//                       wrap the SingleChildScrollView's CHILD.
-//   - SmoothShelfWheel  horizontal shelves (ItemList / SongList):
-//                       wrap each item; the wheel glides the SHELF
-//                       horizontally (Spotify-like) instead of the wheel
-//                       dying on the horizontal axis.
-//
-// Trackpad two-finger pan and touch drags do NOT travel through here —
-// PointerPanZoom/drag gestures stay on the native ballistic path, untouched.
-// If the controller is not attached yet (or the page cannot scroll), the
-// listener quietly declines to register and the native behaviour runs.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 

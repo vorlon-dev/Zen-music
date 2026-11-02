@@ -1,14 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), services/file_storage.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// PORT DEVIATIONS:
-//  1. loadBackup() restored at R8e, written against file_picker 13's ACTUAL
-//     API (verified from package source): FilePicker.pickFile() ->
-//     Future<PlatformFile?>, FilePickerResult/withData no longer exist.
-//  2. Windows folder 'Echo' -> 'ZenMusic' (branding). The BACKUP FORMAT check
-//     ('name' != 'Echo') stays verbatim for cross-compatibility with Echo backups.
-//  3. Unused upstream imports (http, enhanced_image) kept verbatim — benign
-//     info-level lints.
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 import 'dart:io';
@@ -159,8 +149,6 @@ class FileStorage {
     if (filePath == null) return false;
     String data = await File(filePath).readAsString();
     Map backup = jsonDecode(data);
-    // PORT NOTE: 'Echo' is the backup FORMAT identifier — kept verbatim for
-    // cross-compatibility with Echo backups.
     if (backup['name'] != 'Echo' && backup['type'] != 'backup') {
       return false;
     }

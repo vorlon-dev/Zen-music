@@ -1,15 +1,4 @@
-// ZenMusic — LastWave Jam playback sync bridge.
-// ZenMusic remains GPL-3.0.
-//
-// Ported from the LastWave-Desktop Jam sync (Clash Projects, GPL-3.0:
-// lib/features/jam/jam_sync.dart) with the same drift thresholds, quiet
-// windows and latency compensation, and the same rule that the bridge never
-// touches local playback while the socket is down. PORT DEVIATIONS: the
-// bridge drives the app's MediaPlayer (just_audio + GetIt) instead of
-// LastWave's PlaybackService; guest track loads go through playSong() so
-// notification/queue handling stays identical to a normal tap-to-play; a
-// non-YouTube room track is resolved with the app's own YTMusic search
-// before playing (reference searches by title in its player layer).
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -107,7 +96,6 @@ class JamPlaybackSync {
 
   bool _wasMainHost = false;
 
-  // ─────────────────────────────────────────────── inbound (room → player)
 
   Future<void> _apply(JamRemote event) async {
     final jam = _controller;
@@ -260,7 +248,6 @@ class JamPlaybackSync {
     };
   }
 
-  // ─────────────────────────────────────────────── outbound (player → room)
 
   void _broadcast() {
     if (_applyingRemote) return;

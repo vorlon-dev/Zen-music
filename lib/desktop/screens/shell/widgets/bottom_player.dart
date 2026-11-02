@@ -1,24 +1,6 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
-// PORT DEVIATIONS: unused imports dropped (dart:ui, bottom_modals, listtile);
-// MINI PLAYER REDESIGN: layout/behaviour ported from the old mobile
-// MiniPlayer (72px card, 20px radius, 52px rounded artwork, marquee title,
-// wavy progress ring around play/pause, next button, slide-on-track-change
-// animation, swipe left/right = next/previous, swipe up / tap = open
-// player, press-scale). audioHandler streams -> MediaPlayer (GetIt);
-// spotify theme colours -> artwork palette colour.
-// SP-5b: song source is MediaPlayer.currentSongNotifier (works for both
-// just_audio and the Spotify desktop engine); transport routes through
-// MediaPlayer.togglePlayPause/skipNext/skipPrevious.
-//
-// SP-81b FIX (compile error at the old line 177: "The getter 'onOpen'
-// isn't defined for the type '_MiniBody'"): SP-81 added the sheet-opener
-// plumbing to BottomPlayer and read widget.onOpen inside _MiniBodyState,
-// but never declared the field on _MiniBody nor forwarded it from
-// _BottomPlayerState. Both halves are wired now — the behaviour is
-// unchanged: opener != null expands the in-shell sheet, null (Windows /
-// ZenMobileShell) keeps the /player route push.
+// ZenMusic · vorlon-dev
 
-import 'dart:async'; // SP-81: guard release for the sheet path
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -29,9 +11,9 @@ import 'package:palette_generator/palette_generator.dart';
 import 'package:text_scroll/text_scroll.dart';
 
 import 'package:zenmusic/desktop/services/media_player.dart';
-import 'package:zenmusic/desktop/material3/m3_tokens.dart'; // SP-58
-import 'package:zenmusic/desktop/material3/m3_wavy_slider.dart'; // SP-58
-import 'package:zenmusic/desktop/services/settings_manager.dart'; // SP-54
+import 'package:zenmusic/desktop/material3/m3_tokens.dart';
+import 'package:zenmusic/desktop/material3/m3_wavy_slider.dart';
+import 'package:zenmusic/desktop/services/settings_manager.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/buttons.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/progress_ring.dart';
 import 'package:zenmusic/desktop/utils/song_thumbnail.dart';
@@ -39,10 +21,6 @@ import 'package:zenmusic/desktop/utils/song_thumbnail.dart';
 class BottomPlayer extends StatefulWidget {
   const BottomPlayer({super.key, this.onOpen});
 
-  /// SP-81: when the shell provides a mobile player-sheet opener, tapping
-  /// (or swiping up) the mini player expands the in-shell sheet instead
-  /// of pushing the /player route. Null on Windows and on shells that
-  /// don't host the sheet — the route push stays.
   final VoidCallback? onOpen;
 
   @override
@@ -96,9 +74,6 @@ class _BottomPlayerState extends State<BottomPlayer> {
   }
 }
 
-// ═════════════════════════════════════════════
-// MINI PLAYER BODY
-// ═════════════════════════════════════════════
 
 class _MiniBody extends StatefulWidget {
   const _MiniBody({
@@ -112,10 +87,6 @@ class _MiniBody extends StatefulWidget {
   final Color? color;
   final void Function(ImageProvider image) onImageReady;
 
-  /// SP-81b: sheet opener handed down from BottomPlayer. Null on Windows
-  /// and on shells that don't host the in-shell player sheet (e.g.
-  /// ZenMobileShell) — _open() then falls back to the /player route push,
-  /// exactly the pre-SP-78 behaviour.
   final VoidCallback? onOpen;
 
   @override
@@ -178,13 +149,6 @@ class _MiniBodyState extends State<_MiniBody>
     _lastSlideSongId = id;
   }
 
-  // SP-80: re-entrancy guard — the player sheet must never stack twice.
-  // A double tap (or a tap racing the route's own push) used to push TWO
-  // /player routes, which looked like the sheet "opening double".
-  // SP-81: the same guard now fronts the sheet opener too (the shell's
-  // _openPlayerSheet) and releases 600 ms later — the sheet path has no
-  // route future to hook whenComplete onto, so without the timer the
-  // mini player would go DEAD after the first open.
   static bool _opening = false;
 
   void _open() {
@@ -252,17 +216,10 @@ class _MiniBodyState extends State<_MiniBody>
   Widget build(BuildContext context) {
     _consumeSlideIntentIfNeeded();
     final song = widget.song;
-    // SP-54: Liquid Glass — in glass mode the artwork-palette gradient is
-    // dropped so the surrounding ZenGlassPanel (shader glass on Windows,
-    // Kotlin glass on Android) shows through; only a faint frost tint and
-    // a soft shadow remain for legibility.
-    // SP-58: Material 3 — PixelMusic surface treatment: solid
-    // surfaceContainerHigh at 16dp radius, theme-aware text, and the
-    // expressive wavy progress line pinned to the bottom edge.
     final settings = GetIt.I<SettingsManager>();
     final liquid = settings.liquidGlass;
-    final m3 = settings.isMaterial3; // SP-58
-    final cs = Theme.of(context).colorScheme; // SP-58
+    final m3 = settings.isMaterial3;
+    final cs = Theme.of(context).colorScheme;
     final base = widget.color ?? const Color(0xFF202020);
     final dark = Color.lerp(base, Colors.black, 0.45)!;
     final subtitle = '${song.artist ?? song.extras?['subtitle'] ?? ''}';
@@ -290,7 +247,6 @@ class _MiniBodyState extends State<_MiniBody>
           child: Container(
             height: _height,
             decoration: BoxDecoration(
-              // SP-58: Material 3 — solid M3 surface, no palette gradient.
               color: m3
                   ? cs.surfaceContainerHigh
                   : liquid
@@ -360,7 +316,7 @@ class _MiniBodyState extends State<_MiniBody>
                                 style: TextStyle(
                                   color: m3
                                       ? cs.onSurface
-                                      : Colors.white, // SP-58
+                                      : Colors.white,
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,
                                   letterSpacing: 0.1,
@@ -390,8 +346,6 @@ class _MiniBodyState extends State<_MiniBody>
                   ],
                 ),
               ),
-                  // SP-58: the expressive wavy progress line along the
-                  // bottom edge (PixelMusic's collapsed-bar indicator).
                   if (m3)
                     Positioned(
                       left: 0,
@@ -429,7 +383,6 @@ class _MiniBodyState extends State<_MiniBody>
 
   Widget _buildControls() {
     final mp = _mp;
-    // SP-58: Material 3 — theme-aware control icons.
     final m3 = GetIt.I<SettingsManager>().isMaterial3;
     final cs = Theme.of(context).colorScheme;
     return Row(
@@ -462,10 +415,6 @@ class _MiniBodyState extends State<_MiniBody>
   }
 }
 
-// ═════════════════════════════════════════════
-// CIRCULAR PLAY BUTTON — wavy arc ring only: arc = progress, wave
-// travels while playing, flattens when paused.
-// ═════════════════════════════════════════════
 
 class _CircularPlayButton extends StatefulWidget {
   const _CircularPlayButton({required this.state});
@@ -528,7 +477,6 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
     final mp = GetIt.I<MediaPlayer>();
     final isLoading = widget.state == ButtonState.loading;
     final isPlaying = widget.state == ButtonState.playing;
-    // SP-58: Material 3 — ring reads the theme instead of fixed white.
     final m3 = GetIt.I<SettingsManager>().isMaterial3;
     final cs = Theme.of(context).colorScheme;
     final ringColor = m3 ? cs.primary : Colors.white;
@@ -556,8 +504,8 @@ class _CircularPlayButtonState extends State<_CircularPlayButton>
                   painter: _WaveRingPainter(
                     phase: _phase.value * 2 * math.pi,
                     sweepAngle: 2 * math.pi * progress,
-                    color: ringColor, // SP-58
-                    trackColor: ringTrack, // SP-58
+                    color: ringColor,
+                    trackColor: ringTrack,
                     strokeWidth: 3,
                     amplitude: 1.6 * _amp.value,
                   ),

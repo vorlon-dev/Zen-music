@@ -1,36 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), screens/search/search_page.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-//
-// REDESIGN: quieter, theme-driven layout. Fluent System Icons throughout.
-// Colors come from Theme.of(context).colorScheme so it follows the app theme.
-// Behaviour (cubit, playback, routing, suggestion overlay) is unchanged.
-//
-// pubspec.yaml:  fluentui_system_icons: ^1.1.273   (use the latest on pub.dev)
-//
-// SP-41 FIX (field log): the suggestion panel is an OverlayEntry rendered
-// through a CompositedTransformFollower. The "Edit search" IconButton inside
-// that panel carried a Material Tooltip — and a Tooltip is ITSELF a
-// CompositedTransformFollower inside an OverlayPortal. A follower nested in
-// a follower has no reliable paint transform during layout, so hovering the
-// button on Windows threw:
-//   "The paint transform cannot be reliably computed because of
-//    RenderFollowerLayer(s)" (+ a knock-on debugNeedsLayout assert).
-// FIX: that tooltip is removed. The arrow-up-left icon keeps its exact
-// function (fill the field and re-fetch suggestions without submitting);
-// only the hover label is gone. The 'Play as audio' tooltip in _VideoCard
-// sits in the normal result tree — NOT inside the follower overlay — and
-// is intentionally untouched.
-
-// SP-42 FIXES (field report + screenshot):
-// 1. The landing page (no query yet) spun forever: the cubit never fetched
-//    anything when endpoint == null. It now loads the trending feed — see
-//    SearchCubit.fetchTrending() — and onInternetRestored reloads it after a
-//    connection drop, mirroring the titled-page branch.
-// 2. Wheel scrolling on the results is smooth now: the scroll content is
-//    wrapped in SmoothScroll (same controller) so each notch becomes one
-//    eased glide instead of an instant jump. See
-//    lib/desktop/utils/smooth_scroll.dart for the mechanism.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:io';
@@ -123,8 +91,6 @@ class _SearchPageState extends State<_SearchPage> {
         if (widget.title != null) {
           context.read<SearchCubit>().search('');
         } else {
-          // SP-42: landing page — refetch the trending feed after a
-          // connection drop (the cubit constructor did it once at mount).
           context.read<SearchCubit>().fetchTrending();
           _focusNode?.requestFocus();
         }
@@ -181,9 +147,6 @@ class _SearchPageState extends State<_SearchPage> {
                       }
                       return SingleChildScrollView(
                         controller: _scrollController,
-                        // SP-42: SmoothScroll inside the viewport wins the
-                        // wheel and glides smoothly; the pagination listener
-                        // (fetchNext near the bottom) is unchanged.
                         child: SmoothScroll(
                           controller: _scrollController,
                           child: Center(
@@ -222,9 +185,6 @@ class _SearchPageState extends State<_SearchPage> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Filter tabs: plain text with an underline, not pills.
-// ---------------------------------------------------------------------------
 
 class _FilterTabs extends StatelessWidget {
   const _FilterTabs({required this.selected, required this.onChanged});
@@ -337,9 +297,6 @@ class _Notice extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Sections
-// ---------------------------------------------------------------------------
 
 class _SectionBlock extends StatelessWidget {
   const _SectionBlock({required this.section, this.isMore = false});
@@ -563,9 +520,6 @@ class _ResultTile extends StatelessWidget {
         await GetIt.I<MediaPlayer>().playSong(Map.from(item));
       }
     } else if (item['endpoint'] != null) {
-      // SP-77: artist results open the new LastWave-style artist page on
-      // mobile (name + browseId when the row carries one); every other
-      // endpoint type — and desktop — keeps the generic browse page.
       final isArtistRow =
           (item['type'] ?? '').toString().toUpperCase() == 'ARTIST';
       if (isArtistRow && (Platform.isAndroid || Platform.isIOS)) {
@@ -634,11 +588,6 @@ class _ResultTile extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Search field + suggestions (in-tree replacement for flutter_typeahead).
-// The panel sits in a TextFieldTapRegion so a mouse-down on a suggestion
-// does not unfocus the field before the tap completes.
-// ---------------------------------------------------------------------------
 
 class SearchSuggestField extends StatefulWidget {
   const SearchSuggestField({
@@ -800,10 +749,6 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
             ),
             title: Text(query, maxLines: 1, overflow: TextOverflow.ellipsis),
             trailing: IconButton(
-              // SP-41: NO Tooltip here — this button lives inside the
-              // suggestion overlay's CompositedTransformFollower, and a
-              // Tooltip is itself a follower: hovering it crashed layout
-              // ("The paint transform cannot be reliably computed...").
               visualDensity: VisualDensity.compact,
               icon: Icon(FluentIcons.arrow_up_left_24_regular,
                   size: 18, color: cs.onSurfaceVariant),
@@ -899,10 +844,6 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
   }
 }
 
-
-// ---------------------------------------------------------------------------
-// Thumbnail quality
-// ---------------------------------------------------------------------------
 
 /// Upgrades Google-hosted (YT Music / lh3) thumbnail URLs to [size] px.
 String _hiRes(String url, [int size = 300]) {

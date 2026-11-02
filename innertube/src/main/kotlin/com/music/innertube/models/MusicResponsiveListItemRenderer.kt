@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 @file:OptIn(ExperimentalSerializationApi::class)
 
 package com.music.innertube.models

@@ -1,4 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
+// ZenMusic · vorlon-dev
 
 // ignore_for_file: non_constant_identifier_names
 

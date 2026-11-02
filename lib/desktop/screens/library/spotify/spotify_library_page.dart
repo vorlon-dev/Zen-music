@@ -1,11 +1,4 @@
-// ZenMusic — Spotify account library (Saved page entry).
-// Liked Songs card + grid of the user's Spotify playlists. Taps route
-// through MediaPlayer.playFromSection so the queue drawer reflects the
-// whole section, and the Windows engine takes over for Spotify tracks.
-//
-// SP-6: data comes from Pathfinder (see spotify_library.dart). Playlist
-// ids are full URIs (spotify:playlist:...), passed through to
-// SpotifyPlaylistPage which calls fetchPlaylistTracks.
+// ZenMusic · vorlon-dev
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';

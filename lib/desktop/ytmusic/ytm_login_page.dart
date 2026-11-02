@@ -1,37 +1,4 @@
-// ZenMusic — YouTube Music login (SP-65, harvest reworked in SP-68).
-// Cookie capture from a signed-in music.youtube.com session — the flow
-// PixelMusic-class clients use: the user signs in inside an app-hosted
-// webview, the session cookies are harvested automatically, validated
-// against the authed home endpoint (YtmAuth.probeCookies), stored, and the
-// window closes by itself. No code typing, no paste.
-//
-//   Windows — a REAL WebView2 window via desktop_webview_window (the same
-//     plugin the Spotify engine already runs; the embedded InAppWebView is
-//     an empty stub on this platform — SP-63). The 2 s harvest loop has
-//     two capture tiers:
-//       1. Webview.getAllCookies() — the NATIVE WebView2 cookie jar,
-//         HttpOnly included. The SAPISID family is HttpOnly, so
-//         document.cookie can NEVER see it; this native read is the only
-//         path that can actually capture the session (the original
-//         document.cookie-only loop waited forever and never auto-closed).
-//       2. document.cookie — non-HttpOnly cookies, kept as a fallback.
-//     A dedicated user-data folder (webview2-zen-login) keeps this
-//     window's profile independent of the Spotify engine's (WebView2
-//     locks the folder per-instance).
-//   Other platforms — embedded InAppWebView + native CookieManager poll
-//     (the proven Spotify-login pattern), document.cookie as fallback.
-//
-// Guard doctrine: the poll tick holds _busy; validation holds _validating
-// exclusively (a validator must never test _busy — it is called from
-// inside a tick that already holds it, and re-testing deadlocks the loop:
-// exactly the SP-65 bug where "Sign-in detected" appeared but the window
-// never closed). Tier errors never kill the loop — only a tick where BOTH
-// tiers failed (a dead window handle) ends it, and "I signed in" restarts
-// the poll.
-//
-// A cookie paste stays available in Settings -> YouTube Music for exotic
-// cases. Google removed OAuth support from the YTM API (see ytm_auth.dart)
-// — cookies are the only working path, so the SP-62 device-code UI is gone.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';
@@ -99,7 +66,6 @@ class _YtmLoginPageState extends State<YtmLoginPage> {
     super.dispose();
   }
 
-  // ── Windows: WebView2 sign-in window ─────────────────────────────────
 
   Future<void> _openSignInWindow() async {
     if (_done || _windowOpen) return;
@@ -121,9 +87,6 @@ class _YtmLoginPageState extends State<YtmLoginPage> {
       );
       _webview = wv;
       if (mounted) setState(() => _windowOpen = true);
-      // launch() returns void on desktop_webview_window 0.3.x — a bare call,
-      // exactly like the Spotify engine's. Awaiting it is a compile error
-      // ("expression has type 'void'") — SP-65.1.
       wv.launch(_musicUrl);
       _poll ??= Timer.periodic(
           const Duration(seconds: 2), (_) => _harvestWindows());
@@ -198,7 +161,6 @@ class _YtmLoginPageState extends State<YtmLoginPage> {
     }
   }
 
-  // ── Other platforms: embedded webview harvest ────────────────────────
 
   Future<void> _harvest() async {
     if (_done || _busy || !mounted) return;
@@ -225,7 +187,6 @@ class _YtmLoginPageState extends State<YtmLoginPage> {
     } catch (_) {}
   }
 
-  // ── Shared: validate + store + finish ────────────────────────────────
 
   Future<void> _tryCookieBlob(String cookie) async {
     if (_done || _validating) return;
@@ -264,9 +225,6 @@ class _YtmLoginPageState extends State<YtmLoginPage> {
   void _checkAgain() {
     if (Platform.isWindows) {
       if (_windowOpen) {
-        // SP-68: a one-shot check can miss — the session may land right
-        // after the current tick passed. Restart the 2 s poll (it may
-        // have died with a transient error) and run one check now.
         _poll ??= Timer.periodic(
             const Duration(seconds: 2), (_) => _harvestWindows());
         _harvestWindows();
@@ -278,7 +236,6 @@ class _YtmLoginPageState extends State<YtmLoginPage> {
     }
   }
 
-  // ── UI ───────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {

@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 // ZenMusic — Tinder-style swipeable artwork stack for the player page.
 // Drop in: lib/desktop/screens/player/widgets/swipe_artwork_stack.dart
 //
@@ -118,7 +120,6 @@ class SwipeArtworkStackState extends State<SwipeArtworkStack>
     super.dispose();
   }
 
-  // ── public: trigger the same animation from the skip buttons ──
 
   bool swipeNext() {
     if (_awaiting || !_canNext) return false;
@@ -132,7 +133,6 @@ class SwipeArtworkStackState extends State<SwipeArtworkStack>
     return true;
   }
 
-  // ── animation helpers ──
 
   void _animateTo(Offset to, Duration d, Curve curve, [VoidCallback? done]) {
     _from = _offset.value;
@@ -191,7 +191,6 @@ class SwipeArtworkStackState extends State<SwipeArtworkStack>
     _offset.value = Offset.zero;
   }
 
-  // ── gestures ──
 
   void _onStart(DragStartDetails _) {
     if (_awaiting) return;
@@ -225,7 +224,6 @@ class SwipeArtworkStackState extends State<SwipeArtworkStack>
     }
   }
 
-  // ── build ──
 
   Widget _card(MediaItem item, bool isFront) {
     return KeyedSubtree(

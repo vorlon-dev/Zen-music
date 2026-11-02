@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 #pragma once
 
 #include <algorithm>

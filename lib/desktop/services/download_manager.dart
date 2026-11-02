@@ -1,19 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), services/download_manager.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-//
-// PORT DEVIATIONS (stream resolution only — queue/progress/metadata logic is
-// verbatim):
-//  1. Echo's stream_client.dart (AudioStreamClient) is NOT ported. Byte fetch
-//     uses the vendored fork's own API: videos.streams.get(info), which
-//     auto-resolves the client-matched headers via HEAD probing.
-//  2. Manifest resolution uses kYtClientPriority (visionOs -> ios -> android)
-//     from yt_audio_stream.dart — Echo's androidVr is 403'd by YouTube since
-//     2026-08-17 and would fail every download against this fork.
-//  3. streamsClient -> streams (fork API surface); sortByBitrate (not exported
-//     by the fork) -> inline sort.
-//  4. The mp4-only container filter is dropped (desktop = libmpv, plays
-//     mp4/webm/opus alike); saveMusic receives the true container extension.
+// ZenMusic · vorlon-dev
 
 import 'dart:collection';
 import 'dart:io';

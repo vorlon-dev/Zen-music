@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
@@ -8,25 +10,6 @@
 #include "flutter_window.h"
 #include "utils.h"
 
-// ──────────────────────────────────────────────────────────────────────────
-// ZENMUSIC: WebView2 stealth CBT hook.
-//
-// The desktop-Spotify engine needs a WebView2 host that Chromium considers
-// visible (IsWindowVisible == TRUE), otherwise MediaSource never fires
-// sourceopen and the whole EME pipeline stalls (SP-4 lesson). But the user
-// must never see that white rectangle.
-//
-// Dart-side masking (SpotifyDesktopEngine._maskWebViewWindows) runs ~1s
-// after WebviewWindow.create() — long enough for the window to flash for a
-// few seconds. This CBT hook fires on HCBT_CREATEWND, i.e. BEFORE the
-// window is first shown, so the layered-alpha style is in place from frame
-// zero.
-//
-// We filter by class name: the Flutter runner window is
-// "FLUTTER_RUNNER_WIN32_WINDOW"; WebView2 uses "Chrome_WidgetWin_*" or
-// similar. Only WebView2-class windows get masked, the runner is
-// untouched.
-// ──────────────────────────────────────────────────────────────────────────
 
 namespace {
 
@@ -88,17 +71,6 @@ CreateAndAttachConsole();
 
 ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
-// ZENMUSIC: WebView2 EME engine — backgrounding disables. These keep the
-// renderer at full priority while the window is technically visible but
-// masked. Still needed even with the CBT hook: without them, hiding the
-// WebView2 window at OS level still suspends Chromium's media pipeline.
-//
-// SP-48: MediaSessionService is ALSO disabled — that Chromium feature is
-// what registers the webview's own session with Windows SMTC, which made
-// the volume flyout / Quick Settings show "127.0.0.1:<port>/_spengine"
-// instead of the song. With it off, the ONLY SMTC card is the app's own
-// smtc_bridge session (native title/artist/artwork/timeline). The engine
-// page's navigator.mediaSession guard tolerates the API being absent.
 ::SetEnvironmentVariableW(
 L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
 L"--disable-features=CalculateNativeWinOcclusion,MediaSessionService"

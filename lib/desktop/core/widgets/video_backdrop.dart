@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:ui' show ImageFilter;
@@ -7,22 +9,6 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:video_player/video_player.dart';
 
-/// Video backdrop behind the player UI — one contract, two engines.
-///
-/// SP-76: Android / iOS / macOS keep the proven video_player implementation.
-/// Windows runs media_kit (libmpv) instead: `video_player` ships NO Windows
-/// implementation in this app's dependency set (pubspec.lock carries only
-/// the android / avfoundation / web hosts), so every Spotify canvas on
-/// Windows used to die inside initialize() and the backdrop silently
-/// cleared itself — the canvas "never worked" on the platform this app is
-/// mostly used on. Both engines report the same signals: poster while
-/// warming up, first-frame reveal, [onReadyChanged], [onUnavailable].
-///
-/// Looping: [shortLoop] marks a source that is already a short loop
-/// (Spotify canvases are 3–8 s clips) — the whole asset loops, muted,
-/// seamlessly where the engine supports it. [synchronized] marks a
-/// full-length video (YT music video) that is position-locked to the audio
-/// stream instead. The two are mutually exclusive by contract.
 class VideoBackdrop extends StatelessWidget {
   final String streamUrl;
   final bool playing;
@@ -44,9 +30,6 @@ class VideoBackdrop extends StatelessWidget {
   /// [positionStream]. Requires positionStream to be provided.
   final bool synchronized;
 
-  /// First frame is on screen (and the poster can hand over), or the
-  /// backdrop went back to warming up. SP-76: the player screen uses this
-  /// to fade the still cover out exactly while the canvas fades in.
   final ValueChanged<bool>? onReadyChanged;
 
   const VideoBackdrop({
@@ -92,11 +75,6 @@ class VideoBackdrop extends StatelessWidget {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Engine 1 — video_player (Android / iOS / macOS / web). Unchanged
-// behavior, plus onReadyChanged reporting and native looping for
-// shortLoop sources.
-// ══════════════════════════════════════════════════════════════════════
 
 class _VideoPlayerBackdrop extends StatefulWidget {
   final String streamUrl;
@@ -282,10 +260,6 @@ class _VideoPlayerBackdropState extends State<_VideoPlayerBackdrop> {
     await c.setVolume(0);
 
     if (widget.shortLoop) {
-      // SP-76: the whole asset IS the loop (a Spotify canvas is a 3–8 s
-      // clip). Prefer the platform's native looping — seamless where it
-      // is supported — and keep the tick seek below as the safety net
-      // for engines where setLooping is a no-op.
       await c.setLooping(true);
       _loopStart = Duration.zero;
       _loopEnd = c.value.duration > Duration.zero
@@ -582,12 +556,6 @@ class _VideoPlayerBackdropState extends State<_VideoPlayerBackdrop> {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Engine 2 — media_kit (Windows). libmpv plays the canvas: muted, the
-// whole asset looped via PlaylistMode.loop (loop-file restarts a clip
-// without a reload gap), hardware acceleration on — the exact player
-// recipe the Windows video backdrop service already ships.
-// ══════════════════════════════════════════════════════════════════════
 
 class _MediaKitBackdrop extends StatefulWidget {
   final String streamUrl;

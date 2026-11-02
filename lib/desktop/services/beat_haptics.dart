@@ -1,24 +1,4 @@
-// ZenMusic — beat-synced haptics (SP-78).
-//
-// The phone vibrates on the song's beat grid while it plays. The grid is a
-// BPM metronome kept in lock-step with the player position: every fire
-// re-reads the LIVE position and schedules the next beat from it, so the
-// pattern can never drift — pauses, seeks and stalls self-correct on the
-// very next tick without any explicit seek handling.
-//
-// Where the BPM comes from (honest chain, each step cached per song):
-//   1. The persistent per-song cache (a previous lookup's answer).
-//   2. Deezer's public keyless search API — its track objects carry the
-//      studio `bpm`. No key, no auth, and deliberately no api.spotify.com
-//      traffic (the app's shared 429 discipline must stay intact).
-//   3. A neutral 120 BPM grid so the toggle still pulses when every
-//      lookup fails (offline, rare instrumental with no Deezer entry).
-//      The miss is NOT persisted — the next session retries Deezer.
-//
-// Mobile only: the production constructor gates on Android/iOS; on other
-// platforms the engine is inert. Strength maps onto the platform impact
-// tiers (light / medium / heavy) via HapticFeedback; the sink is
-// injectable so tests can count beats without vibrating anything.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';
@@ -56,7 +36,6 @@ void fireHapticFor(BeatStrength s) {
   }
 }
 
-// ── beat math (pure, unit-tested) ────────────────────────────────────
 
 class BeatClock {
   /// Milliseconds one beat of [bpm] lasts.
@@ -75,7 +54,6 @@ class BeatClock {
   }
 }
 
-// ── BPM sources ──────────────────────────────────────────────────────
 
 /// Where the engine asks for a song's tempo. Injectable for tests.
 abstract class TempoSource {
@@ -173,7 +151,6 @@ class BpmCache {
   }
 }
 
-// ── the engine ───────────────────────────────────────────────────────
 
 /// The slice of the player the engine touches — injectable so tests can
 /// drive pauses/seeks/song changes without a real AudioPlayer.

@@ -1,6 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
-// PORT NOTE: dropdown_button.dart is a FRESH implementation (Echo source
-// unavailable) — see that file's header. All other files are ports.
+// ZenMusic · vorlon-dev
 
 export 'appbar.dart';
 export 'buttons.dart';

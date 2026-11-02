@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 @file:OptIn(androidx.media3.common.util.UnstableApi::class)
 
 package com.zen.music.zenmusic.lossless
@@ -9,23 +11,6 @@ import androidx.media3.common.util.UnstableApi
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/**
- * Media3 audio processor routing decoded PCM through the native engine's
- * media path (PcmConverter -> DspProcessor).
- *
- * Ported from LastWave's NativePcmAudioProcessor (GPL-3.0), simplified and
- * adapted for a DefaultAudioSink processor chain:
- *  - Engages ONLY for 16-bit sources (AAC/MP3/Opus/16-bit FLAC decode) and
- *    emits PCM16. Rationale: DefaultAudioSink's internal processors
- *    (silence skipping) receive the format our processor emits, and stock
- *    pipelines always feed them 16-bit — float output from a mid-pipeline
- *    processor threw UnhandledAudioFormatException on the runtime media3.
- *    For 16-bit sources the int16->float->DSP->int16 round trip is exact.
- *  - All other inputs (24/32-bit, float) pass through bit-exact: hi-res
- *    keeps full precision; native hi-res processing is a later round.
- *  - Fail-open everywhere: engine unavailable or a processing failure
- *    emits the raw input untouched. Native must never break playback.
- */
 @androidx.annotation.OptIn(UnstableApi::class)
 class ZenNativePcmAudioProcessor(private val engine: NativeAudioEngine) : BaseAudioProcessor() {
 

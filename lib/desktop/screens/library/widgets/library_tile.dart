@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:expandable_text/expandable_text.dart';
 import 'package:flutter/cupertino.dart';
@@ -14,7 +16,6 @@ class LibraryTile extends StatelessWidget {
   final List songs;
   final int index;
 
-  /// DEVIATION (marked): null-safe thumbnail pick — see section_item.dart.
   String _pickThumbnailUrl(List thumbnails) {
     for (final el in thumbnails) {
       final w = el['width'];

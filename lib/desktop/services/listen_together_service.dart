@@ -1,38 +1,4 @@
-// ZenMusic Desktop — ported from the retired mobile stack's
-// listen_together_service.dart. ZenMusic remains GPL-3.0.
-// Listen Together client for the metroserver protocol (protobuf Envelope).
-// PORT DEVIATIONS: bindings target the desktop MediaPlayer (GetIt); Song ->
-// local LtSong; guest lockout dropped (request_sync + heartbeat re-align
-// guests); host stream-hints metadata-only (legacy Hive cache retired).
-//
-// v3 (1 Hz sync): ping/pong every second, host heartbeat every second,
-// heartbeat-driven drift control that never fights a buffering player
-// (settle window, 2-in-a-row hysteresis, +/-3% speed nudge), clock offset
-// plausibility checks (falls back to RTT when the server timestamps are not
-// what we expect), fallback request_sync polling when heartbeats do not
-// arrive, liveness by ANY inbound frame, and a live LtSyncStats notifier +
-// one "lt:" log line per second (rtt, offset, drift, heartbeat age).
-//
-// SYNC DEVIATIONS (marked, bug-fix / feature):
-//  * Host seek broadcast is back: seeks (slider, +/-10s, anything that moves
-//    the position) are detected from the position stream and sent instantly
-//    as 'seek' (leading edge immediate, trailing coalesced while dragging).
-//    hostSeek() now carries track_id (guests used to ignore it).
-//  * Host heartbeat ('position' every 3 s) so guests keep correcting drift.
-//  * Guests compensate network latency using the server clock offset and the
-//    host's captured_at_server_time, and apply seek -> play in that order.
-//  * Clock offset: fixed NTP formula, burst pings right after the handshake,
-//    best (lowest RTT) of the recent samples is used.
-//  * Guest drift correction: hard seek only when far off, otherwise a tiny
-//    playback-speed nudge (+/-3%) so there is no audible glitch.
-//  * Guest actions run through a serial queue (no play/seek/pause races) and
-//    stale rapid seeks are dropped (latest wins).
-//  * Pending seeks while a track is loading are advanced by the time spent
-//    loading, so the guest lands on the live position.
-//  * connect() now waits for the handshake, so the reconnect message is
-//    really sent after a dropped socket.
-//  * Duplicate change_track for the already-loaded track is a no-op (it used
-//    to force play and cause a blip for existing guests when someone joined).
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';
@@ -62,7 +28,6 @@ class ListenTogetherService {
   static const _livenessTimeoutMs = 12000; // no inbound frame this long -> reconnect
   static const _maxReconnectAttempts = 5;
 
-  // ── sync tuning ──
   static const _heartbeatInterval = Duration(seconds: 1); // host position heartbeat
   static const _hardSeekMs = 300; // playing: seek only if drift is bigger
   static const _pausedSeekMs = 120; // paused: be exact, nobody hears it
@@ -223,7 +188,6 @@ class ListenTogetherService {
   /// Last measured round trip to the server in ms (0 = not measured yet).
   int get roundTripMs => _rttMs;
 
-  // ── CONNECTION ──
 
   Future<void> connect() async {
     if (_channel != null) {
@@ -335,7 +299,6 @@ class ListenTogetherService {
     syncStats.value = LtSyncStats.idle;
   }
 
-  // ── ROOM OPERATIONS ──
 
   Future<String?> createRoom(String username) async {
     await connect();
@@ -396,7 +359,6 @@ class ListenTogetherService {
       _send('reject_suggestion',
           {'suggestion_id': suggestionId, 'reason': reason ?? ''});
 
-  // ── GUEST MODE ──
 
   void _applyGuestSyncTimer() {
     _startStats();
@@ -447,7 +409,6 @@ class ListenTogetherService {
     });
   }
 
-  // ── SEND ──
 
   void _sendRaw(String type, Uint8List payloadBytes) {
     final channel = _channel;
@@ -643,7 +604,6 @@ class ListenTogetherService {
 
   int _serverNow() => DateTime.now().millisecondsSinceEpoch + _serverOffsetMs;
 
-  // ── INCOMING ──
 
   void _onData(dynamic data) {
     _lastRxMono = _mono.elapsedMilliseconds;
@@ -879,7 +839,6 @@ class ListenTogetherService {
     }
   }
 
-  // ── CLOCK SYNC ──
 
   /// NTP style: offset = ((t1 - t0) + (t2 - t3)) / 2, rtt = (t3 - t0) - (t2 - t1).
   /// The sample with the lowest RTT among the recent ones is the most
@@ -923,7 +882,6 @@ class ListenTogetherService {
     }
   }
 
-  // ── SERIAL APPLY QUEUE ──
 
   /// Guest actions run strictly one after another, so play/seek/pause can
   /// never interleave and fight each other.
@@ -931,7 +889,6 @@ class ListenTogetherService {
     _chain = _chain.then((_) => job()).catchError((_) {});
   }
 
-  // ── GUEST APPLICATION ──
 
   void _setPendingSeek(int ms) {
     _pendingSeekMs = ms;
@@ -1134,7 +1091,6 @@ class ListenTogetherService {
     await _applyTrackChange(p, autoplay: _desiredPlaying);
   }
 
-  // ── DRIFT CORRECTION ──
 
   /// Hard seek that lands on the right spot AFTER the seek finished: while
   /// playing, the target is moved forward by the measured seek duration.
@@ -1261,7 +1217,6 @@ class ListenTogetherService {
     return position + elapsed;
   }
 
-  // ── HOST AUTO-BROADCAST ──
 
   void _rebindHostBroadcast() {
     _playingSub?.cancel();
@@ -1410,7 +1365,6 @@ class ListenTogetherService {
     _broadcastTrack(cur);
   }
 
-  // ── ROOM STATE HELPERS ──
 
   void _patchIsPlaying(bool playing) {
     final r = _room;
@@ -1533,7 +1487,6 @@ class ListenTogetherService {
     roomNotifier.value = state;
   }
 
-  // ── KEEPALIVE + RECONNECT ──
 
   void _startPing() {
     _pingTimer?.cancel();
@@ -1591,7 +1544,6 @@ class ListenTogetherService {
   }
 }
 
-// ── MODELS ──
 
 /// Sync health, refreshed once per second while in a room.
 class LtSyncStats {
@@ -1748,7 +1700,6 @@ class LtSuggestionApprovedEvent extends LtEvent {
   final LtSong song;
 }
 
-// ── PARSERS ──
 
 LtPlaybackAction parsePlaybackAction(Uint8List payload) {
   final r = PbReader(payload);
@@ -1922,7 +1873,6 @@ LtSong mapToLtSong(Map<String, dynamic> t) {
   );
 }
 
-// ── PROTO WIRE ──
 
 class Envelope {
   Envelope(this.type, this.payload, this.compressed);

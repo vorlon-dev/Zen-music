@@ -1,7 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), screens/settings/widgets/setting_item.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// NOTE: ColorIcon lives in its own file (color_icon.dart) — NOT here.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 

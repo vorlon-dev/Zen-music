@@ -1,7 +1,4 @@
-// SP-58: Material 3 — design tokens extracted from PixelMusic
-// (ui/theme/Shape.kt, Type.kt, and the M3 expressive component metrics its
-// screens rely on). Values here are the Dart fallback of
-// android/app/src/main/res/values/material3_tokens.xml.
+// ZenMusic · vorlon-dev
 
 /// PixelMusic Shapes (Shape.kt, verbatim).
 class ZenM3Shapes {

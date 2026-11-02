@@ -1,4 +1,6 @@
-﻿// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
+// ZenMusic · vorlon-dev
+
+
 
 part of 'appearance_cubit.dart';
 
@@ -12,15 +14,15 @@ class AppearanceLoaded extends AppearanceState {
   final Color? accentColor;
   final bool amoledBlack;
   final bool dynamicColors;
-  final bool liquidGlass; // SP-54: Liquid Glass whole-app theme
-  final String uiTheme; // SP-58: 'classic' | 'liquid' | 'm3'
+  final bool liquidGlass;
+  final String uiTheme;
 
   const AppearanceLoaded({
     required this.themeMode,
     required this.accentColor,
     required this.amoledBlack,
     required this.dynamicColors,
-    required this.liquidGlass, // SP-54
-    required this.uiTheme, // SP-58
+    required this.liquidGlass,
+    required this.uiTheme,
   });
 }

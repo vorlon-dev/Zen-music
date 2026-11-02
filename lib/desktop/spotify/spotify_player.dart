@@ -1,16 +1,4 @@
-// ZenMusic — spotify playback resolution (SP-2 + SP-7 autoqueue).
-// Ported from Stopify's SpotifyConnectService/SpotifyWebClient (MIT).
-// ZenMusic remains GPL-3.0.
-//
-// SP-7 ADDITION: while a resolve is in flight, every track node the Dealer
-// pushes carries full metadata (name, artists, album, cover, duration, uri)
-// in its `metadata` map. Those nodes are the requested track PLUS Spotify's
-// own autoqueue neighbours — the exact "next" list the Web Player would
-// play. We now capture that metadata and expose:
-//   * lastResolvedSong          -> the requested track (song-map shape)
-//   * lastAutoqueueNeighbours   -> the OTHER tracks from the same payload
-// MediaPlayer._tryEnginePlay reads these to build the Spotify queue. No
-// protocol change, no new request — we just stop throwing the data away.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';
@@ -72,9 +60,6 @@ class SpotifyPlayer {
   // Pending resolve futures completed when the Dealer pushes a manifest.
   final Map<String, Completer<String>> _pending = {};
 
-  // ── SP-7 autoqueue capture ──
-  /// Metadata for every track uri we've seen in a dealer payload. Grows as
-  /// the user plays more; harmless (a few hundred bytes per track).
   final Map<String, Map<String, dynamic>> _trackMeta = {};
   /// Track uris seen since the current resolve began. Cleared on each new
   /// resolve; read at the end to assemble the autoqueue.
@@ -103,7 +88,6 @@ class SpotifyPlayer {
         : SpotifyConfig.defaultDeviceId;
   }
 
-  // ── DEALER WEBSOCKET ──
 
   Future<String?> _ensureDealer() {
     if (_channel != null && _handshaken) return Future.value(_connectionId);
@@ -277,7 +261,6 @@ class SpotifyPlayer {
     _dealerInFlight = null;
   }
 
-  // ── DEVICE REGISTRATION ──
 
   Future<bool> _ensureRegistered() async {
     if (_deviceRegistered && _connectionId != null) return true;
@@ -356,7 +339,6 @@ class SpotifyPlayer {
     }
   }
 
-  // ── CONNECT-STATE PLAY COMMAND ──
 
   Future<bool> _sendPlayCommand(String trackUri) async {
     final token = await _auth.getAccessToken();
@@ -437,7 +419,6 @@ class SpotifyPlayer {
   String _short(String s, [int n = 200]) =>
       s.length > n ? '${s.substring(0, n)}…' : s;
 
-  // ── MANIFEST CAPTURE (file_ids + autoqueue) ──
 
   void _scanPayload(Map payload, String? messageUri) {
     final diag = <String>[];
@@ -498,9 +479,6 @@ class SpotifyPlayer {
     // Diagnostics for track-like entries (metadata.uri present).
     final meta = node['metadata'];
     if (ownUri != null && meta is Map) {
-      // SP-7: capture metadata for the autoqueue. The node with
-      // metadata.uri is also the node carrying name/authors/album/cover/
-      // duration. Read by MediaPlayer._tryEnginePlay to build the queue.
       _trackMeta[ownUri] = _metaToSongMap(ownUri, meta);
       if (_pending.isNotEmpty) _seenThisResolve.add(ownUri);
 
@@ -530,9 +508,6 @@ class SpotifyPlayer {
     }
   }
 
-  /// SP-7: metadata map -> desktop song-map shape. Same shape as
-  /// spotify_search.dart produces so playSong / playFromSection /
-  /// _tryEnginePlay all accept it unchanged.
   Map<String, dynamic> _metaToSongMap(String uri, Map meta) {
     final id = uri.replaceFirst('spotify:track:', '');
     final title = meta['name']?.toString() ?? '';
@@ -645,7 +620,6 @@ class SpotifyPlayer {
     if (c != null && !c.isCompleted) c.complete(fileId);
   }
 
-  // ── PUBLIC RESOLVE ──
 
   /// Resolves a track (id or spotify:track: uri) to a signed CDN URL.
   /// Also populates lastResolvedSong + lastAutoqueueNeighbours on success.
@@ -655,7 +629,6 @@ class SpotifyPlayer {
         : 'spotify:track:$trackIdOrUri';
     final trackId = uri.replaceAll('spotify:track:', '');
 
-    // SP-7: reset autoqueue staging for this resolve.
     _seenThisResolve.clear();
     lastResolvedSong = null;
     lastAutoqueueNeighbours = [];
@@ -679,7 +652,6 @@ class SpotifyPlayer {
     }
     final cdn = await _resolveCdn(fileId);
 
-    // SP-7: publish the resolved track + neighbours for the queue.
     if (cdn != null) {
       final resolved = _trackMeta[uri];
       if (resolved != null) lastResolvedSong = resolved;

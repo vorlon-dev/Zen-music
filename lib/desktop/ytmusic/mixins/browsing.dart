@@ -1,13 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), ytmusic/mixins/browsing.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-//
-// FIX (Spotify songs crash): addYoutubeHistory guarded. Non-YouTube ids
-// (Spotify/JioSaavn song maps routed in by add_history) get a player
-// response WITHOUT playbackTracking, so the unguarded
-// playbackTracking.videostatsPlaybackUrl.baseUrl read threw
-// NoSuchMethodError on every Spotify song change. Now null-safe and
-// wrapped: history is best-effort telemetry and must never crash playback.
+// ZenMusic · vorlon-dev
 
 import 'dart:core';
 import 'dart:math';
@@ -229,8 +220,6 @@ mixin BrowsingMixin on YTClient {
 
   Future addYoutubeHistory(String videoId) async {
     try {
-      // SP-71: only worth a round-trip when an account is connected — an
-      // anonymous ping attributes to nobody and just burns a request.
       if (!YtmAuth.instance.loggedIn.value) return;
       signatureTimestamp = signatureTimestamp ?? getDatestamp() - 1;
       Map<String, dynamic> body = {};
@@ -250,8 +239,6 @@ mixin BrowsingMixin on YTClient {
         baseUrl = tracking['videostatsPlaybackUrl']?['baseUrl'];
       }
       if (baseUrl is! String || baseUrl.isEmpty) {
-        // SP-71: say WHY nothing was recorded — the old silent bail made
-        // "Listen again stays empty" undiagnosable from a run log.
         debugPrint('[ytm-history] no playbackTracking for $videoId');
         return;
       }
@@ -269,8 +256,6 @@ mixin BrowsingMixin on YTClient {
       params.forEach((k, v) {
         url += '&$k=$v';
       });
-      // SP-71: one visible line per recorded play — the next run log must
-      // prove that in-app listening actually lands in the account history.
       final res = await sendGetRequest(url, headers);
       debugPrint('[ytm-history] recorded $videoId (HTTP ${res.statusCode})');
     } catch (e) {

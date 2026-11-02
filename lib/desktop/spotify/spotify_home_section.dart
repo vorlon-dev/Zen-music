@@ -1,63 +1,4 @@
-// ZenMusic — SP-36 + SP-37 + SP-38 + SP-39: the Spotify section on the
-// Home screen.
-//
-// SP-39a (compile hotfix, field log): (1) `_filterTabs` moved into
-// `_TopBar` — the pills' labels were referenced there but declared in
-// _SpotifyContentState (private cross-class access = compile error);
-// (2) `_TopBar` now receives `state.userName ?? ''` — the cubit's
-// userName is String? while the top bar wants a plain String.
-//
-// SP-39b (layout hotfix, field log): the fixed-height card shelves
-// overflowed at >100% Windows text scaling. _RecentCard's column is
-// 164 art + 6 gap + two text lines — ~205px at the user's 125% scale
-// inside a 200px item box (the exact "overflowed by 5.0 pixels").
-// Shelf heights bumped to cover up to 150% scaling: recents 216→232,
-// home square 226→236, hot tracks 195→204, playlists 196→208.
-// No visual change at 100% — the cards are top-aligned, so the extra
-// height only widens the empty strip under the captions.
-//
-// SP-39c (color hotfix, user directive): NO Spotify green anywhere.
-// Every accent — filter pills, play chips, avatars, icons — now
-// follows the APP's own theme via ColorScheme.primary / onPrimary
-// (white-on-black in the app's dark mode, black-on-white in light).
-// The kSpotifyGreen constant is deleted; the section recolors itself
-// with the app and any future theme change, zero hardcoded brand.
-//
-// SP-39 (Stopify port — the current look): the section now mirrors
-// Stopify's Android home screen (com.shashwat.stopify.ui.screens
-// .SimpHomeScreen), which the user provided as the target layout:
-//   * Top bar — profile avatar (36px circle, tap → /saved/
-//     spotify_library) + filter pills (All / Music / Podcasts, REAL
-//     filtering) + a refresh icon (re-fetches the feed).
-//   * "Jump back in" quick grid — the first 6 recently-played tracks
-//     as 2-column quick-play rows (tap = that track, queue = recents).
-//   * "Recently played" horizontal shelf (when > 2 recents).
-//   * THE REAL SPOTIFY HOME SHELVES — data.home via the Pathfinder
-//     `home` persisted query (ported 1:1 from Stopify's
-//     SpotifyWebClient.fetchHomeSections): section titles + square
-//     cards for tracks/albums/playlists/promos, circle cards for
-//     artist shelves. Track tap = plays the section; playlist/album
-//     tap = /saved/spotify_playlist (albums branch to getAlbum).
-//
-// Graceful degradation (the SP-36/37/38 layout is kept as the
-// fallback): if the `home` query returns nothing (hash rotation,
-// pathfinder hiccup), the section falls back to the previous
-// account + trending layout, so a dead endpoint can never blank the
-// section. The oEmbed editorial shelf and the Top-50 charts (SP-38)
-// render inside that fallback.
-//
-// Login state: SpotifyAuth.instance.loggedIn (ValueListenable<bool>) is
-// the ONLY gate. main.dart restores the session with unawaited(load())
-// at boot, so the section can appear a moment AFTER Home renders — the
-// ValueListenableBuilder handles that live, no restart needed.
-//
-// Doctrine: a dead Spotify session must never break the YouTube home
-// feed. Failures collapse to a one-line retry row; nothing here throws.
-//
-// Reload: HomePage's pull-to-refresh reaches SpotifyHomeSectionState
-// .reload() through a GlobalKey — the cubit re-fetches only when logged
-// in, and the whole feed (home + recents + trending) re-fetches through
-// the _reloadTick notifier.
+// ZenMusic · vorlon-dev
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -83,8 +24,6 @@ class SpotifyHomeSection extends StatefulWidget {
 class SpotifyHomeSectionState extends State<SpotifyHomeSection> {
   SpotifyLibraryCubit? _cubit;
 
-  // SP-37: bumped by reload(); the whole feed inside _SpotifyContent
-  // listens and re-fetches alongside the account cubit.
   final ValueNotifier<int> _reloadTick = ValueNotifier<int>(0);
 
   @override
@@ -139,7 +78,6 @@ class SpotifyHomeSectionState extends State<SpotifyHomeSection> {
   }
 }
 
-// ── logged out ────────────────────────────────────────────────────────
 
 class _ConnectBanner extends StatelessWidget {
   const _ConnectBanner();
@@ -197,7 +135,6 @@ class _ConnectBanner extends StatelessWidget {
   }
 }
 
-// ── logged in ─────────────────────────────────────────────────────────
 
 class _SpotifyContent extends StatefulWidget {
   const _SpotifyContent({required this.tick});
@@ -211,9 +148,6 @@ class _SpotifyContentState extends State<_SpotifyContent> {
   SpotifyHomeSnapshot? _feed; // trending + home + recents snapshot
   bool _feedLoading = true;
 
-  // SP-39: All / Music / Podcasts — real filtering over data.home.
-  // (The tab labels live in _TopBar — the only widget that renders
-  // them; see SP-39a.)
   int _filterIndex = 0;
 
   @override
@@ -316,9 +250,6 @@ class _SpotifyContentState extends State<_SpotifyContent> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // SP-39: Stopify top bar — avatar + filter pills + refresh.
-              // (?? '' — SpotifyLibraryLoaded.userName is String?, the
-              // bar wants a plain String; SP-39a fix.)
               _TopBar(
                 userName: state.userName ?? '',
                 avatarUrl: f?.account?['avatar']?.toString() ?? '',
@@ -329,8 +260,6 @@ class _SpotifyContentState extends State<_SpotifyContent> {
               if (_feedLoading && f == null)
                 const _HomeShimmer()
               else if (f != null && f.homeSections.isNotEmpty) ...[
-                // SP-39: Stopify home layout — quick grid, recents
-                // shelf, then the REAL Spotify homepage shelves.
                 if (f.recent.isNotEmpty)
                   _QuickGrid(recent: f.recent),
                 if (f.recent.length > 2)
@@ -349,8 +278,6 @@ class _SpotifyContentState extends State<_SpotifyContent> {
                       label:
                       'No podcasts in your Spotify home right now.'),
               ] else ...[
-                // FALLBACK (SP-36/37/38 layout): the `home` query came
-                // back empty — account header + trending + library.
                 _Header(userName: state.userName, details: f?.account),
                 _TrendingSection(feed: f, loading: _feedLoading),
                 if (state.likedSongs.isNotEmpty)
@@ -370,15 +297,6 @@ class _SpotifyContentState extends State<_SpotifyContent> {
     );
   }
 
-  /// SP-39: item tap semantics (Stopify's onMediaItemClick, mapped to
-  /// ZenMusic's existing destinations):
-  ///   track    → whole section's playable tracks in the queue,
-  ///              starting at this one (playFromSection).
-  ///   playlist → /saved/spotify_playlist (Pathfinder fetchPlaylist).
-  ///   album    → same route; the page branches to getAlbum.
-  ///   artist / podcast / episode → no destination page yet (card is
-  ///              visual only — the artist/podcast screens are a
-  ///              follow-up arc).
   void _openItem(List<Map<String, dynamic>> items, int index) {
     if (index < 0 || index >= items.length) return;
     final item = items[index];
@@ -404,7 +322,6 @@ class _SpotifyContentState extends State<_SpotifyContent> {
   }
 }
 
-// ── SP-39: Stopify top bar (avatar + pills + refresh) ─────────────────
 
 class _TopBar extends StatelessWidget {
   const _TopBar({
@@ -522,7 +439,6 @@ class _Pill extends StatelessWidget {
   }
 }
 
-// ── SP-39: "Jump back in" quick grid (6 recents, 2 columns) ───────────
 
 class _QuickGrid extends StatelessWidget {
   const _QuickGrid({required this.recent});
@@ -635,7 +551,6 @@ class _QuickPlayCard extends StatelessWidget {
   }
 }
 
-// ── SP-39: "Recently played" shelf ────────────────────────────────────
 
 class _RecentShelf extends StatelessWidget {
   const _RecentShelf({required this.recent, required this.onPlay});
@@ -767,7 +682,6 @@ class _RecentCard extends StatelessWidget {
   }
 }
 
-// ── SP-39: the REAL Spotify home shelves ──────────────────────────────
 
 class _HomeShelf extends StatelessWidget {
   const _HomeShelf({required this.section, required this.onOpen});
@@ -831,8 +745,6 @@ class _HomeShelf extends StatelessWidget {
   }
 }
 
-/// SimpSquareCard port: 168-wide column, 164px art, play overlay,
-/// name + subtitle.
 class _SquareCard extends StatelessWidget {
   const _SquareCard({required this.item, required this.onTap});
   final Map<String, dynamic> item;
@@ -909,8 +821,6 @@ class _SquareCard extends StatelessWidget {
   }
 }
 
-/// SimpArtistCircleCard port: 115-wide column, 105px circle, centered
-/// name + "Artist" caption.
 class _ArtistCircleCard extends StatelessWidget {
   const _ArtistCircleCard({required this.item, required this.onTap});
   final Map<String, dynamic> item;
@@ -1012,8 +922,6 @@ class _HomeShimmer extends StatelessWidget {
   }
 }
 
-// ── legacy fallback (SP-36/37/38 shelves — used when the `home`
-//    query returns nothing) ────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
   const _Header({this.userName, this.details});
@@ -1085,7 +993,6 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ── SP-37: trending on Spotify (fallback shelves) ─────────────────────
 
 class _TrendingSection extends StatelessWidget {
   const _TrendingSection({required this.feed, required this.loading});
@@ -1561,7 +1468,6 @@ class _PlaylistShelf extends StatelessWidget {
   }
 }
 
-// ── shared slim row ───────────────────────────────────────────────────
 
 class _SlimRow extends StatelessWidget {
   const _SlimRow({required this.label, this.leading, this.trailing});

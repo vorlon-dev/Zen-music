@@ -1,10 +1,11 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 import 'dart:io';
 import '../utils/enhanced_image.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-/// Ordered fallback chain (see header, deviation 1).
 final List<YoutubeApiClient> kYtClientPriority = [
   YoutubeApiClient.visionOs,
   YoutubeApiClient.ios,
@@ -27,8 +28,6 @@ final Map<
 /// PO-token/SABR wall can return descriptors with empty URLs — skip those.
 bool _hasUsableUrl(AudioOnlyStreamInfo s) => s.url.host.isNotEmpty;
 
-/// Headers that must accompany requests to URLs minted by [client]
-/// (copied from the fork's stream_client.dart — deviation 2).
 Map<String, String> _clientRequestHeaders(YoutubeApiClient client) {
   final clientCtx = client.payload['context']?['client'];
   final userAgent = clientCtx is Map ? clientCtx['userAgent'] as String? : null;
@@ -46,9 +45,6 @@ Map<String, String> _mintedHeaders(String videoId, String quality) {
   return const {};
 }
 
-/// Tries every client in [kYtClientPriority] until one returns a manifest
-/// that actually contains audio streams with usable URLs. Returns the
-/// manifest AND the client that produced it (deviation 2).
 Future<({StreamManifest manifest, YoutubeApiClient client})>
 _getManifestWithFallback(String videoId) async {
   Object? lastError;
@@ -118,7 +114,6 @@ Future<AudioOnlyStreamInfo> resolveAudioStreamInfo(
     throw Exception('No audio stream available for this video.');
   }
 
-  // Remember WHICH client minted this stream (deviation 2).
   _streamInfoCache[key] = (
   info: info,
   client: resolved.client,
@@ -127,9 +122,6 @@ Future<AudioOnlyStreamInfo> resolveAudioStreamInfo(
   return info;
 }
 
-// ----------------------------------------------------------------------------
-// just_audio source
-// ----------------------------------------------------------------------------
 
 class YouTubeAudioSource extends StreamAudioSource {
   final String videoId;
@@ -174,13 +166,7 @@ class YouTubeAudioSource extends StreamAudioSource {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Generic HTTP streaming server
-// ----------------------------------------------------------------------------
 
-/// Starts a generic HTTP server that listens for requests to stream YouTube
-/// audio. Clients must pass 'id' and 'quality' as URL query parameters.
-/// The server binds to a random available port.
 Future<String> createAudioStreamServer() async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
 
@@ -291,9 +277,6 @@ Future<void> handleAudioRequest(HttpRequest request) async {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Direct URL source (with caching)
-// ----------------------------------------------------------------------------
 
 final Map<String, ({String url, DateTime expiry})> _urlCache = {};
 
@@ -324,9 +307,6 @@ Future<AudioSource> getDirectUrlAudioSource(
   }
 }
 
-// ----------------------------------------------------------------------------
-// Byte transport
-// ----------------------------------------------------------------------------
 
 Future<HttpClientResponse> _downloadStream(Uri url, int start, int end,
     {Map<String, String> headers = const {}}) async {

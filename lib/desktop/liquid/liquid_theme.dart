@@ -1,17 +1,4 @@
-// SP-54: Liquid Glass — whole-app glass ThemeData.
-//
-// When SettingsManager.liquidGlass is ON, ZenDesktopApp swaps AppTheme for
-// ZenLiquidTheme so the ENTIRE app (every page, card, rail and bar built on
-// colorScheme surfaces) turns into translucent glass sitting over the
-// LiquidBackdrop aurora:
-//   • Windows — shader glass via liquid_glass_widgets (ZenGlassPanel).
-//   • Android — the glass surfaces themselves are rendered natively in
-//     Kotlin (android/app/src/main/kotlin/com/zen/music/zenmusic/liquid/)
-//     and bridged in as platform views.
-//
-// Surface colors are intentionally TRANSLUCENT (alpha over the aurora) —
-// that is what makes the whole app read as liquid glass without touching
-// every screen. Keep them translucent; opaque values break the illusion.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

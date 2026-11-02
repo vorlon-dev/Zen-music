@@ -1,10 +1,4 @@
-// ZenMusic Desktop — SP-28: the lyrics overlay window's UI.
-//
-// Runs INSIDE the overlay window's own engine — NOT the main app. It owns
-// nothing: no Hive, no GetIt, no audio, no fetching. It renders what
-// lyrics_overlay_bridge.dart pushes and sends 'close' / 'pin' back.
-// Dependency-free (flutter/material + the bridge) so the second engine
-// stays light — same rules as mini_player_page.dart.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 

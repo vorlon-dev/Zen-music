@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 // ZenMusic — 22 seek-slider styles in ONE file, switchable from Settings.
 //
 //   ZenSlider(
@@ -222,7 +224,6 @@ class _ZenSliderState extends State<ZenSlider> with TickerProviderStateMixin {
   }
 }
 
-// ── paint params shared by every style ──
 
 class _P {
   const _P(this.progress, this.time, this.amp, this.drag, this.active,
@@ -342,7 +343,6 @@ class _StylePainter extends CustomPainter {
   @override
   bool shouldRepaint(_StylePainter old) => true; // repainted by animations
 
-  // ── 1. WAVY — animated wave that settles into the thumb, flat after it ──
   static void _wavy(Canvas c, Size s, _P p) {
     const sw = 3.0, wavelength = 26.0, speed = 12.0, maxAmp = 4.0;
     final midY = s.height / 2;
@@ -374,7 +374,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, midY), thumbR, _fill(p.thumb));
   }
 
-  // ── 2. RGB GLOW ──
   static void _rgbGlow(Canvas c, Size s, _P p) {
     final midY = s.height / 2;
     final x0 = _P.inset, x1 = s.width - _P.inset;
@@ -408,7 +407,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, midY), thumbR, _fill(p.thumb));
   }
 
-  // ── 3. CLASSIC ──
   static void _classic(Canvas c, Size s, _P p) {
     final midY = s.height / 2;
     final x0 = _P.inset, x1 = s.width - _P.inset;
@@ -418,7 +416,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, midY), 6 + 3 * p.drag, _fill(p.thumb));
   }
 
-  // ── 4. PILL ──
   static void _pill(Canvas c, Size s, _P p) {
     final midY = s.height / 2;
     final x0 = _P.inset, x1 = s.width - _P.inset;
@@ -439,7 +436,6 @@ class _StylePainter extends CustomPainter {
     );
   }
 
-  // ── 5. SEGMENTS ──
   static void _segments(Canvas c, Size s, _P p) {
     final midY = s.height / 2;
     final x0 = _P.inset, x1 = s.width - _P.inset;
@@ -462,7 +458,6 @@ class _StylePainter extends CustomPainter {
     }
   }
 
-  // ── 6. EQUALIZER ──
   static void _equalizer(Canvas c, Size s, _P p) {
     final midY = s.height / 2;
     final x0 = _P.inset, x1 = s.width - _P.inset;
@@ -493,7 +488,6 @@ class _StylePainter extends CustomPainter {
     );
   }
 
-  // ── 7. NEON ──
   static void _neon(Canvas c, Size s, _P p) {
     final midY = s.height / 2;
     final x0 = _P.inset, x1 = s.width - _P.inset;
@@ -520,9 +514,7 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, midY), r, _fill(p.thumb));
   }
 
-  // ════════════════ NEW STYLES ════════════════
 
-  // ── 8. ORBIT — thumb is a planet with a tilted ring and a moon ──
   static void _orbit(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     c.drawLine(Offset(x0, my), Offset(x1, my), _stroke(p.inactive, 2));
@@ -540,7 +532,6 @@ class _StylePainter extends CustomPainter {
     if (front) c.drawCircle(moon, 2.6, _fill(p.active));
   }
 
-  // ── 9. HEARTBEAT — scrolling ECG trace that flattens into the thumb ──
   static void _heartbeat(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     if (tx < x1) {
@@ -563,7 +554,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), 4.5 * beat * (1 + 0.2 * p.drag), _fill(p.thumb));
   }
 
-  // ── 10. DNA — rotating double helix with rungs, converges at thumb ──
   static void _dna(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     c.drawLine(Offset(x0, my), Offset(x1, my), _stroke(p.inactive, 2));
@@ -594,7 +584,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), 4.5 * (1 + 0.25 * p.drag), _fill(p.thumb));
   }
 
-  // ── 11. ELASTIC — string pulled down by the thumb, wobbles on release ──
   static void _elastic(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     final pull = 3 + 9 * p.drag;
@@ -613,7 +602,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, ty), 5 * (1 + 0.2 * p.drag), _fill(p.thumb));
   }
 
-  // ── 12. LIQUID — glass tube filled with liquid, rippling front edge ──
   static void _liquid(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     const h = 16.0;
@@ -642,7 +630,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), h / 2 + 1 + 2 * p.drag, _stroke(p.thumb, 2));
   }
 
-  // ── 13. CONSTELLATION — stars light up and connect as you progress ──
   static void _constellation(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     const n = 14;
@@ -677,7 +664,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), r * 0.6, _fill(p.thumb));
   }
 
-  // ── 14. FIREFLIES — glowing specks drifting above the played line ──
   static void _fireflies(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     c.drawLine(Offset(x0, my), Offset(x1, my), _stroke(p.inactive, 1.5));
@@ -699,7 +685,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), 4.5 * (1 + 0.25 * p.drag), _fill(p.thumb));
   }
 
-  // ── 15. RIPPLE — water rings radiate from the thumb ──
   static void _ripple(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     c.drawLine(Offset(x0, my), Offset(x1, my), _stroke(p.inactive, 2));
@@ -713,7 +698,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), 5 * (1 + 0.25 * p.drag), _fill(p.thumb));
   }
 
-  // ── 16. SPRING — looping coil for played part, straight wire after ──
   static void _spring(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     if (tx < x1) {
@@ -736,7 +720,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), 4.5 * (1 + 0.25 * p.drag), _fill(p.thumb));
   }
 
-  // ── 17. DOT WAVE — matrix of dots that swell in a travelling wave ──
   static void _dotWave(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     final n = math.max(1, ((x1 - x0) / 6).floor());
@@ -756,7 +739,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), 5 * (1 + 0.25 * p.drag), _stroke(p.thumb, 2));
   }
 
-  // ── 18. RULER — measuring-tape ticks with a pointer ──
   static void _ruler(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     final n = math.max(1, ((x1 - x0) / 5).floor());
@@ -781,7 +763,6 @@ class _StylePainter extends CustomPainter {
     c.drawLine(Offset(tx, my - 8), Offset(tx, base), _stroke(p.thumb, 1.5));
   }
 
-  // ── 19. COMET — tapered glowing tail with sparks ──
   static void _comet(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     c.drawLine(Offset(x0, my), Offset(x1, my), _stroke(p.inactive, 1.5));
@@ -817,7 +798,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), 4.5 * (1 + 0.25 * p.drag), _fill(p.thumb));
   }
 
-  // ── 20. LIGHTNING — crackling electric arc, flickers while playing ──
   static void _lightning(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     c.drawLine(Offset(x0, my), Offset(x1, my), _stroke(p.inactive, 1.5));
@@ -845,7 +825,6 @@ class _StylePainter extends CustomPainter {
     c.drawCircle(Offset(tx, my), 4.5 * (1 + 0.25 * p.drag), _fill(p.thumb));
   }
 
-  // ── 21. GLITCH — RGB-split line with random digital displacement ──
   static void _glitch(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     // dashed unplayed track
@@ -879,7 +858,6 @@ class _StylePainter extends CustomPainter {
         _fill(p.thumb));
   }
 
-  // ── 22. BUBBLES — glossy liquid line with bubbles rising and popping ──
   static void _bubbles(Canvas c, Size s, _P p) {
     final (x0, x1, tx, my) = _geo(s, p);
     c.drawLine(Offset(x0, my), Offset(x1, my), _stroke(p.inactive, 3));
@@ -906,8 +884,6 @@ class _StylePainter extends CustomPainter {
   }
 }
 
-// ── OPTIONAL: quick preview of all styles (use it to test / for the
-//    Settings picker UI) ──
 
 class ZenSliderGallery extends StatefulWidget {
   const ZenSliderGallery({super.key});
