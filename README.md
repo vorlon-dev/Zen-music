@@ -10,6 +10,12 @@
 
 <br/>
 
+<a href="https://www.buymeachai.in/pratam" target="_blank">
+  <img src="https://img.shields.io/badge/UPI-Buy%20Me%20A%20Chai-FF813F?style=for-the-badge&logo=googlepay&logoColor=white" alt="UPI (Buy Me A Chai)" height="34" />
+</a>
+
+<br/>
+
 [**Website**](https://zenmusic-d6t.pages.dev/) · [**Download**](#download-now) · [**Features**](#features) · [**Build**](#building-from-source) · [**Troubleshooting**](#troubleshooting) · [**Contribute**](#contributing) · [**Legal**](#legal)
 
 </div>
@@ -558,7 +564,7 @@ Yes. ZenMusic supports source extensions.
 ZenMusic is free and open source, and it is built in spare time. If you enjoy it and want to help keep it improving, you can buy me a chai. It is completely optional, and starring the repo or sharing the app helps just as much.
 
 <a href="https://www.buymeachai.in/pratam" target="_blank">
-  <img src="https://img.shields.io/badge/Buy%20Me%20A%20Chai-pratam-D4944A?style=for-the-badge" alt="Buy Me A Chai" height="34" />
+  <img src="https://img.shields.io/badge/UPI-Buy%20Me%20A%20Chai-FF813F?style=for-the-badge&logo=googlepay&logoColor=white" alt="UPI (Buy Me A Chai)" height="34" />
 </a>
 
 </div>
