@@ -1,16 +1,4 @@
-// ZenMusic Desktop — offline cache manager page.
-//
-// Companion UI for the song cache (song_cache_service.dart):
-//   • total cache size at a glance (songs + bytes)
-//   • per-song art, codec badge, size, duration, cache date
-//   • delete one song / wipe the whole cache (both confirmed)
-//   • shows the on-disk folder so power users can find the files
-//
-// SELF-CONTAINED: imports only flutter/material, dart:io and
-// song_cache_service.dart. No MediaPlayer access, no router deps —
-// zero impact on existing screens (the Saved page already opens it).
-//
-// R5 print policy: no prints needed here (the service logs [yt_cache]).
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:io';

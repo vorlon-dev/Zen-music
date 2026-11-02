@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:ui' as ui;
@@ -10,11 +12,10 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'package:zenmusic/desktop/core/widgets/section_item.dart';
-import 'package:zenmusic/desktop/services/innertubex_bridge.dart'; // SP-78
+import 'package:zenmusic/desktop/services/innertubex_bridge.dart';
 import 'package:zenmusic/desktop/services/yt_video_engine.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 
-// ─────────────────────────────────────────────────────────── design tokens
 const Color _kRed = Color(0xFFFF0033);
 const Color _kBg = Color(0xFF0A0A0B);
 const Color _kSurface = Color(0xFF151517);
@@ -27,16 +28,6 @@ const List<int> _kSleepOptions = [15, 30, 45, 60];
 /// First-frame speed knob: 360 fastest, 720 / 1080 sharper.
 const int _kStartHeight = 480;
 
-/// Caches extraction results (URLs stay valid for hours) and dedupes
-/// in-flight requests.
-///
-/// SP-78: ANDROID tries the app's own native InnerTube resolver FIRST
-/// (zen/innertubex — client rotation + po-token backed, the same engine
-/// the audio path already runs on) and only falls back to the pure-Dart
-/// pipeline when the bridge is missing or refuses. Windows (and every
-/// non-Android platform) keeps the pure-Dart pipeline directly. Both
-/// paths return the page's YtVideoStreams shape; direct googlevideo URLs
-/// carry their headers through the player's httpHeaders.
 class _StreamCache {
   static final Map<String, ({Future<YtVideoStreams?> f, DateTime at})> _m = {};
 
@@ -104,7 +95,6 @@ class _StreamCache {
 
 String _thumb(String id) => 'https://i.ytimg.com/vi/$id/mqdefault.jpg';
 
-// ───────────────────────────────────────────────────────────────── page
 class VideoWatchPage extends StatefulWidget {
   const VideoWatchPage({super.key, required this.videoId, this.item});
   final String videoId;
@@ -151,7 +141,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   bool _ambient = true;
   bool _cover = false;
   bool _advancing = false;
-  String? _healedForId; // SP-77: one audio self-heal per video, no loops
+  String? _healedForId;
   int _volume = 100;
   double _speed = 1.0;
   double _speedBeforeHold = 1.0;
@@ -206,7 +196,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     }
   }
 
-  // ------------------------------------------------------------- loading
 
   Future<void> _load(String id,
       {String? title,
@@ -218,11 +207,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     _hideTimer?.cancel();
 
     if (heal) {
-      // SP-77 self-heal: re-open the cached stream (audio-files is re-set
-      // inside _open) without redoing related/qualities/ambient work, and
-      // land back on the position the user was watching. SP-78: the heal
-      // forces the pure-Dart proxy path so a silent native track setup
-      // cannot be re-opened into the same silence.
       final s = await _StreamCache.get(id, _height, forceDart: true);
       if (!mounted || token != _loadToken) return;
       if (s == null || s.videoUrl == null) return;
@@ -318,11 +302,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       _error = null;
     });
     _poke();
-    // SP-77: verify the audio track actually landed. With today's YouTube
-    // the picked stream is usually VIDEO-ONLY and the sound rides on the
-    // external /audio track; if mpv dropped it (cold proxy, failed open,
-    // property set while a previous file was still loading) the page used
-    // to play silently forever. One bounded check + one self-heal reload.
     _verifyAudioTrack(s, token: token ?? _loadToken);
   }
 
@@ -447,7 +426,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
         title: h['title'], artist: h['artist'], fromHistory: true);
   }
 
-  // -------------------------------------------------------- map helpers
 
   String? _idOf(Map m) {
     final s = (m['videoId'] ?? m['id'])?.toString() ?? '';
@@ -467,7 +445,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     return v.toString();
   }
 
-  // ----------------------------------------------------------- controls
 
   void _say(String msg) {
     _toastTimer?.cancel();
@@ -672,7 +649,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     super.dispose();
   }
 
-  // -------------------------------------------------------------- sheets
 
   void _sheet(String title, List<Widget> Function(StateSetter) build) {
     showModalBottomSheet<void>(
@@ -828,7 +804,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     ]);
   }
 
-  // --------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
@@ -1047,7 +1022,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     );
   }
 
-  // -------------------------------------------------------------- player
 
   Widget _backBtn() => Positioned(
     top: 4,
@@ -1495,7 +1469,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
-  // ---------------------------------------------------------------- info
 
   List<Widget> _info() {
     return [
@@ -1714,7 +1687,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     );
   }
 
-  // ------------------------------------------------------------- up next
 
   List<Widget> _upNext() {
     return [
@@ -1880,7 +1852,6 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   }
 }
 
-// ──────────────────────────────────────────────────────────── painters
 
 /// Seek bar: buffered + played segments, growing thumb while dragging.
 class _BarPainter extends CustomPainter {

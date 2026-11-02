@@ -1,17 +1,4 @@
-// SP-58: Material 3 — the whole-app ThemeData.
-//
-// Mirrors PixelMusic's PixelPlayerTheme (ui/theme/Theme.kt + Type.kt):
-//   • exact ColorSchemes (dark + light, verbatim anchors),
-//   • the full M3 type scale on the bundled Google Sans Flex variable
-//     font (OFL — see assets/fonts/GoogleSansFlex-OFL.txt; PixelMusic's
-//     "RoundedSans" is the same file with the ROND axis maxed, which is
-//     how a rounded variable font reads as one family),
-//   • Shapes 8 / 16 / 24 (Shape.kt),
-//   • M3 expressive component theming: thick rounded sliders with the
-//     stop indicator, NavigationBar / NavigationRail active-indicator
-//     pills, filled buttons at M3 heights, cards at 12dp radii, surface
-//     app bars — so every screen (built on Theme.of(context)) re-skins
-//     itself without touching page code.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 
@@ -168,7 +155,6 @@ ColorScheme _lightScheme() {
   );
 }
 
-// SP-58: the whole-app ThemeData — PixelMusic's PixelPlayerTheme ported.
 class ZenM3Theme {
   ZenM3Theme._();
 
@@ -200,7 +186,6 @@ class ZenM3Theme {
       splashFactory: InkSparkle.splashFactory,
       visualDensity: VisualDensity.standard,
       materialTapTargetSize: MaterialTapTargetSize.padded,
-      // ── App bars: M3 surface style with headline headers ──
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         foregroundColor: cs.onSurface,
@@ -211,7 +196,6 @@ class ZenM3Theme {
         titleTextStyle: textTheme.titleLarge!.copyWith(color: cs.onSurface),
         iconTheme: IconThemeData(color: cs.onSurfaceVariant),
       ),
-      // ── Buttons (M3 specs, exact heights/radii) ──
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size(64, 40),
@@ -250,16 +234,12 @@ class ZenM3Theme {
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(foregroundColor: cs.onSurfaceVariant),
       ),
-      // SP-64: `fabTheme` only exists on the Flutter master channel — stable
-      // SDKs reject it ("No named parameter with the name 'fabTheme'").
-      // floatingActionButtonTheme carries the same data on every version.
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: cs.primaryContainer,
         foregroundColor: cs.onPrimaryContainer,
         elevation: 3,
         shape: const StadiumBorder(),
       ),
-      // ── Navigation: M3 active-indicator pills ──
       navigationBarTheme: NavigationBarThemeData(
         height: ZenM3Nav.barHeight,
         backgroundColor: cs.surfaceContainer,
@@ -283,7 +263,6 @@ class ZenM3Theme {
         unselectedLabelTextStyle:
             textTheme.labelLarge!.copyWith(color: cs.onSurfaceVariant),
       ),
-      // ── Slider / seek bar: thick rounded M3 track + stop indicator ──
       sliderTheme: SliderThemeData(
         trackHeight: ZenM3SliderMetrics.trackHeight,
         activeTrackColor: cs.primary,
@@ -293,14 +272,8 @@ class ZenM3Theme {
         valueIndicatorColor: cs.inverseSurface,
         valueIndicatorTextStyle:
             textTheme.labelMedium!.copyWith(color: cs.onInverseSurface),
-        // SP-64: dropped `rangeThumbColor` / `inactiveSliderTrackColor` —
-        // stable SliderThemeData has neither parameter. Both were exact
-        // duplicates of values already set above (RangeSlider thumbs follow
-        // `thumbColor`; the inactive track is `inactiveTrackColor`), so the
-        // look is unchanged.
         showValueIndicator: ShowValueIndicator.always,
       ),
-      // ── Cards / lists / sheets / dialogs ──
       cardTheme: CardThemeData(
         color: cs.surfaceContainerLow,
         elevation: 0,
@@ -434,9 +407,6 @@ class ZenM3Theme {
       highlightColor: cs.onSurface.withValues(alpha: 0.08),
       splashColor: cs.onSurface.withValues(alpha: 0.10),
       shadowColor: Colors.black.withValues(alpha: isDark ? 0.5 : 0.2),
-      // SP-64: dropped `borderSide:` — ThemeData has no such parameter on any
-      // stable channel (master-only). Panel hairlines are already covered by
-      // dividerTheme / dividerColor above, which is what they actually read.
     );
   }
 }

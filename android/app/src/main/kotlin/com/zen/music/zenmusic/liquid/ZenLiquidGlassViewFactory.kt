@@ -1,13 +1,7 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.liquid
 
-// SP-54: Liquid Glass — platform-view factory.
-//
-// Registered in MainActivity.configureFlutterEngine as viewType
-// "zen_liquid_glass". Creation args (StandardMessageCodec):
-//   kind   : "backdrop" | "surface"  (default "surface")
-//   radius : Float, logical px     (default 20, surface kind only)
-//
-// Same pattern as the existing ZenVideoPlayerViewFactory.
 
 import android.content.Context
 import io.flutter.plugin.common.StandardMessageCodec

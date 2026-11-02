@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.addon
 
 import android.util.Log
@@ -13,17 +15,6 @@ import okhttp3.Request
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-/**
- * Client for speaking to an Addon server over HTTP.
- *
- * Ported from LastWave (GPL-3.0), modified for ZenMusic: DI and native
- * secret signing removed — request signing uses the Java HMAC fallback.
- *
- * Implements the standard Addon HTTP protocol:
- *  - /manifest.json
- *  - /search?q=...&quality=...&atmos=...
- *  - /stream/{id}?quality=...&atmos=...
- */
 class AddonClient(
     rawBaseUrl: String,
     private val client: OkHttpClient = OkHttpClient.Builder()

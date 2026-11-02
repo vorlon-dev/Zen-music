@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 import 'dart:io';
 
@@ -102,7 +104,6 @@ class DiscordPresenceBridge {
     return kDiscordApplicationId.trim();
   }
 
-  // ── State in, from media_player.dart ──
 
   /// Called whenever the current track changes. Safe to call on every
   /// notifier tick — internal dedupe decides what actually reaches Discord.
@@ -142,7 +143,6 @@ class DiscordPresenceBridge {
     _fire(() => FlutterDiscordRPC.instance.clearActivity());
   }
 
-  // ── Internals ──
 
   void _send() {
     if (!_ready || !_connected) return;

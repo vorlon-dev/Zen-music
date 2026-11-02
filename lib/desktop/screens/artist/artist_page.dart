@@ -1,23 +1,4 @@
-// ZenMusic — Artist page (SP-77).
-// UI/animation concept port of LastWave-Native's ArtistDetailScreen
-// (ui/artist/ArtistDetailScreen.kt): full-bleed hero with an optional
-// looping motion video, 5-stop seam gradient into the page background,
-// shuffle/radio/play action bar, top-songs list with a "show all" pill,
-// albums & singles carousels and a circular "fans also like" row.
-// Reimplemented for Flutter against ZenMusic's own YTMusic client,
-// MediaPlayer and SpotifyCanvas services — no upstream code was copied;
-// ZenMusic remains GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-//
-// Data flow mirrors the upstream ArtistRepository concept:
-//   1. resolve the artist browseId via YTM artist search (when missing)
-//   2. browse(UC…) → header (title/subscribers/thumbnail) + shelves
-//      (Songs / Albums / Singles / Fans might also like)
-//   3. empty Songs shelf → artist-filtered song search fallback
-//   4. hero motion video = Spotify canvas matched on the artist name,
-//      ONLY when the user is logged into Spotify (same gate as the
-//      player screen's canvas); a canvas-less hero stays a plain photo.
-// Every load is failure-safe: a dead section degrades to "absent", a
-// dead page degrades to an error card with Retry.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 
@@ -39,9 +20,6 @@ import 'package:zenmusic/desktop/utils/adaptive_widgets/progress_ring.dart';
 import 'package:zenmusic/desktop/utils/bottom_modals.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
 
 class ArtistPage extends StatefulWidget {
   const ArtistPage({super.key, required this.name, this.browseId});
@@ -80,7 +58,6 @@ class _ArtistPageState extends State<ArtistPage> {
   String? _canvasUrl; // hero motion video (Spotify canvas)
   bool _canvasReady = false;
 
-  // ------------------------------------------------------------- loading
 
   @override
   void initState() {
@@ -273,7 +250,6 @@ class _ArtistPageState extends State<ArtistPage> {
     }
   }
 
-  // -------------------------------------------------------------- actions
 
   MediaPlayer get _player => GetIt.I<MediaPlayer>();
 
@@ -334,7 +310,6 @@ class _ArtistPageState extends State<ArtistPage> {
     });
   }
 
-  // --------------------------------------------------------------- state
 
   bool get _isArtistPlaying {
     final song = _player.currentSongNotifier.value;
@@ -358,7 +333,6 @@ class _ArtistPageState extends State<ArtistPage> {
   bool get _hasHeroVideo =>
       _canvasUrl != null && _canvasUrl!.isNotEmpty && _showHeroVideo;
 
-  // ---------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
@@ -428,7 +402,6 @@ class _ArtistPageState extends State<ArtistPage> {
     );
   }
 
-  // ----------------------------------------------------------------- hero
 
   Widget _buildHero(ColorScheme cs) {
     final artworkCandidates = [_artworkUrl, _searchArtwork]
@@ -637,7 +610,6 @@ class _ArtistPageState extends State<ArtistPage> {
     );
   }
 
-  // ------------------------------------------------------------ action bar
 
   Widget _buildActionBar(ColorScheme cs) {
     return Padding(
@@ -689,7 +661,6 @@ class _ArtistPageState extends State<ArtistPage> {
     );
   }
 
-  // ------------------------------------------------------------ top songs
 
   List<Widget> _buildTopSongsSection(ColorScheme cs) {
     final visible = (_showAllSongs || _topSongs.length <= _initialSongLimit)
@@ -863,7 +834,6 @@ class _ArtistPageState extends State<ArtistPage> {
     Modals.showSongBottomModal(context, item);
   }
 
-  // ------------------------------------------------------------- carousels
 
   Widget _buildCarouselSection(ColorScheme cs, String title,
       List<Map<String, dynamic>> items,
@@ -1070,7 +1040,6 @@ class _ArtistPageState extends State<ArtistPage> {
     );
   }
 
-  // ---------------------------------------------------- fullscreen motion
 
   Widget _buildFullscreenMotion(ColorScheme cs) {
     return Positioned.fill(
@@ -1236,9 +1205,6 @@ class _ArtistPageState extends State<ArtistPage> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Small building blocks
-// ---------------------------------------------------------------------------
 
 /// Hero photo with the upstream fallback chain: each failed candidate
 /// advances to the next artwork automatically (artworkIndex++ pattern).
@@ -1401,9 +1367,6 @@ class _PlayingWaveBarsState extends State<_PlayingWaveBars>
   }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /// "A$AP Rocky, Playboi Carti" → "A$AP Rocky" (upstream ArtistHelper).
 String _primaryArtist(String name) {

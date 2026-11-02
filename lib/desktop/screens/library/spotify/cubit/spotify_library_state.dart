@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 part of 'spotify_library_cubit.dart';
 
 sealed class SpotifyLibraryState {

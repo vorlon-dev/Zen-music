@@ -1,12 +1,4 @@
-// ZenMusic Desktop — screens/mini_player_page.dart (GPL-3.0).
-//
-// SP-26: the UI that runs INSIDE the floating mini-player window.
-//
-// Deliberately dependency-free — no Hive, no GetIt, no app services, no
-// image plugins. The mini window is a second Flutter engine; it only
-// mirrors the state the main window pushes through mini_player_bridge.dart
-// and sends transport commands back. Everything is driven by
-// ValueListenableBuilder so the bar updates the instant a push arrives.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 
@@ -62,7 +54,6 @@ class MiniPlayerPage extends StatelessWidget {
   }
 }
 
-// ── artwork ──────────────────────────────────────────────────────────────
 
 class _Art extends StatelessWidget {
   const _Art();
@@ -119,7 +110,6 @@ class _Art extends StatelessWidget {
   }
 }
 
-// ── title / artist ───────────────────────────────────────────────────────
 
 class _Titles extends StatelessWidget {
   const _Titles();
@@ -159,7 +149,6 @@ class _Titles extends StatelessWidget {
   }
 }
 
-// ── progress + times ─────────────────────────────────────────────────────
 
 class _ProgressRow extends StatelessWidget {
   const _ProgressRow();
@@ -216,7 +205,6 @@ class _ProgressRow extends StatelessWidget {
   }
 }
 
-// ── transport buttons ────────────────────────────────────────────────────
 
 class _Controls extends StatelessWidget {
   const _Controls();

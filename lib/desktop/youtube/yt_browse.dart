@@ -1,30 +1,4 @@
-// ZenMusic — YouTube browse layer (SP-79, data sources rebuilt in SP-80).
-//
-// The app already plays YouTube videos end-to-end (YtVideoEngine streams +
-// VideoWatchPage), and the vendored youtube_explode_dart covers search,
-// channels, playlists, comments and related.
-//
-// SP-80 DATA-SOURCE FIX: YouTube retired the anonymous WEB browse feeds
-// server-side in 2025 — `FEtrending` and `FEshorts_startup` now answer
-// HTTP 400 ("Trending/Shorts are not reachable right now") and
-// `FEwhat_to_watch` returns an empty shell. The tabs now run on the
-// surfaces that still work, all of them infrastructure this app already
-// uses every day (mobile + Windows, no new packages):
-//
-//   • Home     → YouTube Music InnerTube browse (FEmusic_home) via the
-//                app's own YTMusic client — the same engine behind the app's
-//                home feed; works signed-out and personalized.
-//   • Trending → the same InnerTube browse on FEmusic_charts; its "Video
-//                charts" shelf carries the region's trending-video
-//                playlist, whose songs are fetched and listed.
-//   • Shorts   → the vendored youtube_explode SearchClient on "#shorts"
-//                (video filter, ≤ 3 min), paged with the list's own
-//                nextPage().
-//
-// Continuation tokens are self-describing (prefixed) so
-// `fetch(continuation: …)` always lands back on the right engine. The
-// legacy WEB-browse path (raw/parseFeed) is kept intact — the parser is
-// still exercised by tests and stays available for future surfaces.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';
@@ -36,7 +10,6 @@ import 'package:http/http.dart' as http;
 import 'package:zenmusic/desktop/services/youtube_video_search.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
-// ───────────────────────────────────────────────────────────────── models
 
 /// One video-shaped entry harvested from any YouTube browse surface.
 class YtFeedVideo {
@@ -241,9 +214,6 @@ class YtFeedVideo {
     );
   }
 
-  /// SP-80: from one of the app's own YTMusic song maps (the shape
-  /// YTMusic.browse()/getPlaylistSongs() emit). Entries without a playable
-  /// 11-char videoId (albums, playlists, artists) yield null.
   static YtFeedVideo? fromYtmSong(Map raw) {
     final id = raw['videoId']?.toString() ?? '';
     if (id.length != 11) return null;
@@ -321,7 +291,6 @@ class YtBrowseException implements Exception {
   String toString() => 'YtBrowseException: $message';
 }
 
-// ──────────────────────────────────────────────────────────────── client
 
 class YtBrowse {
   YtBrowse._();
@@ -329,10 +298,6 @@ class YtBrowse {
   /// The search query powering the Shorts tab (see [shortsIds]).
   static const _shortsQuery = '#shorts';
 
-  // Kept as the UI's feed identifiers; fetch() routes them to the working
-  // engines (see the SP-80 header). The old anonymous WEB browseIds are
-  // dead server-side, so they are no longer sent — the constants only key
-  // the routing (values unchanged so existing callers/tests keep holding).
   static const String home = 'FEwhat_to_watch';
   static const String trending = 'FEtrending';
   static const String shortsStartup = 'FEshorts_startup';
@@ -353,7 +318,6 @@ class YtBrowse {
   /// (null = exhausted). The shorts feed stores it between pages.
   static String? lastShortsContinuation;
 
-  // ── test seams (null in production) ────────────────────────────────────
   @visibleForTesting
   static Future<Map<String, dynamic>> Function(
           String browseId, String? ytmContinuation)? ytmFetchForTest;
@@ -385,7 +349,6 @@ class YtBrowse {
         },
       };
 
-  // ─────────────────────────────────────────────────────────── routing
 
   /// One feed page. [browseId] is one of [home]/[trending]; [continuation]
   /// is a self-describing token handed out by a previous page.
@@ -414,7 +377,6 @@ class YtBrowse {
     return _legacyPage(browseId: browseId, params: params);
   }
 
-  // ────────────────────────────────────────────── YTM-powered feeds
 
   /// One YTMusic browse page, flattened to videos. Cold visitors (fresh
   /// install) sometimes get an empty-shell first response WITH a valid
@@ -516,15 +478,7 @@ class YtBrowse {
     return GetIt.I<YTMusic>().getPlaylistSongs(playlistId);
   }
 
-  // ─────────────────────────────────────────────────────────────── shorts
 
-  /// Shorts feed as plain video ids (de-duplicated, order kept).
-  ///
-  /// SP-80: powered by the app's own proven WEB InnerTube search service
-  /// (youtube_video_search.dart) queried for "#shorts" — the dedicated
-  /// shorts feed is sign-in-gated by YouTube. The page's continuation
-  /// token is exposed via [lastShortsContinuation]; the shorts feed stores
-  /// it and passes it back to page through the search results.
   static Future<List<String>> shortsIds({String? continuation}) async {
     final f = shortsFetchForTest;
     if (f != null) {
@@ -584,7 +538,6 @@ class YtBrowse {
 
   static const int _kShortsMaxSeconds = 181;
 
-  // ──────────────────────────────────────── legacy WEB browse (kept)
 
   /// POST one browse call. [browseId] OR [continuation] must be given.
   /// Returns the raw decoded JSON (shape-agnostic — the harvester walks it).
@@ -633,7 +586,6 @@ class YtBrowse {
     return parseFeed(json);
   }
 
-  // ──────────────────────────────────────────────── harvesting
 
   /// Walks ANY InnerTube browse/next payload and collects every video-shaped
   /// renderer, the filter-chip bar (if any) and the page continuation token.

@@ -1,4 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
+// ZenMusic · vorlon-dev
 
 /// Formats [duration] as a clock-style string.
 ///

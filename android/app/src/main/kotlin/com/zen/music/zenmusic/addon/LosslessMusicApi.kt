@@ -1,8 +1,7 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.addon
 
-// Ported from LastWave (GPL-3.0), modified for ZenMusic: plain class
-// (no DI), Dart-pushed config (zen/addon channel), Java-HMAC signing
-// inside AddonClient. The matching core is unchanged.
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers

@@ -1,8 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
-// PORT DEVIATIONS: S.of(...) -> English literals. KNOWN GAP (verbatim policy):
-// the offline screen's "Go to Downloads" routes to /saved/downloads, which
-// does not exist until the library round — tapping it while offline will
-// error. Flagged, arrives with R8.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'package:flutter/material.dart';

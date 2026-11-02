@@ -1,6 +1,4 @@
-// SP-42: the body's wheel scrolling is smooth now — the SingleChildScrollView
-// content is wrapped in SmoothScroll (same controller), so wheel notches
-// glide instead of teleporting. See lib/desktop/utils/smooth_scroll.dart.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 
@@ -151,8 +149,6 @@ class _BrowsePageState extends State<_BrowsePage> {
               case BrowseSuccess():
                 return SingleChildScrollView(
                   controller: _scrollController,
-                  // SP-42: SmoothScroll inside the viewport wins the wheel
-                  // and glides smoothly; pagination listener unchanged.
                   child: SmoothScroll(
                     controller: _scrollController,
                     child: Center(

@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 // ZenMusic — Seek bar picker page (opened from Settings > Personalization).
 //
 // * Swipe (or use the arrow keys / chevrons) through all 7 ZenSlider styles
@@ -78,7 +80,6 @@ class _SeekBarPageState extends State<SeekBarPage> {
     super.dispose();
   }
 
-  // ----------------------------------------------------------- actions
 
   ZenSliderStyle get _style => ZenSliderStyle.values[_page];
 
@@ -138,7 +139,6 @@ class _SeekBarPageState extends State<SeekBarPage> {
     ZenSliderStyle.bubbles => 'A glossy line with bubbles rising and popping.',
   };
 
-  // -------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
@@ -294,7 +294,6 @@ class _SeekBarPageState extends State<SeekBarPage> {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
 
 /// Dark "mini player" card with the REAL ZenSlider inside.
 class _PreviewCard extends StatelessWidget {

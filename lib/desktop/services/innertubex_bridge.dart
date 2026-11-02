@@ -1,9 +1,4 @@
-// ZenMusic Desktop — ported from the retired mobile stack's
-// innertubex_bridge.dart. ZenMusic remains GPL-3.0.
-// NATIVE ANDROID ONLY: talks to the zen/innertubex MethodChannel (Kotlin
-// host, untouched on this branch). On Windows/other platforms every call
-// reports available=false and returns null/empty — callers must gate.
-// relatedSongs returns desktop song maps (was: retired Song model).
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/services.dart';
 

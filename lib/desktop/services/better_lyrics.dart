@@ -1,27 +1,4 @@
-// ZenMusic — SP-74: BetterLyrics word-sync provider (Apple TTML / QQ
-// karaoke over lyrics-api.boidu.dev), the word-by-word first stage of
-// the lyrics chain. Ported from LastWave-Desktop's lyrics backend
-// (lib/features/lyrics/lyrics_providers.dart, GPL file set) to Zen's
-// zero-dependency service shape.
-//
-// Free, no key, no auth. Three endpoints are tried in order:
-//   GET https://lyrics-api.boidu.dev/getLyrics        (Apple TTML / LRC)
-//   GET https://lyrics-api.boidu.dev/ttml/getLyrics   (TTML variant)
-//   GET https://lyrics-api.boidu.dev/qq/getLyrics     (QQ karaoke rows)
-// with `s` = title, `a` = artist, `d` = duration seconds, `al` = album.
-//
-// Trust model (inherited from LastWave): these endpoints return bare
-// lyric documents with no candidate identity (no title/artist/duration
-// to compare), so the server's fuzzy match is trusted — the only gate
-// applied client-side is duration plausibility (the lyric timeline must
-// roughly fit the track; see [plausibleDuration]).
-//
-// The provider returns (lines, wordSynced); the caller (lyrics_service)
-// owns parsing of the DOCUMENT through TtmlParser/LrcParser — this file
-// only fetches + unwraps the envelope + classifies the payload.
-// This file must NOT import lyrics_service.dart — the dependency stays
-// one-way (the service imports this file).
-// ZERO new pubspec deps (dart:io HttpClient + dart:convert).
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 import 'dart:io';

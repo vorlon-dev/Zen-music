@@ -1,12 +1,4 @@
-// ZenMusic — brand logos (SP-62). Zero-dependency CustomPainters for the
-// Spotify and YouTube Music marks used on the settings Services tiles.
-//
-// The Spotify mark is the exact simple-icons path (simple-icons 11.14.0,
-// CC0-4.0) rendered through a minimal SVG-path parser that supports the
-// command subset brand paths actually use (M m L l H h V v C c S s Q q T t
-// Z z — no arc commands). First subpath = outer disc (brand green), the
-// remaining subpaths = the three wave slivers (white). The YouTube Music
-// mark is pure geometry: red disc, white ring, white play triangle.
+// ZenMusic · vorlon-dev
 
 import 'dart:ui' show Path;
 

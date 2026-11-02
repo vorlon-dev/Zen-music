@@ -1,12 +1,4 @@
-// ZenMusic — LastWave Jam room screen. ZenMusic remains GPL-3.0.
-//
-// Material port of the LastWave-Desktop Jam page (Clash Projects, GPL-3.0):
-// entry cards (display name, always-on rooms with live listener counts,
-// create room with the collaborative/host-only toggle, join by code or
-// pasted invite link) and the room view (code tile + copy invite, now
-// playing, shared "up next" queue, listeners with host controls, chat with
-// replies, cooldown notice). Local playback keeps running if the server
-// cannot be reached; the error is shown here — same as the reference.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 
@@ -17,7 +9,6 @@ import 'package:go_router/go_router.dart';
 import 'package:zenmusic/desktop/services/bottom_message.dart';
 import 'package:zenmusic/desktop/services/jam_service.dart';
 
-/// Collaborative listening room ("Listen Together"), LastWave-style.
 class JamPage extends StatefulWidget {
   final String? initialCode;
   const JamPage({super.key, this.initialCode});
@@ -189,7 +180,6 @@ class _JamPageState extends State<JamPage> {
   String _seenNoticeKey = '|0';
   int _lastChatLen = 0;
 
-  // ── Not in a room ───────────────────────────────────────────────────
 
   Widget _entry(BuildContext context, JamSnapshot jam) {
     final busy = jam.phase == JamPhase.connecting;
@@ -394,7 +384,6 @@ class _JamPageState extends State<JamPage> {
     );
   }
 
-  // ── In a room ───────────────────────────────────────────────────────
 
   Widget _room(BuildContext context, JamSnapshot jam) {
     final info = _roomColumn(context, jam);
@@ -806,7 +795,6 @@ class _JamPageState extends State<JamPage> {
   }
 }
 
-// ── Small shared pieces ─────────────────────────────────────────────
 
 enum _NoticeTone { warning }
 

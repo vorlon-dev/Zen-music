@@ -1,7 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), screens/settings/backup_storage/backup_storage_page.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// PORT: l10n -> literals; Android folder-picker branch kept (easy_folder_picker).
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 
@@ -136,9 +133,6 @@ class _BackupStoragePage extends StatelessWidget {
   }
 }
 
-/* ──────────────────────────────────────────────────────────────── */
-/* BACKUP SELECTION MODAL (UI ONLY)                                  */
-/* ──────────────────────────────────────────────────────────────── */
 
 Future<(String, List)?> showBackupSelector(BuildContext context) async {
   return await showCupertinoModalPopup<(String, List)?>(

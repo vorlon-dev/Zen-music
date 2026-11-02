@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.innertube
 
 import android.content.Context
@@ -119,7 +121,6 @@ object ZenInnertubeResolver {
             }
     }
 
-    // ── visitorData ──────────────────────────────────────────
 
     private suspend fun ensureVisitorData() {
         if (YouTube.visitorData != null) return
@@ -172,7 +173,6 @@ object ZenInnertubeResolver {
             YouTube.visitorData
         }
 
-    // ── extraction ───────────────────────────────────────────
 
     suspend fun extract(
         videoId: String,
@@ -365,7 +365,6 @@ object ZenInnertubeResolver {
             }
         }
 
-    // ── related / channel art ────────────────────────────────
 
     fun relatedSongsBlocking(videoId: String): List<Map<String, Any?>> =
         runBlocking {
@@ -420,7 +419,6 @@ object ZenInnertubeResolver {
         runCatching { NewPipeExtractor.getSignatureTimestamp(videoId).getOrNull() }
             .getOrNull()
 
-    // ── format picking ───────────────────────────────────────
 
     private fun pickAudio(
         formats: List<PlayerResponse.StreamingData.Format>,
@@ -467,7 +465,6 @@ object ZenInnertubeResolver {
         }
     }
 
-    // ── refusals / exclusions / session ──────────────────────
 
     fun headersFor(url: String): Map<String, String>? = minted[url]?.headers
 

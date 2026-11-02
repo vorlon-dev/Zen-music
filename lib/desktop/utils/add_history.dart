@@ -1,10 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), utils/add_history.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// PORT FIX (marked): the unified stack's song maps carry a Duration
-// ('duration' key) and occasionally other non-primitives — Hive cannot
-// serialize Duration and threw "unknown type: Duration" on every playback.
-// _sanitize converts values to Hive-safe types before any box write.
+// ZenMusic · vorlon-dev
 
 import 'package:get_it/get_it.dart';
 import 'package:hive_flutter/hive_flutter.dart';

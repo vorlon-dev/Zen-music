@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' show Offset, PlatformDispatcher, Rect, Size;
@@ -63,7 +65,6 @@ class LyricsOverlayBridge {
   static const double _overlayWidth = 420;
   static const double _overlayHeight = 640;
 
-  // ── main-window side state ──────────────────────────────────────────
   int? _overlayWindowId; // live overlay window id (main window is 0)
   bool _opening = false;
   bool _mainArmed = false;
@@ -75,7 +76,6 @@ class LyricsOverlayBridge {
   String? _lyricsKey; // which track the cached lyrics payload belongs to
   Map<String, dynamic>? _lastLyricsPayload;
 
-  // ── overlay-window side state (only used inside the overlay engine) ──
   final ValueNotifier<OverlayTrack?> overlayTrack =
       ValueNotifier<OverlayTrack?>(null);
 
@@ -96,9 +96,6 @@ class LyricsOverlayBridge {
   bool get isOverlayWindow => _overlayMode;
   bool get isWindowOpen => _overlayWindowId != null;
 
-  // ═══════════════════════════════════════════════════════════════════
-  // MAIN WINDOW SIDE
-  // ═══════════════════════════════════════════════════════════════════
 
   /// Arms the receiver for commands coming back from overlay windows.
   /// Called once from MediaPlayer's `_initLyricsOverlay()`.
@@ -230,7 +227,6 @@ class LyricsOverlayBridge {
     } catch (_) {}
   }
 
-  // ── state pushes (wired to the MediaPlayer notifiers) ───────────────
 
   void pushTrack(OverlayTrack? track) {
     if (_overlayMode) return;
@@ -243,9 +239,6 @@ class LyricsOverlayBridge {
     unawaited(_fetchLyrics(track));
   }
 
-  /// Same chain the in-player LyricsBox uses (SP-10 Spotify Color Lyrics →
-  /// SP-15 LRCLIB with cleaned metadata + duration gate + Hive cache).
-  /// The overlay engine never fetches — it only renders.
   Future<void> _fetchLyrics(OverlayTrack? track) async {
     if (track == null) {
       _lyricsKey = null;
@@ -262,7 +255,6 @@ class LyricsOverlayBridge {
     try {
       LyricsData? data;
 
-      // 1. Spotify Color Lyrics (SP-10 path, same as LyricsBox).
       if ((track.spotifyUri ?? '').isNotEmpty) {
         try {
           final dynamic sp = await SpotifyLyricsService.instance
@@ -292,7 +284,6 @@ class LyricsOverlayBridge {
         } catch (_) {}
       }
 
-      // 2. LRCLIB (SP-15): cleaned metadata, ±5 s duration gate, Hive cache.
       data ??= await LyricsService.lookup(
         title: track.title,
         artist: track.artist,
@@ -389,9 +380,6 @@ class LyricsOverlayBridge {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // OVERLAY WINDOW SIDE (runs inside the second engine)
-  // ═══════════════════════════════════════════════════════════════════
 
   /// Entry for the overlay engine — routed from lib/desktop/main.dart when
   /// main() receives the plugin's ['multi_window', windowId, …] args with
@@ -483,8 +471,6 @@ class LyricsOverlayBridge {
   static Future<void> _sendToMain(
       String method, Map<String, dynamic> args) async {
     try {
-      // Window id 0 is the main window (verified against the 0.2.1
-      // source during SP-26).
       await DesktopMultiWindow.invokeMethod(0, method, args);
     } catch (e) {
       debugPrint('$_tag send to main failed (ignored): $e');

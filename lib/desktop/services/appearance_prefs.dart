@@ -1,9 +1,4 @@
-// ZenMusic Desktop — ported from the retired mobile stack's
-// appearance_prefs.dart. ZenMusic remains GPL-3.0.
-// Each setting is a ValueNotifier so open screens react immediately;
-// call load() once to hydrate from storage. Consumers wired so far:
-// sliderStyle (player WavySlider), lyricsTextSize/LineSpacing/Position
-// (LyricsBox). The rest hydrate for future settings UI rounds.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -48,21 +43,12 @@ class AppearancePrefs {
   // Buffered streaming.
   static final bufferedStreaming = ValueNotifier<bool>(true);
 
-  // ── SP-78: beat-synced haptics (mobile) ──
-  // Vibrate on the song's beat grid while it plays.
   static final beatHaptics = ValueNotifier<bool>(false);
   // 0 light · 1 medium · 2 strong
   static final beatStrength = ValueNotifier<int>(1);
 
-  // ── SP-78: ZenWall (Android) ──
-  // The playing song's Spotify canvas as the device wallpaper; the album
-  // art whenever the canvas is missing. Applied on every song change.
   static final zenWall = ValueNotifier<bool>(false);
 
-  // ── SP-79: custom app logo (mobile picker) ──
-  // Asset path of the user's chosen logo from assets/logos/, or '' for the
-  // built-in default. Chosen on mobile (Settings ▸ Logo), applied wherever
-  // the app shows its brand mark.
   static final customLogo = ValueNotifier<String>('');
 
   static Future<void> load() async {

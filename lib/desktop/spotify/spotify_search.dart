@@ -1,14 +1,4 @@
-// ZenMusic — spotify search (searchTopResultsList Pathfinder query).
-// Ported from Stopify's SpotifyWebClient.searchTracks (MIT License) —
-// Copyright (c) Shashwat. ZenMusic remains GPL-3.0.
-//
-// Port contract: returns desktop song maps in the JioSaavn shape (videoId =
-// spotify track id; 'spotifyUri' carries spotify:track:... for the player's
-// future Spotify branch; type 'SPOTIFY'). Requires a Spotify session (sp_dc
-// or token-only); returns [] with a console marker when logged out, so the
-// search page is unaffected for non-Spotify users.
-// DEVIATION: unplayable tracks (playability.playable == false) are dropped
-// (Stopify keeps them; they would just error on tap here).
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 
@@ -80,13 +70,6 @@ class SpotifySearch {
 
     var resp = await postSearch(token, clientToken);
 
-    // SP-70: one re-mint + retry when the bearer turns out dead — a stale
-    // token-only session must not blank search results for the whole run.
-    // SP-72: the client-token participates in pathfinder auth too (a dead
-    // one 401s with the same body as a dead Bearer — the fresh-login
-    // field log looped here because the Bearer re-mint alone could never
-    // clear an unbound client-token). Drop BOTH; retry when either
-    // credential moved.
     if (resp.statusCode == 401) {
       SpotifyAuth.instance.notePathfinderAuthRejected();
       SpotifyAuth.instance.invalidateAccessToken();
@@ -116,7 +99,6 @@ class SpotifySearch {
       final data = item['data'];
       if (data is! Map<String, dynamic>) continue;
 
-      // DEVIATION: drop unplayable rows.
       if (data['playability']?['playable'] == false) continue;
 
       final id = data['id']?.toString() ?? '';

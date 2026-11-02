@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
@@ -139,11 +141,8 @@ class _GradientPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
 
-    // DEVIATION 1: solid black base — the page is never white, even if a
-    // later composite fails on this GL backend.
     canvas.drawRect(rect, Paint()..color = Colors.black);
 
-    // Create multiple animated gradient blobs (DEVIATION 2: srcOver below)
     _drawGradientBlob(
       canvas,
       size,

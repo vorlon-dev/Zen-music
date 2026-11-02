@@ -1,9 +1,4 @@
-// ZenMusic — YouTube channel page (SP-79).
-//
-// Header (banner / avatar / name / subscribers) via youtube_explode's
-// ChannelClient, uploads grid via getUploadsFromPage with its own
-// nextPage() for the infinite scroll. Every video opens in the shared
-// watch page.
+// ZenMusic · vorlon-dev
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';

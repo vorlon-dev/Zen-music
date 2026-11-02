@@ -1,3 +1,5 @@
+<!-- ZenMusic · vorlon-dev -->
+
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
@@ -59,15 +61,8 @@
                 <data android:mimeType="text/*" />
             </intent-filter>
         </activity>
-
-        <!-- ═══════════════════════════════════════════════════════════
-             SP-78: LAUNCHER LOGO SLOTS (in-app Logo page)
-             Each alias wraps .MainActivity with its own launcher icon and
-             ships DISABLED — exactly one launcher component stays enabled
-             at a time. The Dart side (zen/launcher_logo channel) flips the
-             enabled alias; the launcher refreshes the icon. Slots unlock
-             after this manifest ships in a build (reinstall once).
-             ═══════════════════════════════════════════════════════════ -->
+        <!-- Launcher logo slots: each alias wraps .MainActivity with its
+             own icon; exactly one launcher component stays enabled. -->
         <activity-alias
             android:name=".LogoZen1"
             android:enabled="false"

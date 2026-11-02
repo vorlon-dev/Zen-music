@@ -1,18 +1,4 @@
-// ZenMusic — spotify listening history (recents Pathfinder query).
-// Ported from Stopify's SpotifyWebClient.fetchSpotifyRecentlyPlayed (MIT)
-// — Copyright (c) Shashwat. ZenMusic remains GPL-3.0.
-//
-// Port contract: returns desktop song maps in the JioSaavn shape (videoId =
-// spotify track id; 'spotifyUri' carries spotify:track:...; type 'SPOTIFY')
-// so rows render and tap-play through the same paths as the Spotify search
-// section (DRM on Android, YT-fallback on desktop).
-// DEVIATIONS: Stopify's Web API /me/player/recently-played fallback dropped
-// (needs a scope the web-player token may not carry — Pathfinder is the
-// proven primary). No local persistence (Stopify's manager is remote-only
-// by design). Dedupe by uri, like Stopify. Duration = seconds x 1000,
-// verbatim from Stopify's recents parser.
-// STYLE NOTE: parsing uses flat is-checked if-blocks on purpose — no nested
-// ternaries or cast chains (paste-mangling immunity).
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 
@@ -73,11 +59,6 @@ class SpotifyHistory {
 
     var resp = await postRecents(token, clientToken);
 
-    // SP-70: one re-mint + retry when the bearer turns out dead — a stale
-    // token-only session must not empty the recents shelf for the run.
-    // SP-72: the client-token participates in pathfinder auth too (a dead
-    // one 401s with the same body as a dead Bearer) — drop BOTH; retry
-    // when either credential moved.
     if (resp.statusCode == 401) {
       SpotifyAuth.instance.notePathfinderAuthRejected();
       SpotifyAuth.instance.invalidateAccessToken();

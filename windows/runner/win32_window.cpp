@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 #include "win32_window.h"
 
 #include <dwmapi.h>

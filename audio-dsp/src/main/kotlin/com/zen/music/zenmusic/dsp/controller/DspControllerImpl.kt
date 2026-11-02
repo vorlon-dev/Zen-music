@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.dsp.controller
 
 import androidx.annotation.OptIn

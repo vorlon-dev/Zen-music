@@ -1,22 +1,7 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.liquid
 
-// SP-54: Liquid Glass — a single glass panel surface, drawn natively in Kotlin.
-//
-// Hosted by the Flutter side inside ZenGlassPanel as platform view
-// "zen_liquid_glass" (kind:"surface"); the Flutter child content is stacked
-// ABOVE this view and keeps all gestures.
-//
-// What it paints (iOS-26-style liquid glass read, zero blur passes):
-//   1. vertical translucent fill — bright at the top (light catch),
-//      fading down, so panels look like curved glass over the aurora;
-//   2. a 1px horizontal specular hairline across the top edge;
-//   3. a soft diagonal sheen band (the "liquid" highlight);
-//   4. an accent-tinted rim glow in the bottom corner.
-//
-// All shaders are pre-softened gradients — deliberately NO RenderEffect /
-// gaussian pass, which is what keeps this smooth on budget phones. Panels
-// sit over the aurora backdrop, and a translucent gradient over a gradient
-// reads exactly like frosted glass.
 
 import android.content.Context
 import android.graphics.Canvas

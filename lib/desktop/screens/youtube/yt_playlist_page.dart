@@ -1,7 +1,4 @@
-// ZenMusic — YouTube playlist page (SP-79).
-//
-// Header (title / author / video count) + contents list, paged through
-// PlaylistClient. Videos open in the shared watch page.
+// ZenMusic · vorlon-dev
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';

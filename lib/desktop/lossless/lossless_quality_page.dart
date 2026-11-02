@@ -1,16 +1,4 @@
-// ZenMusic Desktop — SP-40: Song quality settings page.
-//
-// The control surface for the lossless filter implemented in
-// lossless_service.dart + media_player.dart. The user's pick applies to
-// YouTube Music and JioSaavn songs; YouTube videos and downloaded songs
-// keep their original audio, and any song the endpoint can't serve at the
-// selected tier automatically plays the next best tier (or the app's
-// normal stream when there is no lossless match at all).
-//
-// Same page style as crossfade_page.dart / lastfm_page.dart: plain
-// Material widgets, no new dependencies, selection accent from the app
-// theme (SP-39c doctrine — no hardcoded brand colors). The choice
-// persists in Hive ('SONG_QUALITY') via LosslessPrefs.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 

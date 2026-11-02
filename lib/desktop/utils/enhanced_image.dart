@@ -1,15 +1,6 @@
-﻿// ZenMusic Desktop — ported from Echo Music (GPL-3.0), utils/enhanced_image.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// DEVIATION (marked, bug-fix): Echo upgraded sizes via literal replaceAll of
-// specific tokens (w60-h60, w226-h226, =s192...). Modern YTM thumbnail URLs
-// use the "=w120-h120-p-k-no-nu" format, which NONE of those patterns match —
-// observed as low-quality covers on Android. Rewritten with regex size
-// normalization covering BOTH formats; sddefault fallbacks preserved.
-// DEVIATION (marked, bug-fix #2): the "-c" crop flag is appended so the
-// server returns an exact square (w == h) instead of fit-inside, which kept
-// the source aspect ratio. Video thumbnails (i.ytimg.com) cannot be cropped
-// via URL; crop those in the UI with AspectRatio(1) + BoxFit.cover.
+// ZenMusic · vorlon-dev
+
+
 
 String getEnhancedImage(String imageUrl,
     {String quality = 'high', double? width, double? dp}) {

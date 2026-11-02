@@ -1,6 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
-// PORT DEVIATIONS: none. AdaptiveBackButton restored once icons.dart was
-// vendored (original deferral note removed).
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 

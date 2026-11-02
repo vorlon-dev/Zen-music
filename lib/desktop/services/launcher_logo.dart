@@ -1,21 +1,8 @@
-// SP-78 — Launcher logo switching (the app's OUTSIDE icon).
-//
-// The launcher icon the home screen shows is switched with
-// <activity-alias> entries in AndroidManifest.xml: each alias wraps
-// .MainActivity with its own android:icon and ships disabled. Exactly one
-// launcher component stays enabled at a time (the default .MainActivity or
-// one alias) — the native side of the zen/launcher_logo channel enforces
-// that. Android only; on every other platform every call is a no-op and
-// the Logo page shows the slots as unavailable.
-//
-// NOTE: slots only exist in builds that ship the SP-78 manifest. On an
-// older install every non-default slot reports available=false and the
-// Logo page asks for one rebuild + reinstall.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:flutter/material.dart' show Color;
 
 class LauncherLogoSlot {
   const LauncherLogoSlot({
@@ -23,6 +10,7 @@ class LauncherLogoSlot {
     required this.label,
     required this.bg,
     required this.fg,
+    this.preview,
     this.mandala = false,
     this.available = true,
   });
@@ -32,11 +20,12 @@ class LauncherLogoSlot {
   final String label;
   final Color bg;
   final Color fg;
+
+  /// In-app preview asset mirroring the shipped launcher PNG (null = the
+  /// code-drawn fallback art is used instead).
+  final String? preview;
   final bool mandala;
 
-  /// Catalog entries describe the FULL manifest; [LauncherLogo.listSlots]
-  /// recomputes this per install (an alias slot only exists after the
-  /// SP-78 manifest shipped in the installed APK).
   final bool available;
 }
 
@@ -50,30 +39,71 @@ class LauncherLogo {
   /// the launcher will show.
   static const List<LauncherLogoSlot> catalog = [
     LauncherLogoSlot(
-        id: 'default', label: 'Default', bg: Color(0xFF6D28D9), fg: Color(0xFFFFFFFF)),
+        id: 'default',
+        label: 'Default',
+        bg: Color(0xFF6D28D9),
+        fg: Color(0xFFFFFFFF),
+        preview: 'assets/icon/logo.png'),
     LauncherLogoSlot(
-        id: 'LogoZen1', label: 'Zen 1', bg: Color(0xFF6D28D9), fg: Color(0xFFFFFFFF)),
+        id: 'LogoZen1',
+        label: 'Zen 1',
+        bg: Color(0xFF6D28D9),
+        fg: Color(0xFFFFFFFF),
+        preview: 'assets/logos/zen_logo_1.png'),
     LauncherLogoSlot(
-        id: 'LogoZen2', label: 'Zen 2', bg: Color(0xFF111111), fg: Color(0xFFFFFFFF)),
+        id: 'LogoZen2',
+        label: 'Zen 2',
+        bg: Color(0xFF111111),
+        fg: Color(0xFFFFFFFF),
+        preview: 'assets/logos/zen_logo_2.png'),
     LauncherLogoSlot(
-        id: 'LogoZen3', label: 'Zen 3', bg: Color(0xFFF5F5F5), fg: Color(0xFF111111)),
+        id: 'LogoZen3',
+        label: 'Zen 3',
+        bg: Color(0xFFF5F5F5),
+        fg: Color(0xFF111111),
+        preview: 'assets/logos/zen_logo_3.png'),
     LauncherLogoSlot(
-        id: 'LogoZen4', label: 'Zen 4', bg: Color(0xFF1D4ED8), fg: Color(0xFFFFFFFF)),
+        id: 'LogoZen4',
+        label: 'Zen 4',
+        bg: Color(0xFF1D4ED8),
+        fg: Color(0xFFFFFFFF),
+        preview: 'assets/logos/zen_logo_4.png'),
     LauncherLogoSlot(
-        id: 'LogoZen5', label: 'Zen 5', bg: Color(0xFF15803D), fg: Color(0xFFFFFFFF)),
+        id: 'LogoZen5',
+        label: 'Zen 5',
+        bg: Color(0xFF15803D),
+        fg: Color(0xFFFFFFFF),
+        preview: 'assets/logos/zen_logo_5.png'),
     LauncherLogoSlot(
-        id: 'LogoZen6', label: 'Zen 6', bg: Color(0xFFB91C1C), fg: Color(0xFFFFFFFF)),
+        id: 'LogoZen6',
+        label: 'Zen 6',
+        bg: Color(0xFFB91C1C),
+        fg: Color(0xFFFFFFFF),
+        preview: 'assets/logos/zen_logo_6.png'),
     LauncherLogoSlot(
-        id: 'LogoZen7', label: 'Zen 7', bg: Color(0xFFEA580C), fg: Color(0xFFFFFFFF)),
+        id: 'LogoZen7',
+        label: 'Zen 7',
+        bg: Color(0xFFEA580C),
+        fg: Color(0xFFFFFFFF),
+        preview: 'assets/logos/zen_logo_7.png'),
     LauncherLogoSlot(
-        id: 'LogoZen8', label: 'Zen 8', bg: Color(0xFFBE185D), fg: Color(0xFFFFFFFF)),
+        id: 'LogoZen8',
+        label: 'Zen 8',
+        bg: Color(0xFFBE185D),
+        fg: Color(0xFFFFFFFF),
+        preview: 'assets/logos/zen_logo_8.png'),
     LauncherLogoSlot(
-        id: 'LogoZen9', label: 'Zen 9', bg: Color(0xFF0F766E), fg: Color(0xFFFFFFFF)),
+        id: 'LogoZen9',
+        label: 'Zen 9',
+        bg: Color(0xFF0F766E),
+        fg: Color(0xFFFFFFFF),
+        preview: 'assets/logos/zen_logo_9.png'),
     LauncherLogoSlot(
         id: 'LogoMandala',
         label: 'Mandala',
         bg: Color(0xFF3B0764),
         fg: Color(0xFFE9D5FF),
+        preview: 'assets/logos/mandala.png',
         mandala: true),
   ];
 
@@ -94,9 +124,6 @@ class LauncherLogo {
     }
   }
 
-  /// The catalog annotated with per-install availability: 'default' is
-  /// always available; an alias slot only after the SP-78 manifest shipped
-  /// in this install's APK.
   static Future<List<LauncherLogoSlot>> listSlots() async {
     Set<String> aliases = {};
     try {
@@ -116,6 +143,7 @@ class LauncherLogo {
           label: s.label,
           bg: s.bg,
           fg: s.fg,
+          preview: s.preview,
           mandala: s.mandala,
           available: s.id == 'default' || aliases.contains(s.id),
         ),

@@ -1,13 +1,10 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 import 'dart:io';
 
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
-// Public surface of yt_audio_stream.dart: shared YoutubeExplode instance
-// (one HTTP client pool for the whole app), the client priority chain, the
-// proven /audio byte proxy, and the audio resolver (SP-77: used to pre-warm
-// the external-audio path and to detect "no audio available at all" before
-// the watch page commits to a video-only stream).
 import 'yt_audio_stream.dart'
     show
         ytExplode,
@@ -15,7 +12,6 @@ import 'yt_audio_stream.dart'
         kYtClientPriority,
         resolveAudioStreamInfo;
 
-// ------------------------------------------------------------- result types
 
 /// Same shape the watch page already consumes (was ItxVideoStreams).
 class YtVideoStreams {
@@ -46,7 +42,6 @@ class YtVideoQuality {
   const YtVideoQuality(this.height);
 }
 
-// ------------------------------------------------------------- candidates
 
 /// One playable video candidate minted by a specific client.
 class _Res {
@@ -87,9 +82,6 @@ Future<List<_Res>> _candidates(String videoId) {
   return f;
 }
 
-/// Tries every client in [kYtClientPriority] until one returns a manifest
-/// with usable video/muxed streams. Returns the candidates AND remembers
-/// which client minted each (header replay — deviation 1).
 Future<List<_Res>> _resolveCandidates(String videoId) async {
   Object? lastError;
   for (final client in kYtClientPriority) {
@@ -143,7 +135,6 @@ Future<List<_Res>> _resolveCandidates(String videoId) async {
           'Last error: $lastError');
 }
 
-// ------------------------------------------------------------- selection
 
 /// Picks the candidate for [ask]: 0 = auto (best available), else the
 /// highest height ≤ ask (or the smallest available if nothing is below).
@@ -176,24 +167,10 @@ _Res? _pick(List<_Res> pool, int ask) {
   return atTarget.first;
 }
 
-// ------------------------------------------------------------- public API
 
 class YtVideoEngine {
   YtVideoEngine._();
 
-  /// Resolves playback URLs for [videoId] at [maxHeight] (0 = best).
-  /// Returned URLs are LOCAL proxy URLs — see the header for why.
-  ///
-  /// SP-77 ("video plays but no audio"): modern YouTube serves most videos
-  /// as SEPARATE video-only + audio streams; the muxed itags are gone or
-  /// capped at 360p. When a video-only stream is picked, the watch page
-  /// relies on mpv's external audio track (`audio-files`) pointed at the
-  /// local /audio proxy — but that only produces sound if the proxy can
-  /// actually resolve an audio stream. So: (1) resolve+warm the audio
-  /// FIRST (it also populates the 10-minute resolver cache, removing the
-  /// cold-start race where mpv opens the external track before the proxy
-  /// has its upstream URL); (2) if no audio is resolvable at all, fall back
-  /// to a muxed stream — sound at a lower resolution beats silence.
   static Future<YtVideoStreams?> extractVideo(
       String videoId, {
         int maxHeight = 0,
@@ -261,8 +238,6 @@ class YtVideoEngine {
     }
   }
 
-  /// v1 related list (deviation 2): title search, self excluded.
-  /// The page renders an empty list gracefully if this fails.
   static Future<List<Map<String, dynamic>>> relatedSongs(
       String videoId) async {
     try {
@@ -287,7 +262,6 @@ class YtVideoEngine {
   }
 }
 
-// ------------------------------------------------------------- byte proxy
 
 HttpServer? _srv;
 String? _base;

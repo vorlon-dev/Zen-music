@@ -1,9 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), screens/settings/services/ytmusic/yt_music_page.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// PORT: l10n -> literals (YTMusic, Country, Language, etc.); Echo's
-// 'DOwnload_Quality' typo in the key corrected to 'Download Quality' label
-// (marked — visible text only).
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';

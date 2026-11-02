@@ -1,89 +1,4 @@
-// ZenMusic Desktop — services/media_player.dart (GPL-3.0).
-//
-// FEATURES:
-//  1. Android audio pipeline: AudioPipeline(AndroidEqualizer) gives
-//     device-band EQ on phones. Desktop (Windows/Linux/macOS): plain
-//     player — EQ arrives via the mpv arc. All EQ methods no-op safely
-//     off-Android.
-//  2. just_audio_background imported for the MediaItem tag class ONLY — never
-//     initialized on desktop (its init is the recorded Windows crash); the
-//     MOBILE entry (lib/main.dart) initializes it.
-//  3. YT Music paths: stats timer, autofetch, startRelated,
-//     startPlaylistSongs, online-playlist branches.
-//  4. JioSaavn: direct 320kbps branch (jiosaavnStreamUrl in the song map).
-//  5. Thumbnails upgraded via getEnhancedImage (regex size normalization).
-//  6. playAll is chart-aware: isChart rows resolve via the search-and-play
-//     path the tiles use, then play the resolved list.
-//  7. Spotify branch: song maps from the Spotify search section carry
-//     'spotifyUri'.
-//     ANDROID: Widevine L3 DRM playback via the patched just_audio host.
-//     DESKTOP (SP-5b): the hidden WebView2 EME engine owns playback for the
-//     current track; just_audio listeners stand down while it's active.
-//  8. SP-6 queue snapshot: queueSnapshot mirrors what the user tapped (a
-//     whole search section, playlist, or liked songs). Fills the queue
-//     drawer when the engine owns playback and provides a real queue for
-//     JioSaavn sections that autofetch can't extend.
-//  9. SP-7 Spotify autoqueue: when the engine plays a Spotify track, the
-//     queue drawer is replaced with Spotify's OWN next-up list — the
-//     resolved track plus the autoqueue neighbours from the same Dealer
-//     payload (SpotifyPlayer.lastResolvedSong / lastAutoqueueNeighbours).
-//     Non-Spotify paths keep the section snapshot from SP-6.
-//     SP-39d CORRECTION (field log): the replace fired even when the
-//     user tapped INSIDE a section — the drawer collapsed to 2 tiles
-//     and the playlist queue "vanished". The autoqueue is now a RADIO
-//     fallback only (single-track taps and the 2-tile radio pair); real
-//     section queues are kept and walked end-to-end.
-//  9b. SP-39d auto-advance: a Spotify track that finishes now walks the
-//      queue snapshot (skipNext) instead of rewinding + pausing — the
-//      engine queue plays through like Spotify's web player.
-//  10. SP-11 Local Cache: Automatically saves and restores the last played
-//      queue, index, and position using Hive so the app opens exactly where
-//      the user left off.
-//  11. Offline song cache: every YouTube song that becomes current is
-//      silently downloaded in the background (SongCache) and every later
-//      play comes straight from disk — no proxy, no headers, works with
-//      zero internet. See song_cache_service.dart.
-//  12. SP-22 Windows SMTC: system media keys (play/pause/next/previous),
-//      the Windows volume-flyout card (title, artist, artwork, live
-//      position) and overlay buttons — wired via smtc_bridge.dart and
-//      driven by the existing notifiers, so every source (YT, JioSaavn,
-//      Spotify engine, offline files, restored sessions) shows up in the
-//      OS media overlay with zero per-path wiring.
-//  13. SP-23 Discord Rich Presence: song, artist, artwork and a live
-//      elapsed timer on the user's Discord profile — same notifier-driven
-//      pattern, via discord_presence_bridge.dart. Disabled until a Discord
-//      application id is set (see that file's header).
-//  14. SP-25 Last.fm scrobbling: now-playing + scrobbles to the user's
-//      Last.fm library (LastfmService) — same notifier-driven pattern.
-//      Disabled until the API credentials are set in lastfm_service.dart
-//      and the user connects their account from the Saved page.
-//  15. SP-26 Mini player window: a floating bar in its own desktop window
-//      (desktop_multi_window 0.2.1) mirroring the current track, play
-//      state and live position, with transport buttons — wired via
-//      mini_player_bridge.dart, same notifier-driven pattern. The mini
-//      window is a second Flutter engine; the bridge is the only link.
-//  16. SP-27 Crossfade: smooth volume fade between tracks — the current
-//      track fades out over its last N seconds and the next track fades
-//      in over its first N seconds (Hive 'CROSSFADE_SECS', 0 = off; the
-//      Saved page's Crossfade card is the control). Volume-only — queue
-//      routing, playback logic and the Spotify engine path are untouched,
-//      every ramp self-cancels on pause/seek/skip/stop.
-//  17. SP-28 Lyrics overlay: a floating always-on-top window (the SP-26
-//      mini-window tech + a Win32 topmost helper) mirroring the current
-//      track's synced lyrics and following the position live — wired via
-//      lyrics_overlay_bridge.dart, same notifier-driven pattern. Lyrics
-//      are fetched by the same chain the in-player LyricsBox uses.
-//  18. SP-29 Windows video backdrop: the current track's YouTube video
-//      plays muted as a blurred 16:9 canvas layer behind the player
-//      screen (Windows only) — wired via backdrop/windows_backdrop_service
-//      .dart, same notifier-driven pattern. The audio path is untouched;
-//      the backdrop widget (backdrop/windows_backdrop.dart) goes in as
-//      the first child of the player screen's Stack.
-//  19. SP-40 Song quality: YTM and JioSaavn songs are streamed through the
-//      lossless resolver (lib/desktop/lossless/) at the tier picked in
-//      Settings > Song quality. YouTube videos, Spotify, downloads and the
-//      offline cache are untouched; any resolver failure falls through to
-//      the normal chain inside _getAudioSource.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';
@@ -148,11 +63,9 @@ class MediaPlayer extends ChangeNotifier {
 
   bool autoFetching = false;
 
-  // ── SP-5b engine wiring ──
   bool _engineOwnsPlayback = false;
   bool _engineListenersAttached = false;
 
-  // ── SP-6 queue snapshot ──
   final ValueNotifier<List<Map<String, dynamic>>> queueSnapshot =
   ValueNotifier<List<Map<String, dynamic>>>([]);
   final ValueNotifier<bool> engineOwnsNotifier = ValueNotifier<bool>(false);
@@ -164,7 +77,6 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
-  // ── SP-22 Windows SMTC ──
   StreamSubscription<SmtcButton>? _smtcSub;
 
   MediaPlayer() {
@@ -222,9 +134,6 @@ class MediaPlayer extends ChangeNotifier {
     },
   );
 
-  // ═══════════════════════════════════════════════════════════════════
-  // SP-11 LOCAL CACHE (Save / Restore Session)
-  // ═══════════════════════════════════════════════════════════════════
 
   void _saveCurrentState() {
     if (queueSnapshot.value.isEmpty) return;
@@ -284,9 +193,6 @@ class MediaPlayer extends ChangeNotifier {
     super.dispose();
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  // SP-5b / SP-6 / SP-7 — SpotifyDesktopEngine bridge
-  // ═══════════════════════════════════════════════════════════════════
 
   // Engine transport wrappers. Future<void>.sync() accepts BOTH a void and
   // a Future<void> return from the engine, so these compile and correctly
@@ -391,13 +297,6 @@ class MediaPlayer extends ChangeNotifier {
     }
     _setEngineOwns(true);
 
-    // ★ SP-7 + SP-39d: Spotify's autoqueue neighbours are a RADIO
-    // fallback, not the queue. Overwrite the snapshot only when the
-    // caller had no real queue: a single-track tap, or the 2-tile radio
-    // pair advancing onto its last entry (so the radio keeps renewing).
-    // A section snapshot (playlist / chart / shelf the user tapped
-    // into) IS the queue — keep it so the drawer shows every track and
-    // skipNext/skipPrevious walk it to the end, like Spotify.
     final sp = SpotifyPlayer.instance;
     final resolved = sp.lastResolvedSong;
     final neighbours = sp.lastAutoqueueNeighbours;
@@ -435,7 +334,6 @@ class MediaPlayer extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ═══════════════════════════════════════════════════════════════════
 
   Future<void> _init() async {
     _listenToChangesInPlaylist();
@@ -455,8 +353,6 @@ class MediaPlayer extends ChangeNotifier {
     unawaited(_initMiniPlayer());
     unawaited(_initLyricsOverlay());
     unawaited(_initBackdrop());
-    // SP-48 — like button on the Android media notification (native Kotlin
-    // side via the just_audio_background fork). Inert on Windows.
     _initNotificationLike();
 
     Timer.periodic(const Duration(seconds: 10), (timer) {
@@ -467,19 +363,6 @@ class MediaPlayer extends ChangeNotifier {
     });
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // SP-48 — LIKE BUTTON ON THE ANDROID MEDIA NOTIFICATION
-  // ═══════════════════════════════════════════════════════════════
-  // The notification is rendered by audio_service's native Kotlin
-  // (AudioService) from the playback state broadcast by the
-  // just_audio_background fork. The fork exposes a custom 'like' action
-  // (MediaControl.custom → PlaybackStateCompat.CustomAction →
-  // MediaSessionCallback.onCustomAction → handler.customAction). Here we:
-  //   • listen for notification like taps → toggle the FAVOURITES Hive box
-  //     exactly like the heart button in the player page does, and
-  //   • push the like state so the icon flips (outline ↔ filled heart).
-  // Windows is untouched: likePresses never fires there and the SMTC
-  // surface has its own bridge (SP-22).
   StreamSubscription<void>? _likePressSub;
   StreamSubscription<dynamic>? _favWatchSub;
   bool _likeWiringDone = false;
@@ -542,13 +425,6 @@ class MediaPlayer extends ChangeNotifier {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // SP-22 WINDOWS SMTC (media keys + volume-flyout card)
-  // ═══════════════════════════════════════════════════════════════
-  // Driven entirely by the existing notifiers: currentSongNotifier gives
-  // the OS the track metadata, progressBarState feeds the flyout progress
-  // bar (throttled inside the bridge), buttonState maps to playing/paused.
-  // Engine and just_audio paths both update these, so nothing per-path.
 
   Future<void> _initSmtc() async {
     if (!Platform.isWindows) return;
@@ -636,13 +512,6 @@ class MediaPlayer extends ChangeNotifier {
     unawaited(SmtcBridge.instance.dispose());
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // SP-23 DISCORD RICH PRESENCE
-  // ═══════════════════════════════════════════════════════════════
-  // Same notifier-driven pattern as SP-22: currentSongNotifier carries the
-  // track, buttonState carries play/pause. The bridge dedupes and only
-  // talks to Discord on real changes, never per position tick. Self-noops
-  // without an application id and off Windows/Linux.
 
   Future<void> _initDiscord() async {
     await DiscordPresenceBridge.instance.init();
@@ -691,15 +560,6 @@ class MediaPlayer extends ChangeNotifier {
     DiscordPresenceBridge.instance.stopped();
   }
 
-  // ═════════════════════════════════════════════════════════
-  // SP-25 LAST.FM SCROBBLING
-  // ═════════════════════════════════════════════════════════
-  // Same notifier-driven pattern as SP-22/SP-23: track metadata comes from
-  // currentSongNotifier, positions from progressBarState. The service
-  // applies the Last.fm client rules itself (≥ half the track or ≥ 4 min,
-  // > 30 s tracks), sends "now playing" at track start and queues offline
-  // scrobbles in Hive. No-ops on every platform until the user connects
-  // Last.fm from the Saved page — calls are safe in any state.
 
   Future<void> _initLastfm() async {
     await LastfmService.instance.init();
@@ -727,15 +587,6 @@ class MediaPlayer extends ChangeNotifier {
     progressBarState.removeListener(_lastfmPushProgress);
   }
 
-  // ═════════════════════════════════════════════════════════════
-  // SP-26 MINI PLAYER WINDOW (floating desktop_multi_window bar)
-  // ═════════════════════════════════════════════════════════════
-  // Same notifier-driven pattern as SP-22/23/25: track metadata, play
-  // state and position are mirrored into the mini window and its
-  // transport buttons come back as commands. The mini window is a second
-  // Flutter engine sharing nothing with this isolate — the bridge is the
-  // only link, every push is fire-and-swallow, and a missing/dead mini
-  // window can never affect playback.
 
   Future<void> _initMiniPlayer() async {
     await MiniPlayerBridge.instance.init();
@@ -791,15 +642,6 @@ class MediaPlayer extends ChangeNotifier {
     unawaited(MiniPlayerBridge.instance.shutdown());
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // SP-27 CROSSFADE (smooth volume fade between tracks)
-  // ═══════════════════════════════════════════════════════════════
-  // Volume-only transition: the last N seconds of a track fade out, the
-  // next track fades in. No second player, no queue surgery — every ramp
-  // is token-guarded and re-checks its preconditions on every tick, so it
-  // self-cancels (and restores the volume) on pause, seek, skip, stop or
-  // the Spotify engine taking over. The volume can never stay stuck.
-  // Control surface: crossfade_page.dart (Saved → Crossfade).
 
   static const String _crossfadeKey = 'CROSSFADE_SECS';
   int _crossfadeSeconds = 0;
@@ -973,15 +815,6 @@ class MediaPlayer extends ChangeNotifier {
     _cancelFade(restore: true);
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // SP-28 LYRICS OVERLAY WINDOW
-  // ═══════════════════════════════════════════════════════════════
-  // Same notifier-driven pattern as SP-22/23/25/26: the bridge mirrors
-  // track + position into the overlay engine and fetches lyrics for the
-  // current track (SP-10 Spotify Color Lyrics → SP-15 LRCLIB — the same
-  // chain the in-player LyricsBox uses). Fire-and-swallow everywhere; the
-  // overlay can never affect playback. Control surface: Saved →
-  // Lyrics overlay.
 
   Future<void> _initLyricsOverlay() async {
     await LyricsOverlayBridge.instance.init();
@@ -1015,16 +848,6 @@ class MediaPlayer extends ChangeNotifier {
     unawaited(LyricsOverlayBridge.instance.shutdown());
   }
 
-  // ═════════════════════════════════════════════════════════════
-  // SP-29 WINDOWS VIDEO BACKDROP
-  // ═════════════════════════════════════════════════════════════
-  // Same notifier-driven pattern as SP-22/23/25/26/28: the service
-  // mirrors track + play state + seeks into a dedicated MUTED media_kit
-  // video player (lib/desktop/backdrop/) whose texture the player screen
-  // renders as the blurred 16:9 backdrop (windows_backdrop.dart, first
-  // child of the screen's Stack). Windows-only; fire-and-swallow — the
-  // backdrop can never affect playback. Control surface: Saved → Video
-  // backdrop.
 
   Future<void> _initBackdrop() async {
     await WindowsBackdropService.instance.init();
@@ -1199,12 +1022,6 @@ class MediaPlayer extends ChangeNotifier {
     });
   }
 
-  // ── Offline cache: silent background download ──
-  // Single funnel for every "song became current" path (playSong,
-  // playFromSection, playAll, skipNext, radio/related, playlists). Only
-  // videoId songs are cached; Spotify, JioSaavn and DOWNLOADED files are
-  // skipped. First play streams instantly; the file fills in the
-  // background and every later play replays from disk.
   void _kickCache(Map<String, dynamic> song) {
     final videoId = song['videoId'] as String?;
     if (videoId == null || videoId.isEmpty) return;
@@ -1287,11 +1104,6 @@ class MediaPlayer extends ChangeNotifier {
         }
         return _ytFallbackSource(song, tag);
       }
-      // SP-40: Song quality (Settings > Song quality) — YouTube Music and
-      // JioSaavn songs are upgraded through the lossless resolver at the
-      // user's selected tier. YouTube *videos* (isYtVideo) keep their
-      // YouTube audio, and every failure falls through silently to the
-      // normal chain below (JioSaavn direct URL / offline cache / YT).
       if (song['isYtVideo'] != true) {
         try {
           final lossless = await LosslessService.instance
@@ -1356,7 +1168,7 @@ class MediaPlayer extends ChangeNotifier {
   Future<void> playSong(Map<String, dynamic> song) async {
     if (song['videoId'] == null) return;
     queueSnapshot.value = [Map<String, dynamic>.from(song)];
-    _queueEpoch++; // SP-82: the sequence is about to be replaced
+    _queueEpoch++;
 
     // SP-5b: Windows + Spotify URI -> engine takes over.
     if (Platform.isWindows) {
@@ -1409,10 +1221,6 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
-  /// SP-6: section-aware tap. The whole section becomes the "session":
-  /// queueSnapshot mirrors it, engine takes over for Spotify on Windows,
-  /// and everything else plays through just_audio with the tapped song first
-  /// and the rest of the section lazily preloaded.
   Future<void> playFromSection(
       List<Map<String, dynamic>> section, int index) async {
     if (section.isEmpty) return;
@@ -1420,15 +1228,12 @@ class MediaPlayer extends ChangeNotifier {
 
     queueSnapshot.value =
         section.map((s) => Map<String, dynamic>.from(s)).toList();
-    _queueEpoch++; // SP-82: the sequence is about to be replaced
+    _queueEpoch++;
 
     final song = Map<String, dynamic>.from(section[index]);
 
     if (Platform.isWindows &&
         (song['spotifyUri'] as String?)?.isNotEmpty == true) {
-      // SP-7 + SP-39d: on success the engine KEEPS the section snapshot
-      // set above as THE queue (the autoqueue is a single-track radio
-      // fallback only now). Falls through to just_audio on failure.
       if (await _tryEnginePlay(song)) return;
     }
 
@@ -1441,7 +1246,7 @@ class MediaPlayer extends ChangeNotifier {
       await _player.setAudioSource(first);
       _player.play();
       if (section.length > 1) {
-        _queueAddRemaining(section, index); // SP-82: epoch-guarded
+        _queueAddRemaining(section, index);
       }
       _saveCurrentState();
     } catch (e) {
@@ -1482,7 +1287,7 @@ class MediaPlayer extends ChangeNotifier {
     if (songs.isEmpty) return;
     queueSnapshot.value =
         songs.map((s) => Map<String, dynamic>.from(s as Map)).toList();
-    _queueEpoch++; // SP-82: the sequence is about to be replaced
+    _queueEpoch++;
     if (_engineOwnsPlayback) await _releaseEngine();
 
     _buttonState.value = ButtonState.loading;
@@ -1531,7 +1336,7 @@ class MediaPlayer extends ChangeNotifier {
       _player.play();
 
       if (songs.length > 1) {
-        _queueAddRemaining(songs, index); // SP-82: epoch-guarded
+        _queueAddRemaining(songs, index);
       }
       _saveCurrentState();
     } catch (e) {
@@ -1541,17 +1346,8 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
-  /// SP-82: epoch of the just_audio sequence. Bumped by every path that
-  /// REPLACES the sequence (playSong / playFromSection / playAll /
-  /// startRelated / stop / the snapshot walk) so a lazy preloader that is
-  /// still resolving tracks for the OLD sequence cannot land them behind
-  /// the new playhead (they would duplicate the current track and
-  /// scramble skip order).
   int _queueEpoch = 0;
 
-  /// SP-82: capture the epoch at CALL time (synchronously) — by the time
-  /// the deferred _addRemainingToPlaylist runs, the sequence may already
-  /// have been replaced.
   void _queueAddRemaining(List songs, int playedIndex) {
     final epoch = _queueEpoch;
     Future(() => _addRemainingToPlaylist(songs, playedIndex, epoch));
@@ -1567,11 +1363,11 @@ class MediaPlayer extends ChangeNotifier {
       for (int i = playedIndex + 1;
       i < songs.length && added < maxPreload;
       i++) {
-        if (stamp != _queueEpoch) return; // SP-82: sequence was replaced
+        if (stamp != _queueEpoch) return;
         try {
           final source =
           await _getAudioSource(Map<String, dynamic>.from(songs[i]));
-          if (stamp != _queueEpoch) return; // SP-82: replaced mid-resolve
+          if (stamp != _queueEpoch) return;
           await _player.addAudioSource(source);
           added++;
         } catch (e) {
@@ -1600,7 +1396,7 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> startRelated(Map<String, dynamic> song,
       {bool radio = false, bool shuffle = false, bool isArtist = false}) async {
-    _queueEpoch++; // SP-82: the sequence is about to be replaced
+    _queueEpoch++;
     if (_engineOwnsPlayback) await _releaseEngine();
     await _player.clearAudioSources();
     if (!isArtist) {
@@ -1631,7 +1427,7 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   Future<void> stop() async {
-    _queueEpoch++; // SP-82: in-flight preloaders must not refill after a stop
+    _queueEpoch++;
     if (_engineOwnsPlayback) await _releaseEngine();
     await _player.stop();
     await _player.clearAudioSources();
@@ -1642,7 +1438,6 @@ class MediaPlayer extends ChangeNotifier {
     Hive.box('SETTINGS').delete('CACHE_QUEUE');
   }
 
-  // ── SP-5b transport routing ──
 
   Future<void> togglePlayPause() async {
     if (_engineOwnsPlayback) {
@@ -1665,7 +1460,7 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> seekTo(Duration d) async {
     WindowsBackdropService.instance
-        .seekTo(d); // SP-29: realign the backdrop layer
+        .seekTo(d);
     if (_engineOwnsPlayback) {
       await _engineSeek(d);
       _saveCurrentState();
@@ -1675,9 +1470,6 @@ class MediaPlayer extends ChangeNotifier {
     _saveCurrentState();
   }
 
-  /// SP-6 / SP-7: when the engine owns playback, walk the queue snapshot.
-  /// For Spotify tracks the snapshot is [resolved, ...autoqueueNeighbours]
-  /// (SP-7). For everything else it's whatever the caller set (SP-6).
   Future<void> skipNext() async {
     if (_engineOwnsPlayback) {
       final snapshot = queueSnapshot.value;
@@ -1706,18 +1498,10 @@ class MediaPlayer extends ChangeNotifier {
       await _releaseEngine();
       return;
     }
-    // SP-82: walk the just_audio sequence while it lasts…
     if (_player.hasNext) {
       await _player.seekToNext();
       return;
     }
-    // SP-82: …and never go dead when the preloaded window ran out —
-    // continue through the queueSnapshot the user tapped into instead.
-    // (The Android section player only preloads the next 3 tracks and
-    // nothing refills it for Spotify tracks — on the 4th track of a long
-    // "Top Global" chart, or right after a CDN-resolve failure, the old
-    // blind seekToNext() silently no-oped and the player-page transport
-    // buttons looked dead. User report, fixed here.)
     await _playFromSnapshot(forward: true);
   }
 
@@ -1749,7 +1533,6 @@ class MediaPlayer extends ChangeNotifier {
       await _releaseEngine();
       return;
     }
-    // SP-82: same contract as skipNext — sequence first, snapshot second.
     if (_player.hasPrevious) {
       await _player.seekToPrevious();
       return;
@@ -1757,13 +1540,6 @@ class MediaPlayer extends ChangeNotifier {
     await _playFromSnapshot(forward: false);
   }
 
-  /// SP-82: walk the queueSnapshot the user tapped into (a Spotify "Top
-  /// Global" chart, a playlist, a shelf section) and play the neighbouring
-  /// track — WITHOUT touching the snapshot, so the section stays the live
-  /// queue and further skips keep walking it. This is the safety net that
-  /// keeps the player-page transport buttons alive once the lazily
-  /// preloaded just_audio window runs dry (Android Spotify sections),
-  /// mirroring what the engine path already does on Windows.
   Future<void> _playFromSnapshot({required bool forward}) async {
     final snapshot = queueSnapshot.value;
     final currentId = _currentSongNotifier.value?.id;
@@ -1854,7 +1630,6 @@ class MediaPlayer extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── EQUALIZER (Android session EQ) ──
 
   static const _eqEnabledKey = 'EQ_ENABLED';
   static const _eqBandsKey = 'EQ_BANDS';

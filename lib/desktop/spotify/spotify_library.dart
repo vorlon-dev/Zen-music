@@ -1,27 +1,4 @@
-// ZenMusic — Spotify account library (SP-6, Pathfinder).
-//
-// Data sources (all api-partner.spotify.com/pathfinder/v2/query):
-//   * profileAttributes  -> display name + username + avatar
-//   * libraryV3          -> user's playlists (filters:['Playlists'])
-//                           user's liked songs (filters:['LikedSongs'])
-//   * fetchPlaylist      -> tracks of a NORMAL playlist only. Liked Songs
-//                           is rejected by the server — it's not a
-//                           PLAYLIST-typed URI.
-//   * home (SP-39)       -> the REAL Spotify homepage: greeting +
-//                           shelves (tracks/albums/artists/playlists/
-//                           promos/recents lists), ported 1:1 from
-//                           Stopify's SpotifyWebClient.fetchHomeSections
-//                           (Anattana-Labs/Stopify, MIT).
-//   * recents (SP-39)    -> recently played tracks
-//                           ("spotify:list:recents:page"), ported from
-//                           Stopify's fetchSpotifyRecentlyPlayed.
-//   * getAlbum (SP-39)   -> tracks of an ALBUM uri, ported from
-//                           Stopify's fetchAlbumTracks.
-//
-// Track parsing: fetchPlaylist wraps tracks as
-//   wrap.itemV2.data   (TrackResponseWrapper → Track)
-// The parser tries that direct path, then a wrap-level try, then a deep
-// search that returns the first map whose 'uri' starts with 'spotify:track:'.
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 
@@ -46,20 +23,6 @@ class SpotifyLibrary {
       Map<String, dynamic> payload) async {
     final clientBefore = await SpotifyAuth.instance.getClientToken();
     final first = await _postAttempt(payload, clientBefore);
-    // SP-70: HTTP 401 = the Bearer in hand is dead on the server (aged
-    // token-only session, revoked credential) — NOT a query problem. Drop
-    // the token, re-mint, and give the query one more life before it is
-    // allowed to look like an empty shelf. The old code just logged and
-    // returned null, so one stale token quietly wiped the whole signed-in
-    // home/library for the rest of the session (the "[spotify-lib]
-    // pathfinder HTTP 401" flood in the field log).
-    // SP-72: a 401 can ALSO mean the CLIENT-TOKEN is dead — the partner
-    // API answers an unbound client-token with the same
-    // "Missing/invalid/expired access token" body (field log: fresh
-    // Android sign-in, Bearer minting fine, every pathfinder call
-    // 401-ing because ONE transient client-token mint failure had
-    // permanently downgraded the session to the captured constant). Drop
-    // both credentials; retry when either actually moved.
     if (first.$2 != 401) return first.$1;
     SpotifyAuth.instance.notePathfinderAuthRejected();
     SpotifyAuth.instance.invalidateAccessToken();
@@ -79,12 +42,6 @@ class SpotifyLibrary {
     return second.$1;
   }
 
-  /// One pathfinder round-trip. Returns (decoded body | null, statusCode,
-  /// token used) so the retry wrapper above can tell a dead token from a
-  /// dead session. 0 = no request happened (no session / network error).
-  /// SP-72: [clientToken] is the credential the retry wrapper already
-  /// holds, so the recovery path can observe the client-token moving
-  /// between attempts instead of silently re-reading the same cache.
   Future<(Map<String, dynamic>?, int, String)> _postAttempt(
       Map<String, dynamic> payload,
       [String? clientToken]) async {
@@ -135,7 +92,6 @@ class SpotifyLibrary {
         },
       };
 
-  // ── PUBLIC ──
 
   Future<Map<String, dynamic>?> me() async {
     final data = await _post(_op(
@@ -147,8 +103,6 @@ class SpotifyLibrary {
           '${(data['data'] as Map?)?.keys?.toList() ?? 'null'}');
       return null;
     }
-    // SP-39: the profile node carries the avatar too
-    // (avatar.sources[].url) — Stopify renders it in the home top bar.
     String avatar = '';
     final sources = (profile['avatar'] as Map?)?['sources'] as List?;
     if (sources != null && sources.isNotEmpty) {
@@ -217,11 +171,6 @@ class SpotifyLibrary {
     return out;
   }
 
-  /// User's liked songs. Primary source stays libraryV3 with the
-  /// LikedSongs filter; SP-71 adds the official Web API fallback because
-  /// libraryV3 answers with an empty items node for many accounts in the
-  /// field ("userLikedSongs: 0 items from libraryV3") even while every
-  /// other libraryV3 filter works.
   Future<List<Map<String, dynamic>>> userLikedSongs(
       {int limit = 100, int offset = 0}) async {
     final data = await _post(_op('libraryV3', SpotifyConfig.libraryHash, {
@@ -246,18 +195,11 @@ class SpotifyLibrary {
         return songs;
       }
     }
-    // SP-71: libraryV3 came up empty (or failed) — the official Web API
-    // /v1/me/tracks endpoint is what the Spotify web player itself uses
-    // for the Liked Songs page, and the minted Bearer carries
-    // user-library-read.
     final viaRest = await _likedSongsViaRest(limit, offset);
     _log('userLikedSongs: ${viaRest.length} via REST me/tracks');
     return viaRest;
   }
 
-  /// SP-71: liked songs from the official Web API. Paginates 50 at a time
-  /// (the API max) until [limit] is reached; 401 re-mints the token once,
-  /// 403 means the scope is genuinely absent (logged, then empty result).
   Future<List<Map<String, dynamic>>> _likedSongsViaRest(
       int limit, int offset) async {
     var token = await SpotifyAuth.instance.getAccessToken();
@@ -318,8 +260,6 @@ class SpotifyLibrary {
     return out;
   }
 
-  /// SP-71: official Web API saved-track object -> the standard track map
-  /// every other parser in this file emits (same keys as _trackFromMap).
   Map<String, dynamic>? _trackFromRest(dynamic item) {
     final track = (item as Map?)?['track'];
     if (track is! Map || track['is_local'] == true) return null;
@@ -413,7 +353,6 @@ class SpotifyLibrary {
     return songs;
   }
 
-  // ── SP-39: the REAL Spotify homepage (Stopify port) ──────────────
 
   /// The exact request Stopify's SpotifyWebClient.fetchHomeSections
   /// fires. Returns {'greeting': String, 'sections': [sectionMap]} or
@@ -489,8 +428,6 @@ class SpotifyLibrary {
     return {'greeting': greeting, 'sections': out};
   }
 
-  /// __typename → normalized item map. Ported from Stopify's five
-  /// response-wrapper branches.
   Map<String, dynamic>? _homeItem(Map content) {
     final d = content['data'];
     switch (content['__typename']?.toString() ?? '') {
@@ -700,8 +637,6 @@ class SpotifyLibrary {
     return '';
   }
 
-  /// Recently played tracks ("spotify:list:recents:page"), Stopify
-  /// fetchSpotifyRecentlyPlayed port. Output = the standard track map.
   Future<List<Map<String, dynamic>>> recentlyPlayed(
       {int limit = 100}) async {
     final data = await _post(_op('recents', SpotifyConfig.recentsHash, {
@@ -799,8 +734,6 @@ class SpotifyLibrary {
     };
   }
 
-  /// Tracks of an ALBUM uri (spotify:album:…), Stopify fetchAlbumTracks
-  /// port (getAlbum persisted query). Output = the standard track map.
   Future<List<Map<String, dynamic>>> fetchAlbumTracks(String uri,
       {int limit = 50, int offset = 0}) async {
     final data = await _post(_op('getAlbum', SpotifyConfig.getAlbumHash, {
@@ -860,7 +793,6 @@ class SpotifyLibrary {
     return out;
   }
 
-  // ── PARSERS ──
 
   /// Three-tier track extraction:
   ///   1. Known shape: wrap.itemV2.data (or item / track), then check

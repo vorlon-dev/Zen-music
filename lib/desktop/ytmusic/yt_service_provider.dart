@@ -1,6 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), ytmusic/yt_service_provider.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 import 'package:hive_flutter/hive_flutter.dart';

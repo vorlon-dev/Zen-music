@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'package:flutter/material.dart';
 
 import 'package:zenmusic/desktop/services/lastfm_service.dart';
@@ -64,7 +66,6 @@ class _LastfmPageState extends State<LastfmPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ── Connection card ──
           ValueListenableBuilder<String?>(
             valueListenable: LastfmService.instance.user,
             builder: (context, user, _) {
@@ -132,7 +133,6 @@ class _LastfmPageState extends State<LastfmPage> {
             },
           ),
 
-          // ── Login status / manual token fallback ──
           if (_status.isNotEmpty) ...[
             const SizedBox(height: 16),
             Text(_status, style: const TextStyle(fontSize: 13)),

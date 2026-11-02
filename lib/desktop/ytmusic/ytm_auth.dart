@@ -1,35 +1,4 @@
-// ZenMusic — YouTube Music account session (SP-65).
-// Cookie-based auth via the SAPISIDHASH scheme, the mechanism ytmusicapi
-// (sigma67, GPL-3.0) uses for browser-cookie login — the same project the
-// lib/desktop/ytmusic/ module is ported from. ZenMusic remains GPL-3.0
-// (https://github.com/vorlon-dev/Zen-music).
-//
-// WHY COOKIES AND NOT OAUTH ANYMORE (SP-65): SP-62 shipped Google's
-// device-code OAuth flow (ytmusicapi 1.3.0 TV-client constants). Login
-// "succeeded" (tokens were minted and stored), but Google has since removed
-// OAuth support from the YouTube Music innerTube API server-side: every
-// authed request returns HTTP 400 "Request contains an invalid argument"
-// while anonymous requests keep working. This is a global break, not a
-// header-merging bug — sigma67/ytmusicapi issues #676/#682 document the
-// exact same response body across all third-party clients, and ytmusicapi
-// 1.4.0 dropped OAuth for this reason. The token endpoint still issues
-// refresh tokens, so the old flow LOOKED connected while nothing it did
-// could ever reach the feed. The only working account mechanism is browser
-// cookies: a signed-in music.youtube.com session provides the SAPISID
-// cookie, and Authorization: SAPISIDHASH <ts>_<sha1(sapisid ts origin)> is
-// derived per request (exactly what ytmusicapi does).
-//
-// LOGIN FLOW (SP-65): ytm_login_page.dart captures the cookie string of a
-// signed-in session — a real WebView2 window on Windows (the embedded
-// InAppWebView is stubbed there, SP-63), an embedded InAppWebView with the
-// native CookieManager elsewhere. [probeCookies] validates a candidate
-// blob against the authed home endpoint BEFORE it is stored, so "connected"
-// now means "Google accepted this session", not merely "a token exists".
-// The cookie paste (loginWithCookies) stays as the manual fallback.
-//
-// With the merged headers, YTClient.sendRequest (browse FEmusic_home and
-// friends) returns the signed-in user's personalized feed — Quick picks,
-// Listen again, Mixed for you — and a logout truly returns the public feed.
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 
@@ -53,9 +22,6 @@ class YtmAuth {
   static const _boxName = 'SETTINGS';
   static const _kCookies = 'YTM_COOKIES';
 
-  // SP-62 OAuth leftovers. Google killed YTM OAuth server-side (HTTP 400
-  // on every authed request), so these keys are dead weight; load() wipes
-  // them once so "logged in" can only ever mean "a working cookie session".
   static const _kLegacyRefresh = 'YTM_REFRESH_TOKEN';
   static const _kLegacyAccess = 'YTM_ACCESS_TOKEN';
   static const _kLegacyExpiresAt = 'YTM_EXPIRES_AT';
@@ -95,8 +61,6 @@ class YtmAuth {
   void load() {
     if (!_migrated) {
       _migrated = true;
-      // SP-65 one-time migration: drop the dead OAuth session parts so the
-      // stored state matches what the app can actually use.
       _box.delete(_kLegacyRefresh);
       _box.delete(_kLegacyAccess);
       _box.delete(_kLegacyExpiresAt);
@@ -105,10 +69,7 @@ class YtmAuth {
     _log('load: ${loggedIn.value ? "session present" : "anonymous"}');
   }
 
-  // ── Cookie session (webview capture + paste fallback) ────────────────
 
-  /// Cookie capture from the sign-in window (SP-65). Same rules and
-  /// validation as [loginWithCookies] — named for the call site.
   Future<String?> ingestCookies(String input) => loginWithCookies(input);
 
   /// Accepts a raw cookie header ("a=b; c=d") or Netscape cookies.txt
@@ -144,9 +105,6 @@ class YtmAuth {
     return null;
   }
 
-  /// SP-65: probe a candidate cookie blob against the authed home endpoint
-  /// (browse FEmusic_home with SAPISIDHASH headers) WITHOUT storing it.
-  /// The login page waits for this to pass before declaring success.
   Future<_ProbeResult> probeCookies(String cookieString) async {
     final parsed = _parseCookieBlob(cookieString);
     final auth = _sapisidHashValue(parsed);
@@ -241,7 +199,6 @@ class YtmAuth {
     return '';
   }
 
-  // ── Headers for YTClient ─────────────────────────────────────────────
 
   /// Authorization headers for InnerTube requests, or null when anonymous.
   /// The returned map overwrites the anonymous CONSENT cookie with the real
@@ -258,11 +215,6 @@ class YtmAuth {
     };
   }
 
-  /// SP-65: called by YTClient when an authed request is DEFINITIVELY
-  /// rejected (HTTP 401). Drops the dead session so the home feed falls
-  /// back to the public one instead of failing on every call. A 400/403 is
-  /// request-specific and must NOT kill the session — YTClient only logs
-  /// those.
   Future<void> sessionRejected(String reason) async {
     if (!hasSession) return;
     lastError = 'youtube music session rejected ($reason) — log in again';

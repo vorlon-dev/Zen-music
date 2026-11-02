@@ -1,8 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), the three Modals
-// internals deferred at R8c (downloads bottom sheet, download-details sheet,
-// accent selector), relocated here as static helpers to avoid rewriting
-// bottom_modals.dart. Callers in downloads/appearance pages use this file.
-// l10n -> literals.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 import 'dart:math';

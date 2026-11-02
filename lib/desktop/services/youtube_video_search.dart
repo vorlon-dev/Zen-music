@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 // ZenMusic — standalone YouTube *video* search (pure Dart, every platform).
 // Uses YouTube's public Innertube search endpoint with the "Videos" filter,
 // so results are real YouTube videos (covers, live, interviews, lyric

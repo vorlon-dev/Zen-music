@@ -1,4 +1,6 @@
-﻿#include "flutter_inappwebview_windows_fx/flutter_inappwebview_windows_fx_plugin.h"
+// ZenMusic · vorlon-dev
+
+#include "flutter_inappwebview_windows_fx/flutter_inappwebview_windows_fx_plugin.h"
 
 void FlutterInappwebviewWindowsFxPluginRegisterWithRegistrar(
         FlutterDesktopPluginRegistrarRef registrar) {

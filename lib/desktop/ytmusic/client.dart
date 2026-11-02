@@ -1,6 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), ytmusic/client.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 
@@ -9,10 +7,6 @@ import 'package:zenmusic/desktop/ytmusic/helpers.dart';
 import 'package:zenmusic/desktop/ytmusic/modals/yt_config.dart';
 import 'package:http/http.dart';
 
-// SP-62/SP-65: YouTube Music account auth — cookie session (SAPISIDHASH;
-// the OAuth Bearer path died server-side, see ytm_auth.dart). Merged into
-// every POST so browse() and friends return the signed-in user's
-// personalized feed, with failures now visible in the log.
 import 'package:zenmusic/desktop/ytmusic/ytm_auth.dart';
 
 class YTClient {
@@ -60,8 +54,6 @@ class YTClient {
   Future<void> resetVisitorId() async {
     Map<String, String> newHeaders = Map.from(headers);
     newHeaders.remove('X-Goog-Visitor-Id');
-    // SP-62: when an account is connected, fetch the session-scoped visitor
-    // id (same cookies/authorization) instead of an anonymous one.
     final auth = await YtmAuth.instance.authHeaders();
     if (auth != null) {
       newHeaders.addAll(auth);
@@ -148,14 +140,6 @@ class YTClient {
 
       this.headers.addAll(headers ?? {});
 
-      // SP-62/SP-65: merge the YouTube Music account credentials — a cookie
-      // session (SAPISIDHASH) captured by the sign-in window or pasted
-      // manually. Google removed OAuth support from the YTM API (HTTP 400
-      // "invalid argument" on every authed request), so Bearer is gone; the
-      // same browse() endpoint (FEmusic_home) returns the signed-in user's
-      // taste-based home feed with these headers. When anonymous (logged
-      // out), strip any stale auth headers so a logout truly returns the
-      // app to the public feed.
       final auth = await YtmAuth.instance.authHeaders();
       if (auth != null) {
         this.headers.addAll(auth);
@@ -181,8 +165,6 @@ class YTClient {
       final response =
       await post(uri, headers: this.headers, body: jsonEncode(body));
 
-      // SP-65: make HTTP failures visible — the SP-62 era swallowed them,
-      // so a dead session looked exactly like an empty feed.
       if (response.statusCode != 200) {
         debugPrint('YTClient.sendRequest: HTTP ${response.statusCode} '
             '${response.body.length}B '
@@ -191,10 +173,6 @@ class YTClient {
       if (response.statusCode == 200) {
         return json.decode(response.body) as Map;
       }
-      // SP-65: HTTP 401 on an authed request is definitive — the cookie
-      // session is dead. Drop it so the home feed falls back to the public
-      // one instead of failing on every call. A 400/403 is treated as
-      // request-specific and must NOT kill the session.
       if (auth != null && response.statusCode == 401) {
         await YtmAuth.instance.sessionRejected('HTTP 401');
       }

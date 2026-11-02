@@ -1,28 +1,4 @@
-// ZenMusic Desktop — offline song cache (download → Hive → file replay).
-//
-// Every song that plays gets silently downloaded to a local file (best
-// audio-only stream). All later plays of that song come straight from disk:
-// no proxy, no headers, works with zero internet.
-//
-// Pipeline (mirrors the PROVEN yt_video_engine.dart paths):
-//   ytExplode.videos.streams.getManifest(videoId, ytClients: [client])
-//     → best manifest.audioOnly by bitrate
-//     → ranged GET with per-client header replay (_replayHeaders)
-//     → <videoId>.part  →  atomic rename  →  <videoId>.<ext>
-//     → artwork to <videoId>.jpg (non-fatal)
-//     → Hive box 'song_cache' (plain Map records, no new adapter)
-//
-// ZERO unverified fork calls: this file only uses the exact API surface
-// already proven by yt_video_engine.dart in a running build
-// (getManifest/ytClients, YoutubeApiClient, .url, .container.name,
-// .size.totalBytes, .bitrate, videos.get). Codec is DERIVED from container
-// (m4a→aac, webm→opus) instead of touching unverified codec fields.
-//
-// LEDGER: _replayHeaders is a COPY of yt_video_engine.dart's (which itself
-// copies yt_audio_stream.dart's _clientRequestHeaders) — KEEP ALL IN SYNC.
-//
-// ZERO new pubspec deps (path_provider, hive, youtube_explode_dart all present).
-// R5 print policy: all debug prints use the [yt_cache] prefix.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 
@@ -33,9 +9,6 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 // Public surface of yt_audio_stream.dart (same import the engine uses).
 import 'yt_audio_stream.dart' show ytExplode, kYtClientPriority;
 
-// ---------------------------------------------------------------------------
-// Record
-// ---------------------------------------------------------------------------
 
 /// One cached song. Hive-stored as a plain Map (v1 format) — no adapter.
 class CachedSong {
@@ -116,9 +89,6 @@ class CachedSong {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Resolution (verified fork surface only)
-// ---------------------------------------------------------------------------
 
 class _Resolved {
   final Uri url;
@@ -224,9 +194,6 @@ Map<String, String> _replayHeaders(YoutubeApiClient client) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// SongCache
-// ---------------------------------------------------------------------------
 
 class SongCache {
   SongCache._();
@@ -317,7 +284,6 @@ class SongCache {
       final part = File('${target.path}.part');
       if (await part.exists()) await part.delete(); // leftovers from a crash
 
-      // ── download: ranged GET with header replay (engine pattern) ──
       final req = await _client.getUrl(r.url);
       req.headers.add(HttpHeaders.rangeHeader, 'bytes=0-');
       _replayHeaders(r.client).forEach(req.headers.add);
@@ -365,7 +331,6 @@ class SongCache {
         return null;
       }
 
-      // ── artwork (non-fatal) ──
       var artPath = '';
       if (r.thumbUrl.isNotEmpty) {
         try {

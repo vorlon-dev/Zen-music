@@ -1,19 +1,4 @@
-// ZenMusic — LastWave Jam (listen together) client + playback sync.
-// ZenMusic remains GPL-3.0.
-//
-// Ported from the LastWave-Desktop Jam feature (Clash Projects, GPL-3.0):
-// protocol layer follows the same wire format so rooms are compatible with
-// the hosted Jam server and with LastWave clients. PORT DEVIATIONS (marked):
-// riverpod StateNotifier -> ChangeNotifier registered in GetIt; fluent_ui
-// page -> Material page; prefs -> Hive SETTINGS box; the bridge drives the
-// app's MediaPlayer (just_audio) instead of LastWave's PlaybackService.
-//
-// Behaviour kept from the reference: rooms run on the hosted Jam server; if
-// it is unreachable, local playback keeps going (a failed connection sets
-// JamPhase.error and never touches playback). Always-on rooms, co-hosts,
-// replies, shared queue (admin, read-only), cooldown/rate-limit notices,
-// invite links and server-time latency compensation all behave like the
-// reference implementation.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';
@@ -27,7 +12,6 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:zenmusic/desktop/services/jam_playback_sync.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 
-// ────────────────────────────────────────────────────────── constants
 
 /// Hosted Jam server (same one the reference clients talk to).
 const String jamDefaultServer = 'wss://jam.clashprojects.qd.je/ws';
@@ -138,7 +122,6 @@ class JamTrack {
       );
 }
 
-// ────────────────────────────────────────────────────────── remote events
 
 sealed class JamRemote {
   const JamRemote();
@@ -189,7 +172,6 @@ class JamRemoteFull extends JamRemote {
   });
 }
 
-// ────────────────────────────────────────────────────────── snapshot
 
 enum JamPhase { disconnected, connecting, active, error }
 
@@ -314,7 +296,6 @@ String jamClock(int ms) {
   return '$h:${two(t.minute)}:${two(t.second)} ${t.hour < 12 ? 'AM' : 'PM'}';
 }
 
-// ────────────────────────────────────────────────────────── controller
 
 /// WebSocket client for the hosted Jam server (reference wire format).
 ///
@@ -360,8 +341,6 @@ class JamController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// Shareable https link; opens the invite page of the Jam server, which
-  /// chat apps preview and any LastWave-compatible client can open.
   String inviteLink(String code) {
     final u = Uri.parse(serverUrl);
     final base = Uri(
@@ -873,7 +852,6 @@ class JamController extends ChangeNotifier {
   }
 }
 
-// ────────────────────────────────────────────────────────── app wiring
 
 /// App-scoped Jam holder: one controller + one sync bridge for the whole
 /// app (the reference keeps both in its root provider scope, so rooms

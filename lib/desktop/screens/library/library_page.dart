@@ -1,9 +1,4 @@
-// ZenMusic — Saved (Library) page.
-// SP-30: the feature/setup cards that used to live here (Spotify,
-// Offline cache, Last.fm, Mini player, Crossfade, Lyrics overlay and
-// Video backdrop) all moved to the Settings page. This page is back to
-// pure library content: Favourites, Downloads, History and your
-// playlists.
+// ZenMusic · vorlon-dev
 
 import 'dart:collection';
 

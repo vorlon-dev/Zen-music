@@ -1,4 +1,6 @@
-﻿// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
+// ZenMusic · vorlon-dev
+
+
 
 import 'package:bloc/bloc.dart';
 import 'package:flutter/material.dart';
@@ -20,8 +22,8 @@ class AppearanceCubit extends Cubit<AppearanceState> {
             accentColor: GetIt.I<SettingsManager>().accentColor,
             amoledBlack: GetIt.I<SettingsManager>().amoledBlack,
             dynamicColors: GetIt.I<SettingsManager>().dynamicColors,
-            liquidGlass: GetIt.I<SettingsManager>().liquidGlass, // SP-54
-            uiTheme: GetIt.I<SettingsManager>().uiTheme, // SP-58
+            liquidGlass: GetIt.I<SettingsManager>().liquidGlass,
+            uiTheme: GetIt.I<SettingsManager>().uiTheme,
           ),
         ) {
     _listener = () {
@@ -42,8 +44,8 @@ class AppearanceCubit extends Cubit<AppearanceState> {
         accentColor: _settings.accentColor,
         amoledBlack: _settings.amoledBlack,
         dynamicColors: _settings.dynamicColors,
-        liquidGlass: _settings.liquidGlass, // SP-54
-        uiTheme: _settings.uiTheme, // SP-58
+        liquidGlass: _settings.liquidGlass,
+        uiTheme: _settings.uiTheme,
       ),
     );
   }
@@ -60,12 +62,10 @@ class AppearanceCubit extends Cubit<AppearanceState> {
     _settings.dynamicColors = value;
   }
 
-  // SP-54: Liquid Glass — whole-app glass theme switch.
   void setLiquidGlass(bool value) {
     _settings.liquidGlass = value;
   }
 
-  // SP-58: Material 3 / Classic / Liquid Glass tri-state switch.
   void setUiTheme(String value) {
     _settings.setUiTheme(value);
   }

@@ -1,53 +1,4 @@
-// ZenMusic — SP-38: Spotify home feed — trending data for the Home
-// screen's Spotify section.
-//
-// WHY THE REWRITE (the old v1 died in the field, user log 2026-10):
-//   * charts-spotify-com-service.spotify.com/public/v0/charts/…
-//     → HTTP 404 for EVERY region. Spotify retired the public charts
-//       service when charts.spotify.com was rebuilt (login-walled).
-//   * /v1/browse/featured-playlists → HTTP 429. Deprecated for new
-//       apps (Nov 2024) AND api.spotify.com rate-limits Web-Player
-//       session tokens hard.
-//   * /v1/me → HTTP 429 "API rate limit exceeded" for the same
-//       reason. It is now DECORATIVE ONLY (avatar/plan/country), runs
-//       at most ONCE per app session, and is permanently disabled for
-//       the session on any failure. The signed-in name comes from the
-//       Pathfinder profileAttributes via the library cubit instead.
-//   * Viral 50 charts → gone from Spotify entirely (404 on oEmbed
-//       too). Removed.
-//
-// THE NEW SOURCES — every one verified live before shipping:
-//   1. Official chart playlists via Pathfinder fetchPlaylist (the same
-//      api-partner.spotify.com persisted-query stack the search and
-//      playlist pages already use — proven by "[spotify-search] 29
-//      tracks" in the field):
-//        Top 50 - India  37i9dQZEVXbLZ52XmnySJg
-//        Top 50 - Mexico 37i9dQZEVXbO3qyFxbkOE1
-//        Top 50 - Global 37i9dQZEVXbMDoHDwVN2tF
-//      These ARE Spotify's own charts — "Top 50 - India" is the daily
-//      regional chart. Tap = the whole chart in the queue, every row
-//      carries spotifyUri, so playback needs zero glue code.
-//
-//   2. Editorial playlists via open.spotify.com/oembed (PUBLIC, no
-//      auth, no api.spotify.com, cannot be rate-limited like the Web
-//      API). Each ID was oEmbed-verified 200 before being hardcoded:
-//        Today's Top Hits, RapCaviar, New Music Friday, Viva Latino,
-//        Hot Country, mint, Soft Pop Hits, K-Pop ON!
-//      oEmbed gives the real title + 300px cover. A card here opens
-//      /saved/spotify_playlist, which fetches tracks via Pathfinder
-//      exactly like any other playlist.
-//
-// Track maps are shaped EXACTLY like SpotifySearch/SpotifyLibrary's
-// output ({videoId, title, artist, artists, thumbnails, duration,
-// album, spotifyUri, type:'SPOTIFY'}) and playlist maps like
-// SpotifyLibrary.userPlaylists ({id: 'spotify:playlist:…', title,
-// thumbnails, type:'SPOTIFY_PLAYLIST'}) so the existing shelf cards
-// and the /saved/spotify_playlist route render them unchanged.
-//
-// Doctrine: this feed is decoration on top of Home. Any failure
-// collapses to an empty list / null field with a "[spotify-home]"
-// log line — it must never throw into the Spotify section, and the
-// section itself must never break the YouTube feed.
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 
@@ -97,9 +48,6 @@ class SpotifyHomeSnapshot {
   final List<SpotifyChart> charts; // Top 50 charts
   final String region; // lowercase country code used for charts
 
-  // SP-39: the REAL Spotify homepage (Stopify port) + recents.
-  // homeSections items are normalized maps ({kind, uri, title,
-  // subtitle, thumbnails, [track]}); recent = standard track maps.
   final String greeting;
   final List<Map<String, dynamic>> homeSections;
   final List<Map<String, dynamic>> recent;
@@ -130,13 +78,11 @@ class SpotifyHomeFeed {
 
   final _client = http.Client();
 
-  // ── /v1/me state (decorative only) ──────────────────────────────
   Map<String, dynamic>? _accountCache;
   int _accountAtMs = 0;
   static const int _accountCacheMs = 6 * 3600 * 1000;
-  bool _meDisabled = false; // SP-38: one shot per session, then done.
+  bool _meDisabled = false;
 
-  // ── oEmbed cache (editorial covers/titles; 30 min) ──────────────
   final Map<String, (String, String)?> _oembedCache = {};
   final Map<String, int> _oembedAtMs = {};
   static const int _oembedTtlMs = 30 * 60 * 1000;
@@ -167,7 +113,6 @@ class SpotifyHomeFeed {
   String _short(String s, [int n = 240]) =>
       s.length > n ? '${s.substring(0, n)}…' : s;
 
-  // ── 1. account details (/v1/me — decorative, once per session) ───
 
   Future<Map<String, dynamic>?> accountDetails() async {
     final cached = _accountCache;
@@ -176,8 +121,6 @@ class SpotifyHomeFeed {
             _accountCacheMs) {
       return cached;
     }
-    // SP-39 PRIMARY: Pathfinder profileAttributes — display name AND
-    // avatar, zero api.spotify.com traffic (the 429-prone host).
     final me = await SpotifyLibrary.instance.me();
     if (me != null && (me['display_name']?.toString() ?? '').isNotEmpty) {
       final account = <String, dynamic>{
@@ -203,12 +146,6 @@ class SpotifyHomeFeed {
     }
     try {
       var (status, body) = await _meCall(token);
-      // SP-70: 401 is the stale-token signature, not a rate limit — re-mint
-      // once and retry BEFORE the session-wide kill switch. The old code
-      // disabled /v1/me for the whole session on the first stale token,
-      // which read as "Spotify gone" after a restart. 429 (Spotify
-      // rate-limiting the Web API for Web-Player tokens) and every other
-      // code keep the one-shot-per-session rule.
       if (status == 401) {
         SpotifyAuth.instance.invalidateAccessToken();
         final fresh = await SpotifyAuth.instance.getAccessToken(force: true);
@@ -258,8 +195,6 @@ class SpotifyHomeFeed {
     }
   }
 
-  /// SP-70: one GET /v1/me with a given bearer — (statusCode, body). The
-  /// 401-retry in [accountDetails] reuses this for both attempts.
   Future<(int, String)> _meCall(String bearer) async {
     final r = await _client
         .get(
@@ -274,7 +209,6 @@ class SpotifyHomeFeed {
     return (r.statusCode, r.body);
   }
 
-  // ── 2. editorial playlists via oEmbed (public, no auth) ──────────
 
   /// (title, coverUrl) for a playlist, or null. 30-min in-memory
   /// cache; failures are cached too so a dead ID costs one lookup.
@@ -332,7 +266,6 @@ class SpotifyHomeFeed {
     return out;
   }
 
-  // ── 3. charts = official chart playlists via Pathfinder ──────────
 
   /// The playlist's tracks BECOME the chart. Every row is playable
   /// (spotifyUri from the shared parser), the cover is the playlist's
@@ -385,7 +318,6 @@ class SpotifyHomeFeed {
     return out;
   }
 
-  // ── one-pass snapshot ─────────────────────────────────────────────
 
   Future<SpotifyHomeSnapshot> snapshot() async {
     final account = await accountDetails();
@@ -393,9 +325,6 @@ class SpotifyHomeFeed {
     // Charts are keyed by lowercase country; unknown → India (this
     // app's audience) and Global is always fetched alongside anyway.
     final region = country.isNotEmpty ? country.toLowerCase() : 'in';
-    // Kick everything off before awaiting — they run in parallel.
-    // home + recents are the REAL Spotify homepage (Stopify port,
-    // SP-39); featured + charts stay as the fallback shelves.
     final featuredFuture = featuredPlaylists();
     final chartsFuture = charts(region);
     final homeFuture = SpotifyLibrary.instance.homeSnapshot();

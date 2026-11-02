@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.music.innertube.models
 
 import kotlinx.serialization.SerialName

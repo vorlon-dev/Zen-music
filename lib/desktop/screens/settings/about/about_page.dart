@@ -1,11 +1,11 @@
-// ZenMusic Desktop — About page.
-// Same design language as the settings screens (zen_settings_kit):
-// inset grouped lists, neutral platform icons, sentence-case titles.
+// ZenMusic · vorlon-dev
 
 import 'dart:io' show Platform;
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
+
+import 'package:zenmusic/desktop/core/widgets/zen_logo.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -94,18 +94,10 @@ class _AboutPageState extends State<AboutPage> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
             children: [
-              // ── Header ──
               Padding(
                 padding: const EdgeInsets.fromLTRB(0, 16, 0, 32),
                 child: Column(children: [
-              // SP-80: the built-in mark again — the logo picker now
-              // targets the launcher (home-screen) icon, not the in-app
-              // brand, exactly as the user corrected.
-              ClipRRect(
-                borderRadius: BorderRadius.circular(22),
-                child: Image.asset('assets/icon/logo.png',
-                    width: 88, height: 88, fit: BoxFit.contain),
-              ),
+              const ZenLogoWidget(size: 88, borderRadius: 22),
                   const SizedBox(height: 16),
                   Text('ZenMusic',
                       style: tt.headlineMedium
@@ -125,7 +117,6 @@ class _AboutPageState extends State<AboutPage> {
                 ]),
               ),
 
-              // ── Links ──
               ZenSection(title: 'Project', children: [
                 ZenRow(
                   icon: _I.code,
@@ -153,7 +144,6 @@ class _AboutPageState extends State<AboutPage> {
                 ),
               ]),
 
-              // ── App info ──
               ZenSection(title: 'App info', children: [
                 ZenRow(
                   icon: _I.tag,
@@ -186,7 +176,6 @@ class _AboutPageState extends State<AboutPage> {
                 ),
               ]),
 
-              // ── Credits and licenses ──
               ZenSection(title: 'Credits and licenses', children: [
                 ZenRow(
                   icon: _I.people,

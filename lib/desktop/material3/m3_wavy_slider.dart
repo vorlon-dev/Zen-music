@@ -1,21 +1,8 @@
-// SP-58: Material 3 expressive WAVY seekbar.
-//
-// PixelMusic's player seekbar is the M3-expressive `WavySliderExpressive`:
-// the active track is a sine wave whose amplitude grows while playing and
-// peaks while scrubbing, the inactive remainder is a flat rounded line,
-// and a 20dp thumb rides the wave. This is the Flutter port used by the
-// ZenMusic mini player (and anywhere else) when the Material 3 theme is
-// on. Colors come from the M3 ColorScheme:
-//   active wave + thumb  = colorScheme.primary   (PixelMusic thumbColor)
-//   inactive track       = colorScheme.surfaceContainerHighest
-//   stop indicator       = colorScheme.onSurfaceVariant (M3 spec)
+// ZenMusic · vorlon-dev
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-// SP-64: `Ticker` lives in the scheduler library and material.dart does not
-// re-export it — the bare `Ticker` field below failed to resolve on stable
-// SDKs ("Type 'Ticker' not found" / "'Ticker' isn't a type").
 import 'package:flutter/scheduler.dart';
 
 import 'm3_tokens.dart';
@@ -28,7 +15,7 @@ class ZenM3WavySlider extends StatefulWidget {
     this.onChanged,
     this.onChangeEnd,
     this.height = 44,
-    this.compact = false, // SP-58: mini-player progress line mode
+    this.compact = false,
   }) : assert(value >= 0.0 && value <= 1.0);
 
   /// Playback position as a fraction of the duration (0..1).
@@ -49,9 +36,6 @@ class ZenM3WavySlider extends StatefulWidget {
 
 class _ZenM3WavySliderState extends State<ZenM3WavySlider>
     with SingleTickerProviderStateMixin {
-  /// Phase of the travelling wave — advances only while playing so a
-  /// paused seekbar costs zero frames (same battery contract as the
-  /// SP-54.3 aurora).
   late final Ticker _ticker;
   double _phase = 0;
   bool _animating = false;

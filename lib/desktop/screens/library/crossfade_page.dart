@@ -1,14 +1,4 @@
-// ZenMusic Desktop — SP-27: Crossfade setup page.
-//
-// Control surface for the volume-fade transition implemented in
-// media_player.dart (SP-27 block): the last N seconds of the current track
-// fade out and the next track fades in over its first N seconds. 0 = off.
-// The setting persists in Hive ('CROSSFADE_SECS') and applies from the next
-// track boundary onward.
-//
-// Same page style as lastfm_page.dart: plain Material widgets only, no new
-// dependencies. MediaPlayer is accessed the same way the rest of the app
-// does it (GetIt.I<MediaPlayer>()).
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 

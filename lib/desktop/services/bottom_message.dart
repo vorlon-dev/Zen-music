@@ -1,5 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
-// Known benign analyzer item: withOpacity deprecation hints (verbatim upstream).
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 

@@ -1,16 +1,10 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0).
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// Deviations from upstream are marked with TODO/PORT comments.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-import 'package:zenmusic/desktop/liquid/liquid_bridge.dart'; // SP-54
+import 'package:zenmusic/desktop/liquid/liquid_bridge.dart';
 
-// PORT: upstream imports ../ytmusic/ytmusic.dart here. Desktop vendors the
-// YTMusic client at R5; until then the context-refresh calls in the
-// location/language setters are deferred (see TODO(R5) below).
 
 Box _box = Hive.box('SETTINGS');
 
@@ -35,9 +29,7 @@ class SettingsManager extends ChangeNotifier {
   Color? _accentColor;
   bool _amoledBlack = true;
   bool _dynamicColors = false;
-  bool _liquidGlass = false; // SP-54: Liquid Glass whole-app theme
-  // SP-58: whole-app UI theme — 'classic' | 'liquid' | 'm3'. The SP-54
-  // LIQUID_GLASS bool migrates into this on first boot after the upgrade.
+  bool _liquidGlass = false;
   String _uiTheme = 'classic';
   bool _equalizerEnabled = false;
   List<double> _equalizerBandsGain = [];
@@ -59,9 +51,9 @@ class SettingsManager extends ChangeNotifier {
   Color? get accentColor => _accentColor;
   bool get amoledBlack => _amoledBlack;
   bool get dynamicColors => _dynamicColors;
-  bool get liquidGlass => _uiTheme == 'liquid'; // SP-54 (SP-58: derived)
-  String get uiTheme => _uiTheme; // SP-58
-  bool get isMaterial3 => _uiTheme == 'm3'; // SP-58
+  bool get liquidGlass => _uiTheme == 'liquid';
+  String get uiTheme => _uiTheme;
+  bool get isMaterial3 => _uiTheme == 'm3';
   bool get equalizerEnabled => _equalizerEnabled;
   List<double> get equalizerBandsGain => _equalizerBandsGain;
   bool get loudnessEnabled => _loudnessEnabled;
@@ -81,9 +73,7 @@ class SettingsManager extends ChangeNotifier {
         : null;
     _amoledBlack = _box.get('AMOLED_BLACK', defaultValue: true);
     _dynamicColors = _box.get('DYNAMIC_COLORS', defaultValue: false);
-    _liquidGlass = _box.get('LIQUID_GLASS', defaultValue: false); // SP-54
-    // SP-58: migrate the SP-54 bool into the tri-state UI theme on the
-    // first boot after the upgrade (UI_THEME absent → derive from it).
+    _liquidGlass = _box.get('LIQUID_GLASS', defaultValue: false);
     _uiTheme = _box.get('UI_THEME') as String? ??
         (_liquidGlass ? 'liquid' : 'classic');
     _liquidGlass = _uiTheme == 'liquid';
@@ -167,19 +157,10 @@ class SettingsManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  // SP-54: Liquid Glass — persists the flag and pushes the new state to the
-  // Kotlin glass engine on Android (no-op on Windows; the desktop side
-  // reacts through notifyListeners → ZenDesktopApp rebuild).
-  // SP-58: routed through setUiTheme so the bool and the tri-state stay
-  // in lock-step (legacy callers keep working unchanged).
   set liquidGlass(bool value) {
     setUiTheme(value ? 'liquid' : 'classic');
   }
 
-  // SP-58: the whole-app UI theme switch — 'classic' | 'liquid' | 'm3'.
-  // Material 3 keeps the Kotlin glass engine OFF (no platform views in
-  // its path, per SP-57) and re-skins every screen through the
-  // ZenM3Theme ThemeData, so the toggle is a pure Dart rebuild.
   void setUiTheme(String value) {
     final next = (value == 'liquid' || value == 'm3') ? value : 'classic';
     if (next == _uiTheme) return;

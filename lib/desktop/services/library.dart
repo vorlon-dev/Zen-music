@@ -1,8 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), services/library.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// PORT FIX (marked, non-behavioral): upstream uses ChangeNotifier without an
-// import for it (transitive in Echo's tree) — explicit foundation import here.
+// ZenMusic · vorlon-dev
 
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';

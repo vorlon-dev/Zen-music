@@ -1,17 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  SP-58: Material 3 theme tokens — the NATIVE single source of truth for
-  the "Material 3" UI theme on Android.
+<!-- ZenMusic · vorlon-dev -->
 
-  Values are extracted 1:1 from PixelMusic (github.com/ianshulyadav/
-  PixelMusic) ui/theme/Color.kt + Theme.kt. Material3Tokens.kt serves
-  them to Flutter over the zen/material3_tokens channel; the Dart side
-  (lib/desktop/material3/m3_palette.dart) carries identical fallbacks so
-  Windows renders the same theme without the channel.
-
-  Edit a colour here + Gradle rebuild → the whole Material 3 theme
-  re-skins on Android without touching Dart.
--->
+<!-- ZenMusic · vorlon-dev -->
 <resources>
     <!-- PixelMusic dark scheme anchors -->
     <color name="m3_dark_primary">#FFAB47BC</color>
@@ -27,7 +17,6 @@
     <color name="m3_dark_on_secondary_container">#FFFFD9E6</color>
     <color name="m3_dark_surface_container_high">#FF392C4F</color>
     <color name="m3_dark_surface_container_highest">#FF44375B</color>
-    <!-- SP-61: full surface ladder + outlines (player lyrics / queue /
          quality-sheet surfaces consume these roles via the M3 scheme). -->
     <color name="m3_dark_on_surface_variant">#FFCBBCF0</color>
     <color name="m3_dark_tertiary_container">#FF57321E</color>
@@ -54,7 +43,6 @@
     <color name="m3_light_on_surface_variant">#FF4D4165</color>
     <color name="m3_light_outline">#FF78659A</color>
     <color name="m3_light_error">#FFD32F2F</color>
-    <!-- SP-61: remaining container roles for full native coverage. -->
     <color name="m3_light_tertiary_container">#FFFFDBD1</color>
     <color name="m3_light_on_tertiary_container">#FF3A0B00</color>
     <color name="m3_light_surface_container_lowest">#FFFFFFFF</color>

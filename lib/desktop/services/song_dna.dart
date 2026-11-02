@@ -1,22 +1,4 @@
-// ZenMusic — SP-68: Song DNA — the backstory of the track that is playing.
-//
-// A song's "DNA" is three strands of text, resolved live:
-//   1. Movie / Album    — which release the track belongs to
-//   2. About the Song   — what the song is about (short encyclopedia
-//                         extract, disambiguation-guarded)
-//   3. About the Artist — a short artist biography
-//
-// Resolution order (each strand degrades independently, never throws):
-//   * Genius public web API (no key): /api/search/multi → /api/songs/<id>
-//     → /api/artists/<id> — album name + artist description.
-//   * Wikipedia API (no key): action=query&list=search →
-//     action=query&prop=extracts&exsentences=4&explaintext=1 — song
-//     meaning, and the artist bio when Genius has none. Results that
-//     "may refer to" a disambiguation page are rejected.
-//   * Local metadata (the playing card's album) is the last resort.
-//
-// ZERO new pubspec deps (package:http, dart:convert, dart:async — all
-// present). Debug prints use the [song-dna] prefix.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:convert';
@@ -108,7 +90,6 @@ class SongDna {
     String geniusSongId = '';
     String geniusArtistId = '';
 
-    // ── 1. Genius: search → song → artist ─────────────────────────────
     try {
       final q = Uri.encodeQueryComponent('$artist $title');
       final searchBody = await _getJson('https://genius.com/api/search'
@@ -168,7 +149,6 @@ class SongDna {
       }
     }
 
-    // ── 2. Wikipedia: song meaning (always attempted) ─────────────────
     try {
       final extract = await _wikiExtract('$title $dnaAlbum');
       if (extract != null) meaning = extract;
@@ -176,7 +156,6 @@ class SongDna {
       debugPrint('[song-dna] wiki song failed: $e');
     }
 
-    // ── 3. Wikipedia: artist bio fallback ─────────────────────────────
     if (bio.isEmpty && artist.trim().isNotEmpty) {
       try {
         final extract = await _wikiExtract(artist);

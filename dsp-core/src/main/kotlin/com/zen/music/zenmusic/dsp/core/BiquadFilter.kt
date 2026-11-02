@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.dsp.core
 
 import com.zen.music.zenmusic.dsp.core.models.FilterType
@@ -139,11 +141,6 @@ class BiquadFilter(
     }
   }
 
-  // ── ADDITIVE (Round A1): analytical magnitude response ──
-  // |H(e^{jω})| of the normalized transfer function at [frequency].
-  // Pure read of the coefficients — no filter state is touched, so
-  // this never disturbs processSample/processStereo. Used for drawing
-  // the EQ curve (channel method lands in Round A2).
   fun magnitudeAt(frequency: Double): Double {
     val safeFreq = frequency.coerceIn(1.0, (sampleRate / 2.0) - 1.0)
     val omega = 2.0 * PI * safeFreq / sampleRate
@@ -164,7 +161,6 @@ class BiquadFilter(
     if (denMag == 0.0) return 1.0
     return numMag / denMag
   }
-  // ── end additive ──
 
   fun processSample(input: Double): Double {
     val output = b0 * input + b1 * x1L + b2 * x2L - a1 * y1L - a2 * y2L

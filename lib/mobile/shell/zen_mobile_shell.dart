@@ -1,20 +1,4 @@
-// ZenMusic — MOBILE APP SHELL (SP-77).
-//
-// The phone shell, re-modelled on the reference app's shell behaviour:
-//   * a floating bottom dock (5 destinations: Home / Search / YouTube /
-//     Saved / Settings) with the animated pill indicator — the selected
-//     pill grows (34 -> 62) on a spring-like curve, icon + label colours
-//     cross-fade with it;
-//   * the mini player sits above the dock and BOTH slide away when the
-//     user scrolls a feed up (scroll direction "reverse"), sliding back on
-//     the first downward scroll — exactly like the reference shell;
-//   * content scrolls BEHIND the dock (the dock is a floating overlay, so
-//     glass mode shows the feed through it) — pages get the chrome height
-//     injected into MediaQuery.padding.bottom so their SafeAreas clear it;
-//   * tapping a destination always reveals the chrome again.
-//
-// WINDOWS IS UNTOUCHED: app_shell.dart keeps serving the desktop; this
-// shell is only mounted on Android/iOS (see router.dart).
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 import 'dart:math' as math;
@@ -29,11 +13,9 @@ import 'package:zenmusic/desktop/liquid/glass_panel.dart';
 import 'package:zenmusic/desktop/screens/shell/widgets/bottom_player.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/settings_manager.dart';
-import 'package:zenmusic/desktop/services/shell_overlays_bus.dart'; // SP-82
+import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
+import 'package:zenmusic/desktop/utils/expressive_motion.dart';
 
-/// Branch indexes in the router (see router.dart — SP-79 order):
-/// 0=/ 1=/search 2=/youtube 3=/saved 4=/settings, i.e. exactly the dock's
-/// visual order Home / Search / YouTube / Saved / Settings.
 const List<int> kZenMobileBranchOrder = [0, 1, 2, 3, 4];
 
 class ZenMobileShell extends StatefulWidget {
@@ -41,7 +23,6 @@ class ZenMobileShell extends StatefulWidget {
 
   final StatefulNavigationShell navigationShell;
 
-  /// True on phone platforms — the router mounts this shell there only.
   static bool applies() => Platform.isAndroid || Platform.isIOS;
 
   @override
@@ -67,16 +48,6 @@ class _ZenMobileShellState extends State<ZenMobileShell> {
     if (_chromeHidden) setState(() => _chromeHidden = false);
   }
 
-  // Scroll-direction-aware chrome: scrolling a feed UP (content moves up,
-  // "reverse") hides the dock + mini player; the first downward scroll
-  // brings them back. Near the top the chrome always shows. Horizontal
-  // carousels are ignored (only vertical feeds drive the chrome).
-  //
-  // SP-82: the auto-hide now lives on EVERY tab (Home / Search / YouTube /
-  // Saved / Settings) — the SP-81 home-only scope was too narrow (user:
-  // "I want the auto hide the nav bar in home screen search screen other
-  // 5 tab also"). The dock stays hidden entirely while a full page (the
-  // player) is stacked above the shell — see ShellOverlaysBus.
   bool _onUserScroll(UserScrollNotification n) {
     if (n.metrics.axis != Axis.vertical) return false;
     if (n.metrics.pixels <= 40) {
@@ -98,20 +69,11 @@ class _ZenMobileShellState extends State<ZenMobileShell> {
     final m3 = settings.isMaterial3;
     final mq = MediaQuery.of(context);
 
-    // Overlay shell (the desktop AppShell's proven pattern): the branch
-    // content is full-size and the floating chrome (mini player + dock)
-    // hovers over it — so hiding the chrome genuinely expands the feed.
-    // Pages learn the chrome height through MediaQuery.padding.bottom so
-    // their SafeAreas never underlap it.
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: NotificationListener<UserScrollNotification>(
         onNotification: _onUserScroll,
         child: ValueListenableBuilder<bool>(
-          // SP-82: a full page (the player) stacked above the shell tucks
-          // the WHOLE floating chrome — dock AND mini player. LastWave
-          // contract: pushed routes never carry bottom navigation
-          // ("I don't want nav bar in my player page").
           valueListenable: ShellOverlaysBus.fullPageAbove,
           builder: (context, pageAbove, _) {
             return ValueListenableBuilder<MediaItem?>(
@@ -153,10 +115,6 @@ class _ZenMobileShellState extends State<ZenMobileShell> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Bottom chrome: mini player + dock, sliding away together.
-// ═══════════════════════════════════════════════════════════════════════
-
 class _Chrome extends StatelessWidget {
   const _Chrome({
     required this.hidden,
@@ -186,7 +144,6 @@ class _Chrome extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Mini player (self-hides when nothing is playing).
               const BottomPlayer(),
               _ZenDock(
                 liquid: liquid,
@@ -202,11 +159,7 @@ class _Chrome extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// The floating dock — reference-style animated pill indicator.
-// ═══════════════════════════════════════════════════════════════════════
-
-class _ZenDock extends StatelessWidget {
+class _ZenDock extends StatefulWidget {
   const _ZenDock({
     required this.liquid,
     required this.m3,
@@ -236,67 +189,106 @@ class _ZenDock extends StatelessWidget {
   ];
 
   @override
+  State<_ZenDock> createState() => _ZenDockState();
+}
+
+class _ZenDockState extends State<_ZenDock> {
+  final GlobalKey _dockKey = GlobalKey();
+  final List<GlobalKey> _itemKeys =
+      List.generate(kZenMobileBranchOrder.length, (_) => GlobalKey());
+
+  void _selectAt(Offset local) {
+    final ctx = _dockKey.currentContext;
+    final box = ctx?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    const bridge = 8.0;
+    for (var i = 0; i < _itemKeys.length; i++) {
+      final ictx = _itemKeys[i].currentContext;
+      if (ictx == null) continue;
+      final item = ictx.findRenderObject();
+      if (item is! RenderBox || !item.attached) continue;
+      final topLeft = item.localToGlobal(Offset.zero, ancestor: box);
+      final bounds = topLeft & item.size;
+      if (bounds.inflate(bridge).contains(local)) {
+        final branch = kZenMobileBranchOrder[i];
+        if (branch != widget.currentIndex) widget.onSelect(branch);
+        return;
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final glass = widget.liquid && !widget.m3;
 
     final Color container;
-    if (m3) {
+    if (widget.m3) {
       container = cs.surfaceContainerHigh;
-    } else if (liquid) {
-      container = Colors.transparent; // ZenGlassPanel provides the glass
+    } else if (glass) {
+      container = Colors.transparent;
     } else {
       container = dark ? const Color(0xFF202020) : cs.surfaceContainerLowest;
     }
 
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < kZenMobileBranchOrder.length; i++)
+          _DockItem(
+            key: _itemKeys[i],
+            label: _ZenDock._labels[i],
+            icon: _ZenDock._icons[i],
+            activeIcon: _ZenDock._activeIcons[i],
+            selected: widget.currentIndex == kZenMobileBranchOrder[i],
+            glass: glass,
+            onTap: () => widget.onSelect(kZenMobileBranchOrder[i]),
+          ),
+      ],
+    );
+
     Widget dock = SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 2, 14, 10),
-        child: Material(
-          color: container,
-          elevation: liquid || m3 ? 0 : 8,
-          shadowColor: Colors.black45,
-          borderRadius: BorderRadius.circular(30),
-          child: SizedBox(
-            height: 68,
-            child: Row(
-              children: [
-                for (var i = 0; i < kZenMobileBranchOrder.length; i++)
-                  _DockItem(
-                    label: _labels[i],
-                    icon: _icons[i],
-                    activeIcon: _activeIcons[i],
-                    selected: currentIndex == kZenMobileBranchOrder[i],
-                    liquid: liquid,
-                    m3: m3,
-                    onTap: () => onSelect(kZenMobileBranchOrder[i]),
-                  ),
-              ],
+        padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+        child: Listener(
+          key: _dockKey,
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (e) => _selectAt(e.localPosition),
+          onPointerMove: (e) => _selectAt(e.localPosition),
+          child: Material(
+            color: container,
+            elevation: glass || widget.m3 ? 0 : 6,
+            shadowColor: Colors.black45,
+            borderRadius: BorderRadius.circular(32),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: row,
             ),
           ),
         ),
       ),
     );
 
-    if (liquid && !m3) {
+    if (glass) {
       dock = Padding(
         padding: const EdgeInsets.fromLTRB(8, 0, 8, 2),
-        child: ZenGlassPanel(radius: 30, child: dock),
+        child: ZenGlassPanel(radius: 32, child: dock),
       );
     }
     return dock;
   }
 }
 
-class _DockItem extends StatelessWidget {
+class _DockItem extends StatefulWidget {
   const _DockItem({
+    super.key,
     required this.label,
     required this.icon,
     required this.activeIcon,
     required this.selected,
-    required this.liquid,
-    required this.m3,
+    required this.glass,
     required this.onTap,
   });
 
@@ -304,62 +296,77 @@ class _DockItem extends StatelessWidget {
   final IconData icon;
   final IconData activeIcon;
   final bool selected;
-  final bool liquid;
-  final bool m3;
+  final bool glass;
   final VoidCallback onTap;
 
   @override
+  State<_DockItem> createState() => _DockItemState();
+}
+
+class _DockItemState extends State<_DockItem> {
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final glass = liquid && !m3;
 
-    final Color indicator = selected
-        ? (glass
-            ? cs.secondaryContainer.withValues(alpha: 0.35)
-            : cs.secondaryContainer)
+    final Color indicator = widget.selected
+        ? (widget.glass
+            ? cs.primaryContainer.withValues(alpha: 0.28)
+            : cs.primaryContainer)
         : Colors.transparent;
-    final Color iconTint = selected
-        ? (glass ? Colors.black : cs.onSecondaryContainer)
+    final Color content = widget.selected
+        ? cs.onPrimaryContainer
         : cs.onSurfaceVariant;
-    final Color labelColor = selected
-        ? (glass ? Colors.black : cs.onSurface)
-        : cs.onSurfaceVariant.withValues(alpha: 0.85);
 
-    return Expanded(
-      child: InkResponse(
-        onTap: onTap,
-        radius: 34,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // The growing pill behind the icon — reference-shell signature.
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 280),
-              curve: Curves.easeOutBack,
-              height: 32,
-              width: selected ? 62 : 34,
-              decoration: BoxDecoration(
-                color: indicator,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Icon(
-                selected ? activeIcon : icon,
-                size: 23,
-                color: iconTint,
-              ),
-            ),
-            const SizedBox(height: 3),
-            AnimatedDefaultTextStyle(
-              duration: const Duration(milliseconds: 200),
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: labelColor,
-              ),
-              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-            ),
-          ],
+    final icon = Icon(
+      widget.selected ? widget.activeIcon : widget.icon,
+      size: 24,
+      color: content,
+    );
+
+    final label = AnimatedOpacity(
+      opacity: widget.selected ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 280),
+        curve: const ExpressiveSpring(),
+        alignment: Alignment.centerLeft,
+        child: widget.selected
+            ? Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Text(
+                  widget.label,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.fade,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: content,
+                  ),
+                ),
+              )
+            : const SizedBox(width: 0, height: 0),
+      ),
+    );
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 12, end: widget.selected ? 18 : 12),
+      duration: const Duration(milliseconds: 280),
+      curve: const ExpressiveSpring(),
+      builder: (context, pad, child) => Container(
+        height: 48,
+        padding: EdgeInsets.symmetric(horizontal: pad),
+        decoration: BoxDecoration(
+          color: indicator,
+          shape: BoxShape.rectangle,
+          borderRadius: BorderRadius.circular(24),
         ),
+        child: child,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [icon, label],
       ),
     );
   }

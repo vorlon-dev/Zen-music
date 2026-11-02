@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' show FontFeature, ImageFilter;
@@ -27,9 +29,9 @@ import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/innertubex_bridge.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
-import 'package:zenmusic/desktop/services/shell_overlays_bus.dart'; // SP-82
+import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
-import 'package:zenmusic/desktop/spotify/spotify_canvas.dart'; // SP-9
+import 'package:zenmusic/desktop/spotify/spotify_canvas.dart';
 import 'package:zenmusic/desktop/themes/colors.dart';
 import 'package:zenmusic/desktop/themes/dark.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
@@ -40,9 +42,6 @@ import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 // TODO: change this file name if your service file is named differently.
 import 'package:zenmusic/desktop/lossless/lossless_service.dart';
 
-// ════════════════════════════════════════════════════════════════════
-// ICON TABLE — every icon the page uses lives here.
-// ════════════════════════════════════════════════════════════════════
 class _Ic {
   _Ic._();
   static const chevronDown = FluentIcons.chevron_down_24_regular;
@@ -69,23 +68,13 @@ class _Ic {
 const Color _kHeartRed = Color(0xFFFF4D6D);
 const Color _kFallbackTint = Color(0xFF5B3FD1);
 
-/// MOBILE (Android / iOS) uses the LastWave-style player.
-/// DESKTOP (Windows / macOS / Linux) keeps the original glass-dock player.
-/// Every method below is suffixed `Mobile` or `Desktop` accordingly.
 
-/// LastWave's player has no heart button (double-tap the artwork to like).
-/// Flip to `true` to put a heart button next to the lyrics button again.
 const bool _kShowHeartButton = false;
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, this.videoId, this.onClose});
   final String? videoId;
 
-  /// SP-81: when the shell hosts this page as the in-shell player sheet
-  /// (mobile), it passes [onClose] and every close affordance — chevron,
-  /// swipe-down, Escape, skins' close — collapses the sheet through it.
-  /// Null on route hosting (Windows push): falls back to the old
-  /// context.pop() behaviour, byte-for-byte.
   final VoidCallback? onClose;
 
   @override
@@ -102,12 +91,6 @@ class _PlayerPageState extends State<PlayerPage>
   bool fetchedSong = false;
   late MediaItem? currentSong;
 
-  /// SP-81: single exit funnel — sheet hosting collapses the overlay
-  /// (shell's onClose), route hosting pops the route. Every close
-  /// affordance below routes through this; none may context.pop() while
-  /// the page lives inside the shell's sheet (a bare pop there would
-  /// pop the page UNDER the sheet and leave the player stuck open —
-  /// the user's "I can't exit from player page").
   void _close() {
     final close = widget.onClose;
     if (close != null) {
@@ -125,11 +108,6 @@ class _PlayerPageState extends State<PlayerPage>
   // Seek bar: live finger position while dragging (null = follow playback).
   double? _seekDrag;
 
-  // SP-77: reference player-sheet drag-to-dismiss (mobile). While the
-  // finger is down the sheet follows it 1:1; on release it either pops the
-  // route (past the 88 dp threshold, or a fast fling) or springs back to
-  // rest on the same expressive spring as the entrance — carrying the
-  // release velocity, exactly like the reference's spatial spring.
   double _dismissDragY = 0;
   late final AnimationController _dismissCtrl;
   late final SpringDescription _dismissSpring;
@@ -141,12 +119,6 @@ class _PlayerPageState extends State<PlayerPage>
   String? _videoBackdropUrl;
   Map<String, String> _videoHeaders = const {};
 
-  // SP-76: Spotify canvas state. [_isSpotifyCanvas] marks the current
-  // backdrop as a short canvas loop (looped whole, never sync-seeked);
-  // [_canvasReady] flips once its first frame is on screen and the still
-  // cover hands its pixels over — the canvas-hero contract: the cover is
-  // the placeholder while the video warms up, and it comes back the
-  // moment the canvas leaves (no canvas / error / next track).
   bool _isSpotifyCanvas = false;
   bool _canvasReady = false;
 
@@ -155,18 +127,11 @@ class _PlayerPageState extends State<PlayerPage>
 
   bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
-  // ------------------------------------------------------------ lifecycle
 
   @override
   void initState() {
     super.initState();
-    // SP-82: full page above the shell — every shell tucks its dock /
-    // bottom bar / mini player while the player is open (LastWave:
-    // "hasBottomNavigation = currentRoute == MainShell.route"). This is
-    // the fix for "I don't want nav bar in my player page".
     ShellOverlaysBus.fullPageAbove.value = true;
-    // SP-77 dismiss spring: spring(0.8, 650) — the same constants as the
-    // /player entrance (ExpressiveSpring in expressive_motion.dart).
     _dismissSpring = const SpringDescription(
       mass: 1,
       stiffness: 650,
@@ -193,12 +158,10 @@ class _PlayerPageState extends State<PlayerPage>
   void dispose() {
     GetIt.I<MediaPlayer>().currentSongNotifier.removeListener(songListener);
     _dismissCtrl.dispose();
-    // SP-82: the full page is gone — shells may show their chrome again.
     ShellOverlaysBus.fullPageAbove.value = false;
     super.dispose();
   }
 
-  // ------------------------------------------------- drag-to-dismiss (SP-77)
 
   void _onDismissDragUpdate(DragUpdateDetails d) {
     if (_dismissCtrl.isAnimating) _dismissCtrl.stop();
@@ -214,9 +177,6 @@ class _PlayerPageState extends State<PlayerPage>
     final velocity = d.velocity.pixelsPerSecond.dy;
     if (_dismissDragY > threshold || (velocity > 1500 && _dismissDragY > 24)) {
       HapticFeedback.mediumImpact();
-      // The route's reverse transition (expressive spring) plays the
-      // collapse — same contract as the reference's onCollapse().
-      // SP-81: sheet hosting collapses the overlay instead.
       if (mounted) _close();
       return;
     }
@@ -251,11 +211,6 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  /// SP-76: Spotify canvas for every track while a Spotify session is up
-  /// (direct id when the song carries one, title/artist resolve otherwise),
-  /// else the stock behaviour — Android (YT video) backdrop. Anonymous
-  /// sessions never ask for a canvas, so not-logged-in looks exactly as
-  /// it did before.
   Future<void> _maybeLoadVideoBackdrop() async {
     if (!AppearancePrefs.canvasEnabled.value) return;
     final id = currentSong?.id ?? '';
@@ -323,7 +278,6 @@ class _PlayerPageState extends State<PlayerPage>
   String _formatMs(int ms) {
     final d = Duration(milliseconds: ms);
     final mm = d.inMinutes.remainder(60).toString();
-    // Mobile (LastWave style): 2:47.  Desktop: 02:47.
     final m = (_isMobile && d.inHours == 0) ? mm : mm.padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return d.inHours > 0 ? '${d.inHours}:$m:$s' : '$m:$s';
@@ -382,10 +336,6 @@ class _PlayerPageState extends State<PlayerPage>
 
   Color get _tint => color ?? _kFallbackTint;
 
-  // ------------------------------------------------ LastWave colour roles
-  // LastWave derives a Material-You style scheme from the cover art:
-  // a pale accent (seek bar / play button / titles), a mid-dark tonal
-  // surface (prev / next) and a near-black surface (chips, bottom row).
 
   HSLColor get _hsl => HSLColor.fromColor(_tint);
 
@@ -401,7 +351,6 @@ class _PlayerPageState extends State<PlayerPage>
   Color get _accentSoft => Color.lerp(_accent, Colors.white, 0.45)!;
   static final Color _surface = Colors.white.withValues(alpha: 0.075);
 
-  // ---------------------------------------------------------- small actions
 
   void _seekBy(int seconds) {
     final mp = GetIt.I<MediaPlayer>();
@@ -504,7 +453,6 @@ class _PlayerPageState extends State<PlayerPage>
     const SingleActivator(LogicalKeyboardKey.escape): _close,
   };
 
-  // ---------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
@@ -569,7 +517,6 @@ class _PlayerPageState extends State<PlayerPage>
                 backgroundColor: Colors.black,
                 body: Stack(
                   children: [
-                    // SP-33: video backdrop under custom skins too
                     if (Platform.isWindows) const WindowsVideoBackdrop(),
                     PlayerSkinView(skin: skin, ctx: ctx),
                   ],
@@ -577,17 +524,9 @@ class _PlayerPageState extends State<PlayerPage>
               );
             }
 
-            // SP-77: the player stage is built once; on mobile it is then
-            // wrapped in the reference player-sheet drag-to-dismiss.
-            // deferToChild (default) keeps inner recognizers (seek bar,
-            // artwork swipes, taps) winning their own arenas — the outer
-            // vertical drag only claims the empty stage areas, exactly
-            // like the reference's root detectVerticalDragGestures.
             final Widget stage = Stack(
               children: [
                   if (_isMobile)
-                  // LastWave look: near-black base, only a whisper of the
-                  // cover colour behind the artwork.
                     Positioned.fill(
                       child: IgnorePointer(
                         child: RepaintBoundary(
@@ -626,12 +565,8 @@ class _PlayerPageState extends State<PlayerPage>
                       ),
                     ),
 
-                  // SP-33: Windows video backdrop (muted, 16:9, blurred)
                   const WindowsVideoBackdrop(),
 
-                  // Video backdrop: a full-length YT music video locked to
-                  // the audio position — or, SP-76, a Spotify canvas that
-                  // loops as a short silent clip while it owns the screen.
                   if (_videoBackdropUrl != null)
                     Positioned.fill(
                       child: ValueListenableBuilder<ButtonState>(
@@ -756,9 +691,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  // -------------------------------------------------------------- top bar
-  // [ v ]        NOW PLAYING        [ ⋮ ]
-  //              <playlist/album>
 
   Widget _topBar(MediaItem song) =>
       _isMobile ? _buildTopBarMobile(song) : _buildTopBarDesktop(song);
@@ -868,7 +800,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  // ----------------------------------------------------------------- body
 
   Widget _buildBody(MediaItem song, BoxConstraints box) {
     final wide = box.maxWidth >= 900;
@@ -946,10 +877,6 @@ class _PlayerPageState extends State<PlayerPage>
               fromScale: 0.94,
               child: Center(
                 child: RepaintBoundary(
-                  // SP-76: while the Spotify canvas is on screen the still
-                  // cover fades out in step with the video's fade-in and
-                  // hands the pixels over (canvas-hero handover). Opacity
-                  // only — swipes and double-tap-like keep working.
                   child: AnimatedOpacity(
                     opacity: _canvasOwnsScreen ? 0.0 : 1.0,
                     duration: const Duration(milliseconds: 320),
@@ -1048,7 +975,6 @@ class _PlayerPageState extends State<PlayerPage>
     return Align(alignment: Alignment.center, child: content);
   }
 
-  // -------------------------------------------------------------- artwork
 
   /// Tinder-style swipeable artwork: swipe left = next song, right =
   /// previous. [breathing] (classic layout only) shrinks the cover slightly
@@ -1092,7 +1018,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  // --------------------------------------------------------------- lyrics
 
   Widget _lyricsBox(MediaItem song, Size size) {
     return LyricsBox(
@@ -1177,9 +1102,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  // ------------------------------------------------------------ info row
-  //  Odysseus                                   [ lyrics ]
-  //  [ Ludwig Göransson ]
 
   Widget _buildInfoRowMobile(MediaItem song, {required bool swap}) {
     final videoId = song.extras?['videoId'];
@@ -1208,9 +1130,6 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
                 if (artist.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  // SP-77: tap the artist chip → the new LastWave-style
-                  // artist page (name only; the page resolves the
-                  // browseId via artist search itself).
                   GestureDetector(
                     onTap: () => context.push('/artist', extra: {
                       'name': artist,
@@ -1296,7 +1215,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  // ------------------------------------------------------------- seek bar
 
   Widget _buildSeekBarMobile() {
     final mediaPlayer = mediaPlayerOf(context);
@@ -1327,9 +1245,6 @@ class _PlayerPageState extends State<PlayerPage>
 
         return Column(
           children: [
-            // SP-80: honour the Settings > Seek bar choice on the player
-            // page (was a hardcoded style, so the setting did nothing on
-            // mobile). Drag preview (time labels follow the thumb) kept.
             ZenSlider(
               style: ZenSliderStyle.fromName(
                   AppearancePrefs.sliderStyle.value),
@@ -1359,8 +1274,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  // ------------------------------------------------------------ transport
-  //   [ |< ]  [  ||  ]  [ >| ]
 
   Widget _buildTransportMobile() {
     final mediaPlayer = mediaPlayerOf(context);
@@ -1435,8 +1348,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  // ----------------------------------------------------------- bottom row
-  //  [ shuffle ]  [ HQ  FLAC 24/96 ]  [ repeat ]
 
   Widget _buildBottomRowMobile(MediaItem song) {
     final mediaPlayer = mediaPlayerOf(context);
@@ -1507,9 +1418,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  // ════════════════════════════════════════════════════════════════
-  // DESKTOP — original player (unchanged look)
-  // ════════════════════════════════════════════════════════════════
 
   Widget _buildTopBarDesktop(MediaItem song) {
     final subtitle = song.album;
@@ -1586,10 +1494,6 @@ class _PlayerPageState extends State<PlayerPage>
               fromScale: 0.94,
               child: Center(
                 child: RepaintBoundary(
-                  // SP-76: same cover-to-canvas handover as the mobile
-                  // column — the still cover fades out while the looping
-                  // canvas behind owns the screen, and returns the moment
-                  // the canvas leaves.
                   child: AnimatedOpacity(
                     opacity: _canvasOwnsScreen ? 0.0 : 1.0,
                     duration: const Duration(milliseconds: 320),
@@ -1904,9 +1808,6 @@ class _PlayerPageState extends State<PlayerPage>
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
-// AUDIO QUALITY
-// ════════════════════════════════════════════════════════════════════
 
 enum _Tier { lossless, hiRes, high, standard, low, unknown }
 
@@ -1962,7 +1863,6 @@ class _AudioQuality {
     return codec;
   }
 
-  /// LastWave-style badge text: "FLAC 24/96", "AAC 128", "MP3 320".
   String get pillText {
     final c = codec;
     if (c != null && bitDepth != null && sampleRateHz != null) {
@@ -2337,9 +2237,6 @@ class _QualitySheet extends StatelessWidget {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
-// SHARED WIDGETS
-// ════════════════════════════════════════════════════════════════════
 
 /// Fade + slide + scale in one go. Keeps the child mounted (state and
 /// GlobalKeys survive) and blocks touches while hidden.
@@ -2493,9 +2390,6 @@ class _IconBtnState extends State<_IconBtn> {
   }
 }
 
-/// LastWave's building block: a rounded-square ("squircle") button with
-/// press-scale, hover lift (desktop) and tooltip. Leave [width] null to
-/// fill the parent's width (inside an Expanded).
 class _Squircle extends StatefulWidget {
   const _Squircle({
     required this.child,
@@ -2617,11 +2511,6 @@ class _ModeBtn extends StatelessWidget {
   }
 }
 
-
-
-// ════════════════════════════════════════════════════════════════════
-// DESKTOP-ONLY WIDGETS (original player)
-// ════════════════════════════════════════════════════════════════════
 
 class _QualityChip extends StatefulWidget {
   const _QualityChip({required this.info, required this.onTap});

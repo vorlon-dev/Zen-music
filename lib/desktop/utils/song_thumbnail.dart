@@ -1,4 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0). ZenMusic remains GPL-3.0.
+// ZenMusic · vorlon-dev
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';

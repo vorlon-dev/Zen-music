@@ -1,17 +1,4 @@
-// ZenMusic — Spotify Canvas (SP-9, extended in SP-76).
-// SP-9: the short looping videos behind a track, fetched from Spotify's
-// internal `canvaz-cache` service (Protobuf, hand-encoded/decoded to avoid
-// a protobuf runtime dependency). Reuses the web-player access token.
-//
-// SP-76: while a Spotify session is up, EVERY playing track gets a canvas —
-// not only songs that already carry a `spotifyUri`. The track is matched on
-// Spotify by title/artist (Pathfinder searchTracks → official Web API
-// search), then its canvas is fetched via the protobuf route first and the
-// web player's own `canvas` GraphQL operation second, with the persisted-
-// query hash re-read from the web player script when the baked-in one has
-// been retired. An anonymous session answers null with the reason said out
-// loud, so the player falls through to its normal backdrop instead of
-// silently showing nothing.
+// ZenMusic · vorlon-dev
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -77,10 +64,7 @@ class SpotifyCanvas {
   DateTime _playerScriptAt = DateTime.fromMillisecondsSinceEpoch(0);
   Future<String?>? _scriptFetch;
 
-  // ── public surface ──────────────────────────────────────────────────
 
-  /// The canvas for a track that already carries a Spotify id/uri.
-  /// SP-9 entry point, kept for direct callers.
   Future<String?> fetchCanvasUrl(String trackIdOrUri) async {
     final cleanId = trackIdOrUri.split(':').last;
     if (cleanId.isEmpty) return null;
@@ -97,13 +81,6 @@ class SpotifyCanvas {
     return url;
   }
 
-  /// SP-76: the canvas for the playing song, or null.
-  ///
-  /// [spotifyUri] short-circuits the search when the song already carries a
-  /// Spotify id. Without one the track is matched by title/artist — so
-  /// YTM-sourced songs get canvases too. Requires a Spotify session: an
-  /// anonymous run says so once per track and answers null, and the player
-  /// keeps whatever backdrop it had.
   Future<String?> resolveCanvasUrl({
     String? spotifyUri,
     required String title,
@@ -154,9 +131,6 @@ class SpotifyCanvas {
     }
   }
 
-
-
-  // ── canvas fetch: protobuf route, then the web player's own query ────
 
   Future<String?> _canvasForTrack(String trackUri, {String? token}) async {
     _lastLookupWasDefinitive = false;
@@ -344,7 +318,6 @@ class SpotifyCanvas {
     }
   }
 
-  // ── track resolution: find the Spotify id of the playing song ────────
 
   Future<String?> _resolveTrackId(
       String token, String title, String artist, int? durationMs) async {
@@ -580,7 +553,6 @@ class SpotifyCanvas {
     return x == y || x.startsWith(y) || y.startsWith(x);
   }
 
-  // ── the web player's persisted-query hash ────────────────────────────
 
   /// The `canvas` operation's hash, read out of the web player's own
   /// script. The read is remembered for 6 h; [forceRefresh] (the stale-hash
@@ -650,7 +622,6 @@ class SpotifyCanvas {
     }
   }
 
-  // ── string hygiene ───────────────────────────────────────────────────
 
   /// Words a title picks up from packaging rather than from the song.
   static final RegExp _titleNoise = RegExp(
@@ -685,7 +656,6 @@ class SpotifyCanvas {
     if (_trackIdCache.length > 128) _trackIdCache.remove(_trackIdCache.keys.first);
   }
 
-  // ── test surface — pure logic, no network (SP-76) ────────────────────
 
   @visibleForTesting
   Uint8List encodeCanvazRequest(String uri) => _encodeRequest(uri);
@@ -745,7 +715,6 @@ class SpotifyCanvas {
       .toSet()
       .toList();
 
-  // ── the web player's own declarations ────────────────────────────────
 
   /// The player declares its operations as `"<name>","query","<64 hex>"`.
   static final RegExp _opDeclaration = RegExp(
@@ -754,7 +723,6 @@ class SpotifyCanvas {
   static final RegExp _webPlayerScript = RegExp(
       r'https://open\.spotifycdn\.com/cdn/build/web-player/[A-Za-z0-9._~-]+\.(?:js|mjs)');
 
-  // ── minimal protobuf wire encode/decode (SP-9, unchanged) ────────────
 
   Uint8List _encodeRequest(String uri) {
     final uriBytes = utf8.encode(uri);
@@ -828,7 +796,6 @@ class SpotifyCanvas {
 }
 
 class _Reader {
-  // (SP-76 canvas resolver helpers live above; the wire reader is SP-9.)
   final Uint8List data;
   int pos = 0;
   _Reader(this.data);
@@ -876,5 +843,3 @@ class _Reader {
     }
   }
 }
-
-

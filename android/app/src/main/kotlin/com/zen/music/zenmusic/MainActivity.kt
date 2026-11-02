@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic
 
 import android.Manifest
@@ -33,9 +35,9 @@ import com.zen.music.zenmusic.innertube.ZenInnertubeResolver
 import com.zen.music.zenmusic.lossless.NativeAudioEngine
 import com.zen.music.zenmusic.lossless.broadcastNativeEqualizer
 import com.zen.music.zenmusic.potoken.ZenPoTokenBridge
-import com.zen.music.zenmusic.liquid.ZenLiquidGlassEngine // SP-54
-import com.zen.music.zenmusic.liquid.ZenLiquidGlassViewFactory // SP-54
-import com.zen.music.zenmusic.material3.Material3Tokens // SP-58
+import com.zen.music.zenmusic.liquid.ZenLiquidGlassEngine
+import com.zen.music.zenmusic.liquid.ZenLiquidGlassViewFactory
+import com.zen.music.zenmusic.material3.Material3Tokens
 import com.zen.music.zenmusic.videoplayer.ZenVideoPlayerViewFactory
 import kotlinx.coroutines.runBlocking
 import io.flutter.embedding.engine.FlutterEngine
@@ -92,13 +94,9 @@ class MainActivity : AudioServiceActivity() {
         // Native DSP engine control (15-band EQ broadcast to all engine
         // instances — main + crossfade player).
         registerLosslessChannel(flutterEngine)
-        // Lossless addon source (Tidal via user addon server) — ported
-        // from LastWave; config is pushed from Dart.
         registerAddonChannel(flutterEngine)
         // In-app APK installer channel (OTA updates)
         InstallApkPlugin.register(flutterEngine, this)
-        // SP-78: launcher logo switching (activity-alias icon slots) —
-        // lets the in-app Logo page swap the app icon the launcher shows.
         registerLauncherLogoChannel(flutterEngine)
         // Native merged-stream video player (video watch page) —
         // platform-view factory; each instance owns the per-view
@@ -108,19 +106,12 @@ class MainActivity : AudioServiceActivity() {
                 "zen_video_player",
                 ZenVideoPlayerViewFactory(flutterEngine.dartExecutor.binaryMessenger)
             )
-        // SP-54: Liquid Glass — Kotlin-rendered glass layer (bridge +
-        // platform views). The theme UI is drawn natively here so it stays
-        // smooth on low-end phones; Dart only flips the switch and stacks
-        // its content above the glass.
         ZenLiquidGlassEngine.register(flutterEngine, this)
         flutterEngine.platformViewsController.registry
             .registerViewFactory(
                 ZenLiquidGlassEngine.VIEW_TYPE,
                 ZenLiquidGlassViewFactory()
             )
-        // SP-58: Material 3 theme — native palette provider. Tokens live
-        // in res/values/material3_tokens.xml and are served to Flutter
-        // (m3_bridge.dart) once at boot. Failure-soft; no platform views.
         Material3Tokens.register(flutterEngine, this)
         // Flutter apps have no BuildConfig — use the runtime debuggable
         // flag instead. Also gates the extraction resolver's verbose logs.
@@ -135,9 +126,6 @@ class MainActivity : AudioServiceActivity() {
         ZenPoTokenBridge.attachActivity(this)
     }
 
-    // ═══════════════════════════════════════════
-    // AUDIO DEVICE (Bluetooth) EVENTS
-    // ═══════════════════════════════════════════
 
     private fun registerAudioDeviceEvents(flutterEngine: FlutterEngine) {
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/audio_device")
@@ -216,9 +204,6 @@ class MainActivity : AudioServiceActivity() {
         return null
     }
 
-    // ═══════════════════════════════════════════
-    // INNERTUBE
-    // ═══════════════════════════════════════════
 
     private fun registerInnertubexChannel(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/innertubex")
@@ -343,15 +328,7 @@ class MainActivity : AudioServiceActivity() {
             }
     }
 
-    // ═══════════════════════════════════════════
-    // LAUNCHER LOGO (activity-alias icon slots)
-    // ═══════════════════════════════════════════
 
-    // SP-78: the launcher icon is switched with <activity-alias> entries in
-    // AndroidManifest.xml — each alias wraps .MainActivity with its own
-    // android:icon and ships disabled. Exactly ONE launcher component may
-    // stay enabled at a time (the default .MainActivity or one alias),
-    // otherwise the launcher icon would disappear entirely.
     private fun registerLauncherLogoChannel(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/launcher_logo")
             .setMethodCallHandler { call, result ->
@@ -436,9 +413,6 @@ class MainActivity : AudioServiceActivity() {
             }
     }
 
-    // ═══════════════════════════════════════════
-    // DSP
-    // ═══════════════════════════════════════════
 
     private fun registerDspChannel(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/dsp")
@@ -572,9 +546,6 @@ class MainActivity : AudioServiceActivity() {
         "metadata" to eq.metadata,
     )
 
-    // ═══════════════════════════════════════════
-    // LOSSLESS
-    // ═══════════════════════════════════════════
 
     private fun registerLosslessChannel(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/lossless")
@@ -603,9 +574,6 @@ class MainActivity : AudioServiceActivity() {
             }
     }
 
-    // ═══════════════════════════════════════════
-    // ADDON
-    // ═══════════════════════════════════════════
 
     private val addonApi: LosslessMusicApi by lazy { LosslessMusicApi() }
 
@@ -682,9 +650,6 @@ class MainActivity : AudioServiceActivity() {
             }
     }
 
-    // ═══════════════════════════════════════════
-    // VOLUME EVENTS
-    // ═══════════════════════════════════════════
 
     private fun registerVolumeEvents(flutterEngine: FlutterEngine) {
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/volume_events")
@@ -739,9 +704,6 @@ class MainActivity : AudioServiceActivity() {
         )
     }
 
-    // ═══════════════════════════════════════════
-    // AUDIO CHANNEL
-    // ═══════════════════════════════════════════
 
     private fun registerAudioChannel(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/audio")

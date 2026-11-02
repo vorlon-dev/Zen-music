@@ -1,3 +1,5 @@
+# ZenMusic · vorlon-dev
+
 name: zenmusic
 description: "A YouTube zen player built with Flutter."
 publish_to: 'none'
@@ -10,51 +12,23 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
   crypto: ^3.0.7
-  # ─────────────────────────────────────────────
-  # 🎵 YouTube Extraction & Audio Playback
-  # ─────────────────────────────────────────────
-  yt_extractor: ^0.1.0
   just_audio:
     path: packages/just_audio
   youtube_explode_dart:
     path: packages/youtube_explode_dart
   audio_service: ^0.18.18
   audio_session: ^0.1.21
-  # WebView for YouTube embed video mode
-  webview_flutter: ^4.10.0
-  record: ^7.1.1
-  # ─────────────────────────────────────────────
-  #  Lyrics
-  # ─────────────────────────────────────────────
-  flutter_lyric: ^3.0.8
   http: ^1.2.2
 
-  # ─────────────────────────────────────────────
-  #  Local Storage & State
-  # ─────────────────────────────────────────────
   shared_preferences: ^2.3.2
   hive: ^2.2.3
   hive_flutter: ^1.1.0
-  fixnum: ^1.1.0
   web_socket_channel: ^3.0.3
-  protobuf: ^6.1.0
-  # ─────────────────────────────────────────────
-  #  Networking & Utilities
-  # ─────────────────────────────────────────────
   cached_network_image: ^3.4.1
   permission_handler: ^11.3.1
-  receive_sharing_intent: ^1.8.1
-  # ─────────────────────────────────────────────
-  #  UI / State Management
-  # ─────────────────────────────────────────────
   provider: ^6.1.2
-  palette_generator_master: ^1.1.0
   liquid_glass_widgets: ^1.15.1
-  # ─────────────────────────────────────────────
-  #  Track 2: extracted-stream video backdrop
-  # ─────────────────────────────────────────────
   flutter_file_dialog: ^3.3.3
   video_player: ^2.9.2
   fluentui_system_icons: ^1.1.273
@@ -62,22 +36,16 @@ dependencies:
   palette_generator: ^0.3.3+7
   package_info_plus: ^10.2.1
   url_launcher: ^6.3.3
-  device_info_plus: ^13.2.0
-  stream_transform: ^2.1.2
   google_fonts: ^9.0.0
   go_router: ^18.0.2
   flutter_bloc: ^9.1.1
   get_it: ^9.3.0
-  blur: ^4.0.2
   path_provider: ^2.1.6
   media_kit: ^1.2.6
   media_kit_libs_windows_video: ^1.0.11
   rxdart: ^0.28.0
-  audio_video_progress_bar: ^2.0.3
   text_scroll: ^0.2.1
-  scrollable_positioned_list: ^0.3.8
   loading_indicator_m3e: ^0.1.1
-  # SP-48: forked copy with the native notification LIKE button
   just_audio_background:
     path: packages/just_audio_background
   just_audio_media_kit: ^2.1.0
@@ -106,9 +74,7 @@ dependencies:
   media_kit_libs_android_video: ^1.3.6
   smtc_windows: ^1.1.0
   flutter_discord_rpc: ^1.1.0
-  flutter_rust_bridge: 2.11.1
   desktop_multi_window: 0.2.1
-# ▼▼▼ MUST BE AT THE ROOT LEVEL (No indentation) ▼▼▼
 dependency_overrides:
   flutter_inappwebview_windows_fx:
     path: ./windows_webview_stub
@@ -124,19 +90,14 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # SP-79: the user's logo pack — any png/jpg/webp dropped into
-  # assets/logos/ shows up automatically in the mobile Settings ▸ Logo
-  # picker (read through the AssetManifest at runtime, no code changes).
   assets:
     - assets/logos/
+    - assets/icon/
 
   fonts:
     - family: Retro Blendy
       fonts:
         - asset: assets/fonts/Retro Blendy.otf
-    # SP-58: Material 3 theme — Google Sans Flex variable font, the same
-    # rounded family PixelMusic's whole type scale runs on (OFL-licensed;
-    # license bundled at assets/fonts/GoogleSansFlex-OFL.txt).
     - family: ZenSansFlex
       fonts:
         - asset: assets/fonts/gflex_variable.ttf

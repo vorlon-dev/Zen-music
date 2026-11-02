@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 part of 'search_cubit.dart';
 
 @immutable

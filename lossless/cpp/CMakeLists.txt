@@ -1,3 +1,5 @@
+# ZenMusic · vorlon-dev
+
 cmake_minimum_required(VERSION 3.22.1)
 project(zen_lossless LANGUAGES C CXX)
 

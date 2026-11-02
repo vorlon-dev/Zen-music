@@ -1,8 +1,5 @@
-// SP-76 widget tests — SyncedLyricsView renders resolved lyrics.
-//
-// Guards the player-page lyric surface end-to-end at the widget level:
-// word-timed data must render the karaoke word spans, plain data must
-// render its lines, and a miss must show the not-found empty state.
+// ZenMusic · vorlon-dev
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -84,10 +81,10 @@ void main() {
         reason: 'active line text must render');
     expect(plain, contains('Second line here'),
         reason: 'upcoming line must render');
-    // The word wipe builds per-word TextSpans; the plain text of the
-    // active line must be assembled from word spans (not one big run).
-    // NOTE: Text.rich wraps the given span in an outer TextSpan on this
-    // Flutter version, so assert on LEAF spans, not root children.
+    // The word wipe is painted by the karaoke painter (feathered wipe
+    // + syllable lift on a CustomPaint fed by the per-word timings), so
+    // the word data must surface as that painter, with the glow Text
+    // carrying the full line.
     final dump = tester
         .widgetList<RichText>(find.byType(RichText))
         .map((r) {
@@ -104,14 +101,16 @@ void main() {
           return leaves;
         })
         .toList();
-    final active = dump.any((leaves) =>
-        leaves.length == 3 &&
-        leaves[0] == 'Hello ' &&
-        leaves[1] == 'world ' &&
-        leaves[2] == 'today');
-    expect(active, isTrue,
-        reason: 'active line must be built from per-word TextSpans; '
-            'leaf structure: $dump');
+    final karaoke = find.byWidgetPredicate((w) =>
+        w is CustomPaint &&
+        w.painter?.runtimeType.toString() == '_KaraokePainter');
+    expect(karaoke, findsWidgets,
+        reason: 'word-timed active line must render through the karaoke '
+            'painter; leaf structure: $dump');
+    expect(
+        dump.any((leaves) => leaves.contains('Hello world today')),
+        isTrue,
+        reason: 'active line text must render alongside the wipe');
   });
 
   testWidgets('plain (untimed) lyrics render their lines', (tester) async {

@@ -1,10 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), utils/bottom_modals.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// PORT SCOPE: modals reachable from shipped screens. R8 additions:
-// "Watch Video" (song window + player popup), "Download" on songs
-// (window + popup, status-aware) and playlists (playlist window) via
-// the cross-platform DownloadManager.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 import 'dart:ui';
@@ -18,8 +12,6 @@ import 'package:go_router/go_router.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
-// SP-68: Song DNA — the playing track's backstory (release, meaning,
-// artist bio) opened as a card from the song options list.
 import 'song_dna_dialog.dart';
 
 import 'package:zenmusic/desktop/screens/import_dialog.dart';
@@ -1004,8 +996,6 @@ class _SongWindowContent extends StatelessWidget {
         const Divider(color: Colors.white12),
         const SizedBox(height: 8),
 
-        // Actions
-        // SP-68: Song DNA — leads the list, one tap to the backstory.
         _buildAction(
           context,
           icon: Icons.fingerprint_rounded,

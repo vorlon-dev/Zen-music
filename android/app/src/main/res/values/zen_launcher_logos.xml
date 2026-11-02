@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<!-- ZenMusic · vorlon-dev -->
+
+<!-- ZenMusic · vorlon-dev --><resources>
     <color name="zen_logo_1_bg">#7C4DFF</color>
     <color name="zen_logo_2_bg">#1A1A1A</color>
     <color name="zen_logo_3_bg">#4A148C</color>

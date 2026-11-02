@@ -1,10 +1,4 @@
-// ZenMusic — shared building blocks for the YouTube browse pages (SP-79).
-//
-// Everything here is theme-aware (the YouTube section lives inside the
-// app shell, so it must look right in Classic / Liquid Glass / Material 3
-// and in light or dark mode) and dependency-free beyond the packages the
-// app already ships (cached_network_image 3.4.1 → errorWidget, not
-// errorBuilder).
+// ZenMusic · vorlon-dev
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -111,7 +105,6 @@ class YtItemVm {
   }
 }
 
-// ───────────────────────────────────────────────────────────── thumbnails
 
 class YtThumb extends StatelessWidget {
   const YtThumb({super.key, required this.vm, this.radius = 14});
@@ -178,7 +171,6 @@ class YtThumb extends StatelessWidget {
       );
 }
 
-// ───────────────────────────────────────────────────────────── cards
 
 /// Grid card — YouTube-style 16:9 thumb over two lines of text.
 class YtVideoCard extends StatelessWidget {
@@ -317,7 +309,6 @@ class YtVideoTile extends StatelessWidget {
   }
 }
 
-// ───────────────────────────────────────────────────────────── states
 
 class YtErrorCard extends StatelessWidget {
   const YtErrorCard({super.key, required this.message, this.onRetry});

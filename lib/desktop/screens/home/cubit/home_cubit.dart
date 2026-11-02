@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 import 'package:bloc/bloc.dart';
 import 'package:meta/meta.dart';
 
@@ -7,12 +9,6 @@ import 'package:zenmusic/desktop/services/chart_model.dart';
 
 part 'home_state.dart';
 
-// SP-68: when a YouTube Music account is signed in, the home feed follows
-// the user's YTM taste — "Last listening" (the account's play history)
-// leads, then the personalized home shelves in YouTube Music's own order
-// (Listen again, Mixed for you, playlists, music videos, songs — whatever
-// the account's taste yields), and Browse Charts moves to the back.
-// Anonymous keeps the previous charts-first layout.
 
 class HomeCubit extends Cubit<HomeState> {
   final YTMusic _ytMusic;
@@ -35,10 +31,6 @@ class HomeCubit extends Cubit<HomeState> {
     }
   }
 
-  /// The whole feed build shared by [fetch] (cold load) and [refresh]
-  /// (pull-to-refresh). Nothing is emitted until the result is ready, so
-  /// a refresh keeps the current feed on screen instead of flashing a
-  /// loader — the pre-SP-68 behavior, kept.
   Future<HomeSuccess> _assemble() async {
     final authed = YtmAuth.instance.hasSession;
 
@@ -62,10 +54,6 @@ class HomeCubit extends Cubit<HomeState> {
     List sections = feed['sections'];
     final chartsSection = _createChartsSection(charts);
 
-    // SP-68 ordering: signed-in => the user's YTM taste leads (last
-    // listening first, then the home shelves exactly as YouTube Music
-    // ordered them) and Browse Charts moves to the back; anonymous =>
-    // charts lead, as before.
     if (authed) {
       final lastListening = _lastListeningSection(history);
       if (lastListening != null) sections.insert(0, lastListening);

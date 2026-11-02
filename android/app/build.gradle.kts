@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 plugins {
     id("com.android.application")
     id("dev.flutter.flutter-gradle-plugin")
@@ -7,9 +9,8 @@ plugins {
 
 android {
     namespace = "com.zen.music.zenmusic"
-    // Override: receive_sharing_intent's latest release was built
-    // against SDK 37; Flutter's default lags at 36. Explicit override
-    // keeps the plugin happy regardless of Flutter's pinned value.
+    // Pinned above Flutter's default so every plugin compiles against the
+    // same (newest) SDK level.
     compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
@@ -44,8 +45,15 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8 code/resource shrinking: unused classes and resources are
+            // stripped from the APK (see proguard-rules.pro — shrink-only
+            // mode, no obfuscation/optimization).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 package com.zen.music.zenmusic.potoken
 
 import android.annotation.SuppressLint
@@ -21,32 +23,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
-/**
- * WebView BotGuard po-token minter — LibreTube's architecture,
- * PORTED FROM THEIR PROVEN IMPLEMENTATION (PoTokenWebView +
- * JavaScriptUtil + PoTokenGenerator, pasted verbatim this session).
- *
- * Flow (theirs, exactly): page loads with youtube.com base →
- * self-bootstrap in the page calls ZenPo.downloadAndRunBotguard()
- * (onPageFinished backup) → Kotlin POSTs api/jnn/v1/Create with
- * [REQUEST_KEY] → parseChallengeData descrambles (base64 → +97/byte)
- * → runBotGuard in JS → Kotlin POSTs GenerateIT → integrity token
- * embedded → session READY → per-video obtainPoToken with the
- * videoId as the identifier → u8ToBase64 result.
- *
- * ATTACHMENT (this device's requirement): the WebView is attached to
- * the Activity's decor view at 1×1 px. An application-context,
- * never-attached WebView did not evaluate pages on this build (no
- * onPageFinished, no JS execution — ten rounds of logs). Attach +
- * one real window makes the page live.
- *
- * NOTE: no labeled returns into Handler.post lambdas — Java-SAM
- * lambda labels are unreliable on this toolchain (two compile
- * failures). Early-exits are structured as if/else instead.
- *
- * Failure anywhere returns null / stays tokenless: no path here can
- * break playback.
- */
 object ZenPoTokenBridge {
 
     private const val TAG = "ZenPoToken"
@@ -215,7 +191,6 @@ object ZenPoTokenBridge {
         }
     }
 
-    // ── Bootstrap step 1: Create → parseChallengeData → runBotGuard ──
 
     /// @JavascriptInterface — the page's self-bootstrap AND the
     /// onPageFinished backup both land here; idempotent.
@@ -259,7 +234,6 @@ object ZenPoTokenBridge {
         }.start()
     }
 
-    // ── Bootstrap step 2: GenerateIT → integrity token embedded ──
 
     /// @JavascriptInterface — the VM's snapshot output.
     @JavascriptInterface
@@ -294,7 +268,6 @@ object ZenPoTokenBridge {
         Log.w(TAG, "init error from JS: $error")
     }
 
-    // ── Minting ──
 
     /// Mints (or returns cached) po-token for [videoId]. Null-safe on
     /// ANY failure. Blocking — background thread only. [visitorData]
@@ -374,7 +347,6 @@ object ZenPoTokenBridge {
         mintLatches[identifier]?.countDown()
     }
 
-    // ── JavaScriptUtil ports (their parsing, org.json) ──
 
     // LibreTube ExternalApi.botguardRequest's EXACT header set —
     // verbatim from their pasted @Headers annotation. The

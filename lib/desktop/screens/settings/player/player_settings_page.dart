@@ -1,9 +1,4 @@
-// ZenMusic Desktop — ported from Echo Music (GPL-3.0), screens/settings/player/player_settings_page.dart.
-// Echo Music is Copyright (C) the Echo Music authors; this port and ZenMusic
-// remain GPL-3.0 (https://github.com/vorlon-dev/Zen-music).
-// PORT: l10n -> literals. NOTE (verbatim): skip-silence is hidden on Windows
-// upstream (ExoPlayer-only effect) — on desktop this page renders appbar-only
-// until desktop EQ/effects land.
+// ZenMusic · vorlon-dev
 
 import 'dart:io';
 

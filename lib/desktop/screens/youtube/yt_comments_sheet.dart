@@ -1,10 +1,4 @@
-// ZenMusic — YouTube comments bottom sheet (SP-79).
-//
-// Reads comments through the vendored youtube_explode CommentsClient
-// (getComments needs a Video object — one lightweight videos.get first).
-// Replies expand inline via getReplies; paging via CommentsList.nextPage.
-// Presented as a modal bottom sheet from the video watch page and the
-// shorts feed.
+// ZenMusic · vorlon-dev
 
 // VideoClient.comments is marked @Deprecated upstream ("will not be
 // supported anymore") but it is the ONLY comments API this vendored 3.1.0

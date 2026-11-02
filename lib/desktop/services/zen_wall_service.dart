@@ -1,17 +1,4 @@
-// ZenMusic — ZenWall (SP-78): the playing song as the device wallpaper.
-//
-// When the ZenWall switch is on, every song change pushes the song's
-// Spotify CANVAS to the Android home-screen wallpaper — natively, by
-// grabbing a frame from the canvas mp4 (MediaMetadataRetriever inside
-// ZenWallPlugin.kt; a static frame is all a wallpaper can hold). When the
-// canvas is not available — no Spotify session, no canvas for the track,
-// resolve failure, or the native frame grab failing — the song's normal
-// ART COVER is applied instead, exactly as requested. Wallpaper updates
-// ride the same currentSong pulse the player screen uses, so a song
-// change is all it takes.
-//
-// Mobile only (Android): every entry point gates on Platform.isAndroid.
-// iOS has no settable wallpaper API — the row is hidden there.
+// ZenMusic · vorlon-dev
 
 import 'dart:async';
 import 'dart:io';

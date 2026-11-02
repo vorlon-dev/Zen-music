@@ -1,3 +1,5 @@
+// ZenMusic · vorlon-dev
+
 // ZenMusic — Spotify playlist details page.
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -15,8 +17,6 @@ class SpotifyPlaylistPage extends StatefulWidget {
     this.title,
   });
 
-  /// Full Spotify URI (spotify:playlist:...) or the liked-songs collection
-  /// URI (spotify:user:USER:collection). Passed to fetchPlaylistTracks.
   final String playlistId;
   final String? title;
 
