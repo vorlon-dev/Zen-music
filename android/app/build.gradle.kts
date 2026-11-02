@@ -51,7 +51,11 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
-                getDefaultProguardFile("proguard-android.txt"),
+                // AGP 9 removed proguard-android.txt (it hard-codes
+                // -dontoptimize). The optimize variant is now required;
+                // proguard-rules.pro still pins -dontoptimize + -dontobfuscate,
+                // so R8 keeps the exact same shrink-only pass as before.
+                getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
         }
