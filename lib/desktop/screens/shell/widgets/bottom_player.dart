@@ -9,7 +9,16 @@
 // SP-5b: song source is MediaPlayer.currentSongNotifier (works for both
 // just_audio and the Spotify desktop engine); transport routes through
 // MediaPlayer.togglePlayPause/skipNext/skipPrevious.
+//
+// SP-81b FIX (compile error at the old line 177: "The getter 'onOpen'
+// isn't defined for the type '_MiniBody'"): SP-81 added the sheet-opener
+// plumbing to BottomPlayer and read widget.onOpen inside _MiniBodyState,
+// but never declared the field on _MiniBody nor forwarded it from
+// _BottomPlayerState. Both halves are wired now — the behaviour is
+// unchanged: opener != null expands the in-shell sheet, null (Windows /
+// ZenMobileShell) keeps the /player route push.
 
+import 'dart:async'; // SP-81: guard release for the sheet path
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -28,7 +37,13 @@ import 'package:zenmusic/desktop/utils/adaptive_widgets/progress_ring.dart';
 import 'package:zenmusic/desktop/utils/song_thumbnail.dart';
 
 class BottomPlayer extends StatefulWidget {
-  const BottomPlayer({super.key});
+  const BottomPlayer({super.key, this.onOpen});
+
+  /// SP-81: when the shell provides a mobile player-sheet opener, tapping
+  /// (or swiping up) the mini player expands the in-shell sheet instead
+  /// of pushing the /player route. Null on Windows and on shells that
+  /// don't host the sheet — the route push stays.
+  final VoidCallback? onOpen;
 
   @override
   State<BottomPlayer> createState() => _BottomPlayerState();
@@ -72,6 +87,7 @@ class _BottomPlayerState extends State<BottomPlayer> {
               song: currentSong,
               color: backgroundColor,
               onImageReady: updateBackgroundColor,
+              onOpen: widget.onOpen, // SP-81b: forward the sheet opener
             ),
           ),
         );
@@ -89,11 +105,18 @@ class _MiniBody extends StatefulWidget {
     required this.song,
     required this.color,
     required this.onImageReady,
+    this.onOpen, // SP-81b
   });
 
   final MediaItem song;
   final Color? color;
   final void Function(ImageProvider image) onImageReady;
+
+  /// SP-81b: sheet opener handed down from BottomPlayer. Null on Windows
+  /// and on shells that don't host the in-shell player sheet (e.g.
+  /// ZenMobileShell) — _open() then falls back to the /player route push,
+  /// exactly the pre-SP-78 behaviour.
+  final VoidCallback? onOpen;
 
   @override
   State<_MiniBody> createState() => _MiniBodyState();
@@ -155,7 +178,26 @@ class _MiniBodyState extends State<_MiniBody>
     _lastSlideSongId = id;
   }
 
-  void _open() => context.push('/player');
+  // SP-80: re-entrancy guard — the player sheet must never stack twice.
+  // A double tap (or a tap racing the route's own push) used to push TWO
+  // /player routes, which looked like the sheet "opening double".
+  // SP-81: the same guard now fronts the sheet opener too (the shell's
+  // _openPlayerSheet) and releases 600 ms later — the sheet path has no
+  // route future to hook whenComplete onto, so without the timer the
+  // mini player would go DEAD after the first open.
+  static bool _opening = false;
+
+  void _open() {
+    if (_opening) return;
+    _opening = true;
+    final opener = widget.onOpen;
+    if (opener != null) {
+      Timer(const Duration(milliseconds: 600), () => _opening = false);
+      opener();
+      return;
+    }
+    context.push('/player').whenComplete(() => _opening = false);
+  }
 
   void _next() {
     _noteSlideIntent(true);

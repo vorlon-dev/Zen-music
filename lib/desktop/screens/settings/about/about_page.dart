@@ -98,22 +98,14 @@ class _AboutPageState extends State<AboutPage> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(0, 16, 0, 32),
                 child: Column(children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(22),
-                    child: Image.asset(
-                      'assets/icon/logo.png',
-                      width: 88,
-                      height: 88,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        width: 88,
-                        height: 88,
-                        color: cs.surfaceContainerHigh,
-                        child: Icon(Icons.music_note,
-                            size: 44, color: cs.onSurfaceVariant),
-                      ),
-                    ),
-                  ),
+              // SP-80: the built-in mark again — the logo picker now
+              // targets the launcher (home-screen) icon, not the in-app
+              // brand, exactly as the user corrected.
+              ClipRRect(
+                borderRadius: BorderRadius.circular(22),
+                child: Image.asset('assets/icon/logo.png',
+                    width: 88, height: 88, fit: BoxFit.contain),
+              ),
                   const SizedBox(height: 16),
                   Text('ZenMusic',
                       style: tt.headlineMedium

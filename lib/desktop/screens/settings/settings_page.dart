@@ -173,6 +173,23 @@ class _SettingsBodyState extends State<_SettingsBody> {
         ),
       ]),
       _Group('Personalization', [
+        // SP-78: the launcher-icon slots — changes the app icon OUTSIDE the
+        // app (home screen / launcher), the thing the earlier in-app logo
+        // work got wrong. Android only; other platforms never render it.
+        if (Platform.isAndroid)
+          _Entry(
+            icon: Icons.image_outlined,
+            title: 'Logo',
+            subtitle: 'Pick the launcher icon',
+            keywords: const ['logo', 'icon', 'launcher', 'app icon', 'theme'],
+            builder: (ctx) => ZenRow(
+              icon: Icons.image_outlined,
+              title: 'Logo',
+              subtitle: 'Pick the launcher icon',
+              chevron: true,
+              onTap: () => ctx.push('/logo'),
+            ),
+          ),
         _Entry(
           title: 'Seek bar',
           keywords: const ['slider', 'progress', 'wave', 'style'],

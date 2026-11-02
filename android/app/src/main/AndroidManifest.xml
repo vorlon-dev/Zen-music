@@ -60,6 +60,135 @@
             </intent-filter>
         </activity>
 
+        <!-- ═══════════════════════════════════════════════════════════
+             SP-78: LAUNCHER LOGO SLOTS (in-app Logo page)
+             Each alias wraps .MainActivity with its own launcher icon and
+             ships DISABLED — exactly one launcher component stays enabled
+             at a time. The Dart side (zen/launcher_logo channel) flips the
+             enabled alias; the launcher refreshes the icon. Slots unlock
+             after this manifest ships in a build (reinstall once).
+             ═══════════════════════════════════════════════════════════ -->
+        <activity-alias
+            android:name=".LogoZen1"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_zen1"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen2"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_zen2"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen3"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_zen3"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen4"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_zen4"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen5"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_zen5"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen6"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_zen6"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen7"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_zen7"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen8"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_zen8"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen9"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_zen9"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoMandala"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/logo_mandala"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+
         <!-- Serves the downloaded APK to the system installer. -->
         <provider
             android:name="androidx.core.content.FileProvider"

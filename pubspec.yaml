@@ -124,6 +124,12 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  # SP-79: the user's logo pack — any png/jpg/webp dropped into
+  # assets/logos/ shows up automatically in the mobile Settings ▸ Logo
+  # picker (read through the AssetManifest at runtime, no code changes).
+  assets:
+    - assets/logos/
+
   fonts:
     - family: Retro Blendy
       fonts:

@@ -4,10 +4,16 @@ import 'dart:io';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 // Public surface of yt_audio_stream.dart: shared YoutubeExplode instance
-// (one HTTP client pool for the whole app), the client priority chain, and
-// the proven /audio byte proxy.
+// (one HTTP client pool for the whole app), the client priority chain, the
+// proven /audio byte proxy, and the audio resolver (SP-77: used to pre-warm
+// the external-audio path and to detect "no audio available at all" before
+// the watch page commits to a video-only stream).
 import 'yt_audio_stream.dart'
-    show ytExplode, handleAudioRequest, kYtClientPriority;
+    show
+        ytExplode,
+        handleAudioRequest,
+        kYtClientPriority,
+        resolveAudioStreamInfo;
 
 // ------------------------------------------------------------- result types
 
@@ -177,6 +183,17 @@ class YtVideoEngine {
 
   /// Resolves playback URLs for [videoId] at [maxHeight] (0 = best).
   /// Returned URLs are LOCAL proxy URLs — see the header for why.
+  ///
+  /// SP-77 ("video plays but no audio"): modern YouTube serves most videos
+  /// as SEPARATE video-only + audio streams; the muxed itags are gone or
+  /// capped at 360p. When a video-only stream is picked, the watch page
+  /// relies on mpv's external audio track (`audio-files`) pointed at the
+  /// local /audio proxy — but that only produces sound if the proxy can
+  /// actually resolve an audio stream. So: (1) resolve+warm the audio
+  /// FIRST (it also populates the 10-minute resolver cache, removing the
+  /// cold-start race where mpv opens the external track before the proxy
+  /// has its upstream URL); (2) if no audio is resolvable at all, fall back
+  /// to a muxed stream — sound at a lower resolution beats silence.
   static Future<YtVideoStreams?> extractVideo(
       String videoId, {
         int maxHeight = 0,
@@ -184,17 +201,46 @@ class YtVideoEngine {
     try {
       final base = await _serverBase();
       final pool = await _candidates(videoId);
-      final picked = _pick(pool, maxHeight);
+      var picked = _pick(pool, maxHeight);
       if (picked == null) return null;
+
+      String? audioUrl;
+      if (!picked.muxed) {
+        final audioOk = await audioResolvable(videoId);
+        if (audioOk) {
+          audioUrl = '$base/audio?id=$videoId&quality=high';
+        } else {
+          final muxed = pool.where((r) => r.muxed && r.height > 0).toList()
+            ..sort((a, b) => b.height.compareTo(a.height));
+          if (muxed.isNotEmpty) {
+            picked = muxed.first;
+            print('[yt_video] $videoId no audio stream resolvable — '
+                'falling back to muxed ${picked.height}p');
+          }
+        }
+      }
       return YtVideoStreams(
         videoUrl: '$base/video?id=$videoId&h=${picked.height}',
-        audioUrl: picked.muxed ? null : '$base/audio?id=$videoId&q=high',
+        audioUrl: picked.muxed ? null : audioUrl,
         headers: const {},
         height: picked.height,
       );
     } catch (e) {
       print('[yt_video] extractVideo($videoId, $maxHeight) failed: $e');
       return null;
+    }
+  }
+
+  /// True when an audio stream can be resolved for [videoId]. Calling this
+  /// ALSO warms the resolver cache, so the /audio proxy's first request by
+  /// mpv is instant (no cold-start race against the video load).
+  static Future<bool> audioResolvable(String videoId) async {
+    try {
+      await resolveAudioStreamInfo(videoId, 'high');
+      return true;
+    } catch (e) {
+      print('[yt_video] audio not resolvable for $videoId: $e');
+      return false;
     }
   }
 

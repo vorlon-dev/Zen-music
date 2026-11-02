@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -96,6 +97,9 @@ class MainActivity : AudioServiceActivity() {
         registerAddonChannel(flutterEngine)
         // In-app APK installer channel (OTA updates)
         InstallApkPlugin.register(flutterEngine, this)
+        // SP-78: launcher logo switching (activity-alias icon slots) —
+        // lets the in-app Logo page swap the app icon the launcher shows.
+        registerLauncherLogoChannel(flutterEngine)
         // Native merged-stream video player (video watch page) —
         // platform-view factory; each instance owns the per-view
         // channel zen/video_player_<viewId>.
@@ -333,6 +337,99 @@ class MainActivity : AudioServiceActivity() {
                             }
                             mainHandler.post { result.success(url) }
                         }.start()
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    // ═══════════════════════════════════════════
+    // LAUNCHER LOGO (activity-alias icon slots)
+    // ═══════════════════════════════════════════
+
+    // SP-78: the launcher icon is switched with <activity-alias> entries in
+    // AndroidManifest.xml — each alias wraps .MainActivity with its own
+    // android:icon and ships disabled. Exactly ONE launcher component may
+    // stay enabled at a time (the default .MainActivity or one alias),
+    // otherwise the launcher icon would disappear entirely.
+    private fun registerLauncherLogoChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/launcher_logo")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "listSlots" -> {
+                        try {
+                            val pm = applicationContext.packageManager
+                            val pkg = applicationContext.packageName
+                            val pkgInfo = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
+                            val aliases = mutableListOf<String>()
+                            for (info in pkgInfo.activities ?: emptyArray()) {
+                                // Activity aliases carry targetActivity; plain
+                                // activities never do.
+                                if (info.targetActivity != null && info.name.startsWith(pkg)) {
+                                    aliases.add(info.name)
+                                }
+                            }
+                            result.success(aliases)
+                        } catch (_: Throwable) {
+                            result.success(emptyList<String>())
+                        }
+                    }
+                    "getCurrentSlot" -> {
+                        try {
+                            val pm = applicationContext.packageManager
+                            val pkg = applicationContext.packageName
+                            val pkgInfo = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
+                            var current = "default"
+                            for (info in pkgInfo.activities ?: emptyArray()) {
+                                if (info.targetActivity == null) continue
+                                val state = pm.getComponentEnabledSetting(
+                                    ComponentName(pkg, info.name))
+                                if (state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
+                                    current = info.name
+                                    break
+                                }
+                            }
+                            result.success(current)
+                        } catch (_: Throwable) {
+                            result.success("default")
+                        }
+                    }
+                    "setSlot" -> {
+                        val slot = call.argument<String>("slot") ?: "default"
+                        try {
+                            val pm = applicationContext.packageManager
+                            val pkg = applicationContext.packageName
+                            val pkgInfo = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
+                            val aliases = (pkgInfo.activities ?: emptyArray())
+                                .filter { it.targetActivity != null }
+                                .map { it.name }
+                            if (slot != "default" && !aliases.contains(slot)) {
+                                result.error(
+                                    "slot_missing",
+                                    "This launcher logo slot is not part of this install. Rebuild and reinstall the app once with the shipped manifest — then every slot unlocks.",
+                                    null)
+                                return@setMethodCallHandler
+                            }
+                            // Disable every alias first, then enable the
+                            // requested one (none = back to the default icon).
+                            // DONT_KILL_APP keeps the running app alive; the
+                            // launcher refreshes the icon on its own.
+                            for (name in aliases) {
+                                pm.setComponentEnabledSetting(
+                                    ComponentName(pkg, name),
+                                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                                    PackageManager.DONT_KILL_APP)
+                            }
+                            if (slot != "default") {
+                                pm.setComponentEnabledSetting(
+                                    ComponentName(pkg, slot),
+                                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                                    PackageManager.DONT_KILL_APP)
+                            }
+                            result.success(true)
+                        } catch (t: Throwable) {
+                            result.error("slot_error", t.message ?: "failed", null)
+                        }
                     }
                     else -> result.notImplemented()
                 }

@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:ui' show FontFeature, ImageFilter;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart' show SpringDescription, SpringSimulation;
 import 'package:flutter/services.dart'
     show HapticFeedback, LogicalKeyboardKey;
 import 'package:get_it/get_it.dart';
@@ -26,6 +27,7 @@ import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/innertubex_bridge.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/services/shell_overlays_bus.dart'; // SP-82
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_canvas.dart'; // SP-9
 import 'package:zenmusic/desktop/themes/colors.dart';
@@ -76,14 +78,22 @@ const Color _kFallbackTint = Color(0xFF5B3FD1);
 const bool _kShowHeartButton = false;
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({super.key, this.videoId});
+  const PlayerPage({super.key, this.videoId, this.onClose});
   final String? videoId;
+
+  /// SP-81: when the shell hosts this page as the in-shell player sheet
+  /// (mobile), it passes [onClose] and every close affordance — chevron,
+  /// swipe-down, Escape, skins' close — collapses the sheet through it.
+  /// Null on route hosting (Windows push): falls back to the old
+  /// context.pop() behaviour, byte-for-byte.
+  final VoidCallback? onClose;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> {
+class _PlayerPageState extends State<PlayerPage>
+    with SingleTickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _key = GlobalKey();
   final GlobalKey<SwipeArtworkStackState> _swipeKey =
   GlobalKey<SwipeArtworkStackState>();
@@ -91,6 +101,22 @@ class _PlayerPageState extends State<PlayerPage> {
   List<Color> paletteColors = []; // desktop gradient
   bool fetchedSong = false;
   late MediaItem? currentSong;
+
+  /// SP-81: single exit funnel — sheet hosting collapses the overlay
+  /// (shell's onClose), route hosting pops the route. Every close
+  /// affordance below routes through this; none may context.pop() while
+  /// the page lives inside the shell's sheet (a bare pop there would
+  /// pop the page UNDER the sheet and leave the player stuck open —
+  /// the user's "I can't exit from player page").
+  void _close() {
+    final close = widget.onClose;
+    if (close != null) {
+      close();
+    } else if (mounted) {
+      context.pop();
+    }
+  }
+
   bool _hasLyrics = false;
   bool _lyricsLoading = true;
   bool _showLyrics = false; // narrow layout: swap artwork <-> lyrics
@@ -98,6 +124,15 @@ class _PlayerPageState extends State<PlayerPage> {
 
   // Seek bar: live finger position while dragging (null = follow playback).
   double? _seekDrag;
+
+  // SP-77: reference player-sheet drag-to-dismiss (mobile). While the
+  // finger is down the sheet follows it 1:1; on release it either pops the
+  // route (past the 88 dp threshold, or a fast fling) or springs back to
+  // rest on the same expressive spring as the entrance — carrying the
+  // release velocity, exactly like the reference's spatial spring.
+  double _dismissDragY = 0;
+  late final AnimationController _dismissCtrl;
+  late final SpringDescription _dismissSpring;
 
   // Double-tap-to-like heart burst on the artwork.
   bool _heartBurst = false;
@@ -125,6 +160,22 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void initState() {
     super.initState();
+    // SP-82: full page above the shell — every shell tucks its dock /
+    // bottom bar / mini player while the player is open (LastWave:
+    // "hasBottomNavigation = currentRoute == MainShell.route"). This is
+    // the fix for "I don't want nav bar in my player page".
+    ShellOverlaysBus.fullPageAbove.value = true;
+    // SP-77 dismiss spring: spring(0.8, 650) — the same constants as the
+    // /player entrance (ExpressiveSpring in expressive_motion.dart).
+    _dismissSpring = const SpringDescription(
+      mass: 1,
+      stiffness: 650,
+      damping: 2 * 0.8 * 25.495, // 2·ζ·√k keeps ζ at the reference 0.8
+    );
+    _dismissCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+    _dismissCtrl.addListener(() {
+      if (mounted) setState(() => _dismissDragY = _dismissCtrl.value);
+    });
     if (widget.videoId != null) {
       GetIt.I<YTMusic>().getSongDetails(widget.videoId!).then((song) {
         if (song != null) {
@@ -141,7 +192,45 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void dispose() {
     GetIt.I<MediaPlayer>().currentSongNotifier.removeListener(songListener);
+    _dismissCtrl.dispose();
+    // SP-82: the full page is gone — shells may show their chrome again.
+    ShellOverlaysBus.fullPageAbove.value = false;
     super.dispose();
+  }
+
+  // ------------------------------------------------- drag-to-dismiss (SP-77)
+
+  void _onDismissDragUpdate(DragUpdateDetails d) {
+    if (_dismissCtrl.isAnimating) _dismissCtrl.stop();
+    final delta = d.delta.dy;
+    // Downward follows 1:1; upward is rubber-banded (the sheet only ever
+    // collapses downward, like the reference).
+    final next = _dismissDragY + (delta < 0 ? delta * 0.3 : delta);
+    setState(() => _dismissDragY = next);
+  }
+
+  void _onDismissDragEnd(DragEndDetails d) {
+    const threshold = 88.0; // dp — the reference's swipe threshold.
+    final velocity = d.velocity.pixelsPerSecond.dy;
+    if (_dismissDragY > threshold || (velocity > 1500 && _dismissDragY > 24)) {
+      HapticFeedback.mediumImpact();
+      // The route's reverse transition (expressive spring) plays the
+      // collapse — same contract as the reference's onCollapse().
+      // SP-81: sheet hosting collapses the overlay instead.
+      if (mounted) _close();
+      return;
+    }
+    _springDismissBack(velocity);
+  }
+
+  void _springDismissBack([double velocity = 0]) {
+    if (!mounted) return;
+    _dismissCtrl.animateWith(SpringSimulation(
+      _dismissSpring,
+      _dismissDragY,
+      0,
+      velocity.clamp(-3000.0, 3000.0).toDouble(),
+    ));
   }
 
   void songListener() {
@@ -412,9 +501,7 @@ class _PlayerPageState extends State<PlayerPage> {
     const SingleActivator(LogicalKeyboardKey.keyL): _toggleLyrics,
     const SingleActivator(LogicalKeyboardKey.keyQ): () =>
         _key.currentState?.openEndDrawer(),
-    const SingleActivator(LogicalKeyboardKey.escape): () {
-      if (mounted) context.pop();
-    },
+    const SingleActivator(LogicalKeyboardKey.escape): _close,
   };
 
   // ---------------------------------------------------------------- build
@@ -469,7 +556,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   song: song.extras ?? {'videoId': song.id, 'title': song.title},
                   borderRadius: radius,
                 ),
-                close: () => context.pop(),
+                close: _close,
                 openQueue: () => _key.currentState?.openEndDrawer(),
                 openQuality: () => _openQuality(song),
                 toggleLyrics: _toggleLyrics,
@@ -490,15 +577,14 @@ class _PlayerPageState extends State<PlayerPage> {
               );
             }
 
-            return Scaffold(
-              key: _key,
-              backgroundColor: Colors.black,
-              endDrawer: SizedBox(
-                width: min(400, MediaQuery.of(context).size.width) - 50,
-                child: const QueueList(),
-              ),
-              body: Stack(
-                children: [
+            // SP-77: the player stage is built once; on mobile it is then
+            // wrapped in the reference player-sheet drag-to-dismiss.
+            // deferToChild (default) keeps inner recognizers (seek bar,
+            // artwork swipes, taps) winning their own arenas — the outer
+            // vertical drag only claims the empty stage areas, exactly
+            // like the reference's root detectVerticalDragGestures.
+            final Widget stage = Stack(
+              children: [
                   if (_isMobile)
                   // LastWave look: near-black base, only a whisper of the
                   // cover colour behind the artwork.
@@ -641,7 +727,28 @@ class _PlayerPageState extends State<PlayerPage> {
                     ),
                   ),
                 ],
+            );
+
+            final Widget body = _isMobile
+                ? GestureDetector(
+                    onVerticalDragUpdate: _onDismissDragUpdate,
+                    onVerticalDragEnd: _onDismissDragEnd,
+                    onVerticalDragCancel: () => _springDismissBack(),
+                    child: Transform.translate(
+                      offset: Offset(0, _dismissDragY),
+                      child: stage,
+                    ),
+                  )
+                : stage;
+
+            return Scaffold(
+              key: _key,
+              backgroundColor: Colors.black,
+              endDrawer: SizedBox(
+                width: min(400, MediaQuery.of(context).size.width) - 50,
+                child: const QueueList(),
               ),
+              body: body,
             );
           },
         ),
@@ -680,7 +787,7 @@ class _PlayerPageState extends State<PlayerPage> {
                 radius: 17,
                 color: _surface,
                 tooltip: 'Close',
-                onTap: () => context.pop(),
+                onTap: _close,
                 child: const Icon(_Ic.chevronDown,
                     size: 26, color: Colors.white),
               ),
@@ -1101,21 +1208,29 @@ class _PlayerPageState extends State<PlayerPage> {
                 ),
                 if (artist.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  Container(
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: _role(0.30, 0.09),
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: Text(
-                      artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                        color: _accentSoft,
+                  // SP-77: tap the artist chip → the new LastWave-style
+                  // artist page (name only; the page resolves the
+                  // browseId via artist search itself).
+                  GestureDetector(
+                    onTap: () => context.push('/artist', extra: {
+                      'name': artist,
+                    }),
+                    child: Container(
+                      padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: _role(0.30, 0.09),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Text(
+                        artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: _accentSoft,
+                        ),
                       ),
                     ),
                   ),
@@ -1212,14 +1327,20 @@ class _PlayerPageState extends State<PlayerPage> {
 
         return Column(
           children: [
-            _ChunkySeekBar(
-              fraction: fraction,
+            // SP-80: honour the Settings > Seek bar choice on the player
+            // page (was a hardcoded style, so the setting did nothing on
+            // mobile). Drag preview (time labels follow the thumb) kept.
+            ZenSlider(
+              style: ZenSliderStyle.fromName(
+                  AppearancePrefs.sliderStyle.value),
+              value: fraction,
+              isPlaying: playing,
               enabled: totalMs > 0,
-              active: _accent,
-              inactive: Colors.white.withValues(alpha: 0.20),
-              onDrag: (v) => setState(() => _seekDrag = v),
-              onCommit: commit,
-              onCancel: () => setState(() => _seekDrag = null),
+              height: 34,
+              activeColor: _accent,
+              inactiveColor: Colors.white.withValues(alpha: 0.20),
+              onChanged: (v) => setState(() => _seekDrag = v),
+              onChangeEnd: commit,
             ),
             const SizedBox(height: 2),
             Padding(
@@ -1400,7 +1521,7 @@ class _PlayerPageState extends State<PlayerPage> {
             icon: _Ic.chevronDown,
             tooltip: 'Close',
             filled: true,
-            onPressed: () => context.pop(),
+            onPressed: _close,
           ),
           Expanded(
             child: Column(
@@ -2496,144 +2617,6 @@ class _ModeBtn extends StatelessWidget {
   }
 }
 
-/// LastWave seek bar: thick rounded capsule that stops short of a tall
-/// vertical thumb, then a thick inactive capsule and a tiny end marker.
-class _ChunkySeekBar extends StatelessWidget {
-  const _ChunkySeekBar({
-    required this.fraction,
-    required this.enabled,
-    required this.active,
-    required this.inactive,
-    required this.onDrag,
-    required this.onCommit,
-    required this.onCancel,
-  });
-
-  final double fraction;
-  final bool enabled;
-  final Color active;
-  final Color inactive;
-  final ValueChanged<double> onDrag;
-  final ValueChanged<double> onCommit;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, c) {
-        final w = c.maxWidth;
-        double at(Offset p) => w <= 0 ? 0 : (p.dx / w).clamp(0.0, 1.0);
-        return MouseRegion(
-          cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapUp: enabled ? (d) => onCommit(at(d.localPosition)) : null,
-            onHorizontalDragStart:
-            enabled ? (d) => onDrag(at(d.localPosition)) : null,
-            onHorizontalDragUpdate:
-            enabled ? (d) => onDrag(at(d.localPosition)) : null,
-            onHorizontalDragEnd: enabled
-                ? (_) => onCommit(fraction)
-                : null,
-            onHorizontalDragCancel: enabled ? onCancel : null,
-            child: SizedBox(
-              height: 44,
-              width: double.infinity,
-              child: CustomPaint(
-                painter: _SeekPainter(
-                  fraction: fraction,
-                  active: active,
-                  inactive: inactive,
-                  dim: !enabled,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _SeekPainter extends CustomPainter {
-  _SeekPainter({
-    required this.fraction,
-    required this.active,
-    required this.inactive,
-    required this.dim,
-  });
-
-  final double fraction;
-  final Color active;
-  final Color inactive;
-  final bool dim;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final width = size.width;
-    final centerY = size.height / 2;
-    const trackH = 14.0;
-    const thumbW = 5.0;
-    const thumbH = 38.0;
-    const clearance = 9.0;
-    final r = const Radius.circular(trackH / 2);
-
-    final fg = dim ? active.withValues(alpha: 0.5) : active;
-
-    final rawX = fraction * width;
-    final thumbCx = width > thumbW
-        ? rawX.clamp(thumbW / 2, width - thumbW / 2).toDouble()
-        : width / 2;
-    final activeEnd = (thumbCx - clearance).clamp(0.0, width).toDouble();
-    final inactiveStart = (thumbCx + clearance).clamp(0.0, width).toDouble();
-
-    // Active capsule.
-    if (activeEnd > 0) {
-      canvas.drawRRect(
-        RRect.fromLTRBR(0, centerY - trackH / 2, activeEnd,
-            centerY + trackH / 2, r),
-        Paint()..color = fg,
-      );
-    }
-
-    // Inactive capsule.
-    if (inactiveStart < width) {
-      canvas.drawRRect(
-        RRect.fromLTRBR(inactiveStart, centerY - trackH / 2, width,
-            centerY + trackH / 2, r),
-        Paint()..color = inactive,
-      );
-    }
-
-    // End-of-track marker.
-    final endX = width - trackH / 2;
-    if (inactiveStart < endX) {
-      canvas.drawCircle(
-          Offset(endX, centerY), 2, Paint()..color = fg.withValues(alpha: 0.9));
-    }
-
-    // Thumb: soft dark halo for separation + the pill itself.
-    final thumbRect = RRect.fromLTRBR(
-      thumbCx - thumbW / 2,
-      centerY - thumbH / 2,
-      thumbCx + thumbW / 2,
-      centerY + thumbH / 2,
-      const Radius.circular(thumbW / 2),
-    );
-    canvas.drawRRect(
-      thumbRect.inflate(1),
-      Paint()..color = Colors.black.withValues(alpha: 0.35),
-    );
-    canvas.drawRRect(thumbRect, Paint()..color = fg);
-  }
-
-  @override
-  bool shouldRepaint(_SeekPainter o) =>
-      o.fraction != fraction ||
-          o.active != active ||
-          o.inactive != inactive ||
-          o.dim != dim;
-}
 
 
 // ════════════════════════════════════════════════════════════════════

@@ -563,7 +563,21 @@ class _ResultTile extends StatelessWidget {
         await GetIt.I<MediaPlayer>().playSong(Map.from(item));
       }
     } else if (item['endpoint'] != null) {
-      context.push('/browse', extra: {'endpoint': item['endpoint']});
+      // SP-77: artist results open the new LastWave-style artist page on
+      // mobile (name + browseId when the row carries one); every other
+      // endpoint type — and desktop — keeps the generic browse page.
+      final isArtistRow =
+          (item['type'] ?? '').toString().toUpperCase() == 'ARTIST';
+      if (isArtistRow && (Platform.isAndroid || Platform.isIOS)) {
+        context.push('/artist', extra: {
+          'name': (item['title'] ?? '').toString(),
+          'browseId': item['endpoint'] is Map
+              ? (item['endpoint']['browseId'] ?? '').toString()
+              : null,
+        });
+      } else {
+        context.push('/browse', extra: {'endpoint': item['endpoint']});
+      }
     }
   }
 

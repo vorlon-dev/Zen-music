@@ -48,6 +48,23 @@ class AppearancePrefs {
   // Buffered streaming.
   static final bufferedStreaming = ValueNotifier<bool>(true);
 
+  // ── SP-78: beat-synced haptics (mobile) ──
+  // Vibrate on the song's beat grid while it plays.
+  static final beatHaptics = ValueNotifier<bool>(false);
+  // 0 light · 1 medium · 2 strong
+  static final beatStrength = ValueNotifier<int>(1);
+
+  // ── SP-78: ZenWall (Android) ──
+  // The playing song's Spotify canvas as the device wallpaper; the album
+  // art whenever the canvas is missing. Applied on every song change.
+  static final zenWall = ValueNotifier<bool>(false);
+
+  // ── SP-79: custom app logo (mobile picker) ──
+  // Asset path of the user's chosen logo from assets/logos/, or '' for the
+  // built-in default. Chosen on mobile (Settings ▸ Logo), applied wherever
+  // the app shows its brand mark.
+  static final customLogo = ValueNotifier<String>('');
+
   static Future<void> load() async {
     if (_loaded) return;
     final p = await SharedPreferences.getInstance();
@@ -72,6 +89,10 @@ class AppearancePrefs {
     crossfadeEnabled.value = p.getBool('ap_xfade') ?? false;
     crossfadeSeconds.value = p.getDouble('ap_xfade_secs') ?? 4;
     bufferedStreaming.value = p.getBool('ap_bufstream') ?? true;
+    beatHaptics.value = p.getBool('ap_beat_haptics') ?? false;
+    beatStrength.value = p.getInt('ap_beat_strength') ?? 1;
+    zenWall.value = p.getBool('ap_zenwall') ?? false;
+    customLogo.value = p.getString('ap_custom_logo') ?? '';
     _loaded = true;
   }
 
@@ -191,5 +212,25 @@ class AppearancePrefs {
   static Future<void> setBufferedStreaming(bool v) async {
     bufferedStreaming.value = v;
     await _write('ap_bufstream', v);
+  }
+
+  static Future<void> setBeatHaptics(bool v) async {
+    beatHaptics.value = v;
+    await _write('ap_beat_haptics', v);
+  }
+
+  static Future<void> setBeatStrength(int v) async {
+    beatStrength.value = v.clamp(0, 2);
+    await _write('ap_beat_strength', beatStrength.value);
+  }
+
+  static Future<void> setZenWall(bool v) async {
+    zenWall.value = v;
+    await _write('ap_zenwall', v);
+  }
+
+  static Future<void> setCustomLogo(String v) async {
+    customLogo.value = v;
+    await _write('ap_custom_logo', v);
   }
 }

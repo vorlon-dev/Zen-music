@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'package:zenmusic/desktop/core/widgets/section_item.dart';
+import 'package:zenmusic/desktop/services/innertubex_bridge.dart'; // SP-78
 import 'package:zenmusic/desktop/services/yt_video_engine.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 
@@ -27,23 +29,76 @@ const int _kStartHeight = 480;
 
 /// Caches extraction results (URLs stay valid for hours) and dedupes
 /// in-flight requests.
+///
+/// SP-78: ANDROID tries the app's own native InnerTube resolver FIRST
+/// (zen/innertubex — client rotation + po-token backed, the same engine
+/// the audio path already runs on) and only falls back to the pure-Dart
+/// pipeline when the bridge is missing or refuses. Windows (and every
+/// non-Android platform) keeps the pure-Dart pipeline directly. Both
+/// paths return the page's YtVideoStreams shape; direct googlevideo URLs
+/// carry their headers through the player's httpHeaders.
 class _StreamCache {
   static final Map<String, ({Future<YtVideoStreams?> f, DateTime at})> _m = {};
 
-  static Future<YtVideoStreams?> get(String id, int height) {
+  static Future<YtVideoStreams?> get(String id, int height,
+      {bool forceDart = false}) {
     final k = '$id@$height';
     final e = _m[k];
     if (e != null &&
+        !forceDart &&
         DateTime.now().difference(e.at) < const Duration(hours: 3)) {
       return e.f;
     }
     if (_m.length > 12) _m.remove(_m.keys.first);
-    final f = YtVideoEngine.extractVideo(id, maxHeight: height).then((s) {
+    final f = _resolve(id, height, forceDart: forceDart).then((s) {
       if (s == null || s.videoUrl == null) _m.remove(k);
       return s;
     });
     _m[k] = (f: f, at: DateTime.now());
     return f;
+  }
+
+  static Future<YtVideoStreams?> _resolve(String id, int height,
+      {bool forceDart = false}) async {
+    // forceDart: the audio self-heal re-opens through the PROVEN pure-Dart
+    // proxy path — if the native track setup ever plays silent, the heal
+    // cannot land on the same silent setup again.
+    if (!forceDart &&
+        Platform.isAndroid &&
+        InnertubexBridge.available != false) {
+      final native = await _nativeStreams(id, height);
+      if (native != null && native.videoUrl != null) {
+        print('[yt_video] $id streams via native innertube');
+        return native;
+      }
+      print('[yt_video] $id native innertube returned nothing — '
+          'falling back to pure Dart');
+    }
+    return YtVideoEngine.extractVideo(id, maxHeight: height);
+  }
+
+  /// Native InnerTube extraction -> the page's stream shape. audioUrl
+  /// rides as mpv's external track exactly like the proxy path; when the
+  /// native side hands back a muxed-only payload the audio field stays
+  /// null and the video file carries the sound itself.
+  static Future<YtVideoStreams?> _nativeStreams(String id, int height) async {
+    try {
+      final itx = await InnertubexBridge.extractVideo(id, maxHeight: height);
+      if (itx == null || itx.videoUrl == null || itx.videoUrl!.isEmpty) {
+        return null;
+      }
+      return YtVideoStreams(
+        videoUrl: itx.videoUrl,
+        audioUrl: (itx.audioUrl == null || itx.audioUrl!.isEmpty)
+            ? null
+            : itx.audioUrl,
+        headers: itx.headers,
+        height: height,
+      );
+    } catch (e) {
+      print('[yt_video] native extractVideo($id) failed: $e');
+      return null;
+    }
   }
 }
 
@@ -96,6 +151,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
   bool _ambient = true;
   bool _cover = false;
   bool _advancing = false;
+  String? _healedForId; // SP-77: one audio self-heal per video, no loops
   int _volume = 100;
   double _speed = 1.0;
   double _speedBeforeHold = 1.0;
@@ -156,9 +212,23 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       {String? title,
         String? artist,
         bool keepMeta = false,
-        bool fromHistory = false}) async {
+        bool fromHistory = false,
+        bool heal = false}) async {
     final token = ++_loadToken;
     _hideTimer?.cancel();
+
+    if (heal) {
+      // SP-77 self-heal: re-open the cached stream (audio-files is re-set
+      // inside _open) without redoing related/qualities/ambient work, and
+      // land back on the position the user was watching. SP-78: the heal
+      // forces the pure-Dart proxy path so a silent native track setup
+      // cannot be re-opened into the same silence.
+      final s = await _StreamCache.get(id, _height, forceDart: true);
+      if (!mounted || token != _loadToken) return;
+      if (s == null || s.videoUrl == null) return;
+      await _open(s, startAt: _pos.value, token: token);
+      return;
+    }
 
     if (!fromHistory && id != _id && _title.isNotEmpty) {
       _history.add({'id': _id, 'title': _title, 'artist': _artist});
@@ -248,6 +318,29 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       _error = null;
     });
     _poke();
+    // SP-77: verify the audio track actually landed. With today's YouTube
+    // the picked stream is usually VIDEO-ONLY and the sound rides on the
+    // external /audio track; if mpv dropped it (cold proxy, failed open,
+    // property set while a previous file was still loading) the page used
+    // to play silently forever. One bounded check + one self-heal reload.
+    _verifyAudioTrack(s, token: token ?? _loadToken);
+  }
+
+  /// Watches mpv's track list for an audio track; if none appears within
+  /// the window for a video-only stream, reload once so the freshly set
+  /// `audio-files` takes effect (reload also restarts track enumeration).
+  Future<void> _verifyAudioTrack(YtVideoStreams s, {required int token}) async {
+    for (var i = 0; i < 12; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (!mounted || token != _loadToken) return;
+      if (_p.state.tracks.audio.isNotEmpty) return; // sound is on
+    }
+    if (!mounted || token != _loadToken) return;
+    if (_healedForId == _id) return; // already tried — avoid a reload loop
+    _healedForId = _id;
+    print('[yt_video] no audio track after 6 s — reloading once to heal');
+    await _load(_id, title: _title, artist: _artist, keepMeta: true,
+        fromHistory: true, heal: true);
   }
 
   Future<void> _switchQuality(int height) async {

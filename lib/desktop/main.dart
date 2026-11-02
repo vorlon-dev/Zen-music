@@ -39,6 +39,7 @@ import 'package:zenmusic/desktop/material3/m3_theme.dart'; // SP-58
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart'; // SP-54 (Windows shader glass)
 import 'package:zenmusic/desktop/services/download_manager.dart';
 import 'package:zenmusic/desktop/services/file_storage.dart';
+import 'package:zenmusic/desktop/services/jam_service.dart'; // SP-83: boot restored (SP-78 rewrite dropped it)
 import 'package:zenmusic/desktop/services/library.dart';
 import 'package:zenmusic/desktop/services/lyrics.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
@@ -48,6 +49,8 @@ import 'package:zenmusic/desktop/utils/router.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/ytmusic/modals/yt_config.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
+import 'package:zenmusic/desktop/services/beat_haptics.dart'; // SP-78
+import 'package:zenmusic/desktop/services/zen_wall_service.dart'; // SP-78
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_desktop_engine.dart';
 import 'package:zenmusic/desktop/spotify/sp4_probe.dart';
@@ -121,6 +124,13 @@ Future<void> main(List<String> args) async {
   final MediaPlayer mediaPlayer = MediaPlayer();
   GetIt.I.registerSingleton<MediaPlayer>(mediaPlayer);
 
+  // SP-78: beat haptics + ZenWall. Both self-gate (mobile-only, prefs off
+  // by default) so wiring them unconditionally is inert on Windows.
+  GetIt.I.registerSingleton<BeatHapticsEngine>(
+      BeatHapticsEngine(mediaPlayer));
+  GetIt.I<BeatHapticsEngine>().start();
+  ZenWallService.instance.attach(mediaPlayer.currentSongNotifier);
+
   final libraryService = LibraryService();
   GetIt.I.registerSingleton<LibraryService>(libraryService);
 
@@ -132,6 +142,13 @@ Future<void> main(List<String> args) async {
   GetIt.I.registerSingleton<LyricsService>(LyricsService());
 
   GetIt.I.registerSingleton<YTMusic>(ytMusic);
+
+  // SP-83: LastWave Jam (listen together) boot is BACK. The SP-78 rewrite
+  // of this file rebuilt it from a pre-SP-77 base and silently dropped the
+  // start() call — rooms could never connect even when the page opened.
+  // App-scoped controller + playback sync bridge; rooms survive navigation
+  // and run for the app's lifetime.
+  JamService.instance.start(mediaPlayer);
 
   // Spotify session: restore login state (Hive-backed). Cheap for token-only
   // sessions; mints a token for sp_dc sessions. No resolve, no dealer

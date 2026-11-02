@@ -1356,6 +1356,7 @@ class MediaPlayer extends ChangeNotifier {
   Future<void> playSong(Map<String, dynamic> song) async {
     if (song['videoId'] == null) return;
     queueSnapshot.value = [Map<String, dynamic>.from(song)];
+    _queueEpoch++; // SP-82: the sequence is about to be replaced
 
     // SP-5b: Windows + Spotify URI -> engine takes over.
     if (Platform.isWindows) {
@@ -1419,6 +1420,7 @@ class MediaPlayer extends ChangeNotifier {
 
     queueSnapshot.value =
         section.map((s) => Map<String, dynamic>.from(s)).toList();
+    _queueEpoch++; // SP-82: the sequence is about to be replaced
 
     final song = Map<String, dynamic>.from(section[index]);
 
@@ -1439,7 +1441,7 @@ class MediaPlayer extends ChangeNotifier {
       await _player.setAudioSource(first);
       _player.play();
       if (section.length > 1) {
-        Future(() => _addRemainingToPlaylist(section, index));
+        _queueAddRemaining(section, index); // SP-82: epoch-guarded
       }
       _saveCurrentState();
     } catch (e) {
@@ -1480,6 +1482,7 @@ class MediaPlayer extends ChangeNotifier {
     if (songs.isEmpty) return;
     queueSnapshot.value =
         songs.map((s) => Map<String, dynamic>.from(s as Map)).toList();
+    _queueEpoch++; // SP-82: the sequence is about to be replaced
     if (_engineOwnsPlayback) await _releaseEngine();
 
     _buttonState.value = ButtonState.loading;
@@ -1528,7 +1531,7 @@ class MediaPlayer extends ChangeNotifier {
       _player.play();
 
       if (songs.length > 1) {
-        Future(() => _addRemainingToPlaylist(songs, index));
+        _queueAddRemaining(songs, index); // SP-82: epoch-guarded
       }
       _saveCurrentState();
     } catch (e) {
@@ -1538,7 +1541,25 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
-  Future<void> _addRemainingToPlaylist(List songs, int playedIndex) async {
+  /// SP-82: epoch of the just_audio sequence. Bumped by every path that
+  /// REPLACES the sequence (playSong / playFromSection / playAll /
+  /// startRelated / stop / the snapshot walk) so a lazy preloader that is
+  /// still resolving tracks for the OLD sequence cannot land them behind
+  /// the new playhead (they would duplicate the current track and
+  /// scramble skip order).
+  int _queueEpoch = 0;
+
+  /// SP-82: capture the epoch at CALL time (synchronously) — by the time
+  /// the deferred _addRemainingToPlaylist runs, the sequence may already
+  /// have been replaced.
+  void _queueAddRemaining(List songs, int playedIndex) {
+    final epoch = _queueEpoch;
+    Future(() => _addRemainingToPlaylist(songs, playedIndex, epoch));
+  }
+
+  Future<void> _addRemainingToPlaylist(List songs, int playedIndex,
+      [int? epoch]) async {
+    final stamp = epoch ?? _queueEpoch;
     try {
       final int maxPreload = 3;
       int added = 0;
@@ -1546,9 +1567,11 @@ class MediaPlayer extends ChangeNotifier {
       for (int i = playedIndex + 1;
       i < songs.length && added < maxPreload;
       i++) {
+        if (stamp != _queueEpoch) return; // SP-82: sequence was replaced
         try {
           final source =
           await _getAudioSource(Map<String, dynamic>.from(songs[i]));
+          if (stamp != _queueEpoch) return; // SP-82: replaced mid-resolve
           await _player.addAudioSource(source);
           added++;
         } catch (e) {
@@ -1577,6 +1600,7 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> startRelated(Map<String, dynamic> song,
       {bool radio = false, bool shuffle = false, bool isArtist = false}) async {
+    _queueEpoch++; // SP-82: the sequence is about to be replaced
     if (_engineOwnsPlayback) await _releaseEngine();
     await _player.clearAudioSources();
     if (!isArtist) {
@@ -1607,6 +1631,7 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    _queueEpoch++; // SP-82: in-flight preloaders must not refill after a stop
     if (_engineOwnsPlayback) await _releaseEngine();
     await _player.stop();
     await _player.clearAudioSources();
@@ -1681,7 +1706,19 @@ class MediaPlayer extends ChangeNotifier {
       await _releaseEngine();
       return;
     }
-    await _player.seekToNext();
+    // SP-82: walk the just_audio sequence while it lasts…
+    if (_player.hasNext) {
+      await _player.seekToNext();
+      return;
+    }
+    // SP-82: …and never go dead when the preloaded window ran out —
+    // continue through the queueSnapshot the user tapped into instead.
+    // (The Android section player only preloads the next 3 tracks and
+    // nothing refills it for Spotify tracks — on the 4th track of a long
+    // "Top Global" chart, or right after a CDN-resolve failure, the old
+    // blind seekToNext() silently no-oped and the player-page transport
+    // buttons looked dead. User report, fixed here.)
+    await _playFromSnapshot(forward: true);
   }
 
   Future<void> skipPrevious() async {
@@ -1712,7 +1749,53 @@ class MediaPlayer extends ChangeNotifier {
       await _releaseEngine();
       return;
     }
-    await _player.seekToPrevious();
+    // SP-82: same contract as skipNext — sequence first, snapshot second.
+    if (_player.hasPrevious) {
+      await _player.seekToPrevious();
+      return;
+    }
+    await _playFromSnapshot(forward: false);
+  }
+
+  /// SP-82: walk the queueSnapshot the user tapped into (a Spotify "Top
+  /// Global" chart, a playlist, a shelf section) and play the neighbouring
+  /// track — WITHOUT touching the snapshot, so the section stays the live
+  /// queue and further skips keep walking it. This is the safety net that
+  /// keeps the player-page transport buttons alive once the lazily
+  /// preloaded just_audio window runs dry (Android Spotify sections),
+  /// mirroring what the engine path already does on Windows.
+  Future<void> _playFromSnapshot({required bool forward}) async {
+    final snapshot = queueSnapshot.value;
+    final currentId = _currentSongNotifier.value?.id;
+    final idx = snapshot.indexWhere((s) => s['videoId'] == currentId);
+    final target = forward ? idx + 1 : idx - 1;
+    if (idx < 0 || target < 0 || target >= snapshot.length) {
+      // Current track is outside the section, or the section ended —
+      // nothing sane to walk to; leave playback exactly as it is.
+      return;
+    }
+    final song = Map<String, dynamic>.from(snapshot[target]);
+    // Invalidate any lazy preloader still resolving the OLD sequence so
+    // it cannot land stale tracks behind the new playhead.
+    _queueEpoch++;
+    _buttonState.value = ButtonState.loading;
+    notifyListeners();
+    try {
+      await _player.stop();
+      await _player.clearAudioSources();
+      final src = await _getAudioSource(song);
+      await _player.setAudioSource(src);
+      _player.play();
+      // Refill the preloaded window ahead of the new playhead.
+      if (target + 1 < snapshot.length) {
+        _queueAddRemaining(snapshot, target);
+      }
+      _saveCurrentState();
+    } catch (e) {
+      print('[skip] snapshot walk error: $e');
+      _buttonState.value = ButtonState.paused;
+      notifyListeners();
+    }
   }
 
   Future<void> _addSongListToQueue(List songs, {bool isNext = false}) async {
