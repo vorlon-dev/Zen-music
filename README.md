@@ -555,13 +555,10 @@ Yes. ZenMusic supports source extensions.
 
 ## Support the Project
 
-ZenMusic is free and open source, and it is built in spare time. If you enjoy it and want to help keep it improving, you can buy me a chai or a coffee. It is completely optional, and starring the repo or sharing the app helps just as much.
+ZenMusic is free and open source, and it is built in spare time. If you enjoy it and want to help keep it improving, you can buy me a chai. It is completely optional, and starring the repo or sharing the app helps just as much.
 
 <a href="https://www.buymeachai.in/pratam" target="_blank">
   <img src="https://img.shields.io/badge/Buy%20Me%20A%20Chai-pratam-D4944A?style=for-the-badge" alt="Buy Me A Chai" height="34" />
-</a>
-<a href="https://buymeacoffee.com/ajisth" target="_blank">
-  <img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ajisth-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy Me A Coffee" height="34" />
 </a>
 
 </div>
