@@ -46,6 +46,16 @@ jobs:
       - name: Build web
         run: flutter build web -t lib/web/web_main.dart --release
 
+      - name: Create Pages project if missing
+        if: ${{ env.CF_TOKEN != '' }}
+        run: >
+          npx --yes wrangler@3 pages project create
+          "${{ vars.CLOUDFLARE_PROJECT || 'zenmusic-d6t' }}"
+          --production-branch=main || echo "Project exists or could not be created; continuing."
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Deploy to Cloudflare Pages
         if: ${{ env.CF_TOKEN != '' }}
         run: >
