@@ -26,10 +26,11 @@ class WebSong {
 
   /// Builds a song from one JioSaavn-style result object.
   factory WebSong.fromJson(Map<String, dynamic> map) {
-    final artists = map['artists'] is Map
-        ? ((map['artists'] as Map)['primary'] as List? ?? const [])
-        : (map['artists'] as List? ?? const []);
-    final artistNames = artists
+    final rawArtists = map['artists'];
+    Object? artists = rawArtists;
+    if (rawArtists is Map) artists = rawArtists['primary'];
+    final artistList = artists is List ? artists : const <Object?>[];
+    final artistNames = artistList
         .whereType<Map>()
         .map((a) => unescapeHtml('${a['name'] ?? ''}'))
         .where((s) => s.isNotEmpty)
