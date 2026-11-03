@@ -14,6 +14,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'song_dna_dialog.dart';
 
+import 'package:zenmusic/desktop/screens/settings/player/equalizer_page.dart';
 import 'package:zenmusic/desktop/screens/import_dialog.dart';
 import 'package:zenmusic/desktop/services/import_service.dart';
 import 'package:zenmusic/desktop/services/bottom_message.dart';
@@ -397,8 +398,16 @@ class _AppleMusicStylePopup extends StatelessWidget {
                               icon: AdaptiveIcons.equalizer,
                               title: 'Equalizer',
                               onTap: () {
+                                // Grab the root navigator BEFORE popping the
+                                // sheet, then push the page directly. The
+                                // /settings/player/equalizer route lives in a
+                                // shell branch and can't be reached from the
+                                // full-screen player.
+                                final nav =
+                                    Navigator.of(context, rootNavigator: true);
                                 Navigator.pop(context);
-                                // R9: EqualizerPage push (Android-gated upstream).
+                                nav.push(MaterialPageRoute(
+                                    builder: (_) => const EqualizerPage()));
                               },
                             ),
                           Padding(

@@ -8,6 +8,28 @@ import 'package:http/http.dart' as http;
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_config.dart';
 
+/// Playlist metadata + tracks (cover art, title, owner, description).
+class SpotifyPlaylistDetail {
+  SpotifyPlaylistDetail({
+    this.name = '',
+    this.description = '',
+    this.owner = '',
+    this.coverUrl = '',
+    this.totalCount = 0,
+    this.songs = const [],
+    this.kind = 'Playlist',
+    this.year = '',
+  });
+  final String kind; // 'Playlist' | 'Album'
+  final String year;
+  final String name;
+  final String description;
+  final String owner;
+  final String coverUrl;
+  final int totalCount;
+  final List<Map<String, dynamic>> songs;
+}
+
 class SpotifyLibrary {
   SpotifyLibrary._();
   static final SpotifyLibrary instance = SpotifyLibrary._();
@@ -171,8 +193,31 @@ class SpotifyLibrary {
     return out;
   }
 
+  /// Liked songs. Order matters: Pathfinder `fetchLibraryTracks` first (same
+  /// as Stopify, not subject to the Web API 429), then libraryV3, and the
+  /// REST endpoint only as a last resort while it isn't rate-limited.
   Future<List<Map<String, dynamic>>> userLikedSongs(
       {int limit = 100, int offset = 0}) async {
+    // 1. fetchLibraryTracks
+    final tracksData = await _post(_op(
+        'fetchLibraryTracks', SpotifyConfig.fetchLibraryTracksHash, {
+      'offset': offset,
+      'limit': limit > 50 ? limit : 50,
+    }));
+    if (tracksData != null) {
+      final items = tracksData['data']?['me']?['library']?['tracks']
+          ?['items'] as List? ??
+          [];
+      final songs = <Map<String, dynamic>>[];
+      for (final wrap in items) {
+        final s = _trackFromLibraryTrack(wrap);
+        if (s != null) songs.add(s);
+      }
+      _log('userLikedSongs: ${songs.length} via fetchLibraryTracks');
+      if (songs.isNotEmpty) return songs;
+    }
+
+    // 2. libraryV3
     final data = await _post(_op('libraryV3', SpotifyConfig.libraryHash, {
       'filters': ['LikedSongs'],
       'order': null,
@@ -195,9 +240,44 @@ class SpotifyLibrary {
         return songs;
       }
     }
+
+    // 3. REST, skipped while a previous 429 is still cooling down.
+    final now = DateTime.now();
+    if (_restBlockedUntil != null && now.isBefore(_restBlockedUntil!)) {
+      _log('liked REST skipped (rate-limited until $_restBlockedUntil)');
+      return [];
+    }
     final viaRest = await _likedSongsViaRest(limit, offset);
     _log('userLikedSongs: ${viaRest.length} via REST me/tracks');
     return viaRest;
+  }
+
+  DateTime? _restBlockedUntil;
+
+  /// Parses an item of `me.library.tracks.items`
+  /// (`{track: {_uri, data: {...}}}`).
+  Map<String, dynamic>? _trackFromLibraryTrack(dynamic wrap) {
+    if (wrap is! Map) return null;
+    final track = wrap['track'];
+    if (track is! Map) return _trackFromPathfinder(wrap);
+    final data = track['data'];
+    if (data is! Map) return _trackFromPathfinder(wrap);
+    final copy = Map<String, dynamic>.from(data);
+    var uri = (track['_uri'] ?? track['uri'] ?? copy['uri'] ?? '').toString();
+    if (uri.isEmpty) {
+      final id = (track['id'] ?? copy['id'] ?? '').toString();
+      if (id.isNotEmpty) uri = 'spotify:track:$id';
+    }
+    if (uri.isEmpty) return _trackFromPathfinder(wrap);
+    copy['uri'] = uri;
+    // duration can be {totalMilliseconds} or trackDuration/plain number.
+    final dur = copy['duration'] ?? copy['trackDuration'];
+    if (dur is num) {
+      copy['duration'] = {'totalMilliseconds': dur};
+    } else if (dur is Map && dur['totalMilliseconds'] == null) {
+      copy['duration'] = {'totalMilliseconds': 0};
+    }
+    return _trackFromMap(copy);
   }
 
   Future<List<Map<String, dynamic>>> _likedSongsViaRest(
@@ -237,6 +317,13 @@ class SpotifyLibrary {
         }
         if (r.statusCode == 403) {
           _log('liked REST 403 — token lacks user-library-read');
+          break;
+        }
+        if (r.statusCode == 429) {
+          final retry = int.tryParse(r.headers['retry-after'] ?? '') ?? 60;
+          _restBlockedUntil =
+              DateTime.now().add(Duration(seconds: retry.clamp(30, 900)));
+          _log('liked REST 429 — backing off ${retry}s');
           break;
         }
         if (r.statusCode < 200 || r.statusCode >= 300) {
@@ -307,7 +394,18 @@ class SpotifyLibrary {
   /// Fetches tracks of a NORMAL playlist. Pass the full uri
   /// ("spotify:playlist:...").
   Future<List<Map<String, dynamic>>> fetchPlaylistTracks(String uri,
+          {int limit = 100, int offset = 0}) async =>
+      (await fetchPlaylistDetail(uri, limit: limit, offset: offset)).songs;
+
+  /// Same request as [fetchPlaylistTracks] but also returns the playlist's
+  /// cover art, name, owner and description.
+  Future<SpotifyPlaylistDetail> fetchPlaylistDetail(String uri,
       {int limit = 100, int offset = 0}) async {
+    // Home shelves hand us albums through the same page; the playlist query
+    // rejects them ("not of type [PLAYLIST, PLAYLIST_V2]").
+    if (uri.startsWith('spotify:album:')) {
+      return fetchAlbumDetail(uri, limit: limit < 50 ? 50 : limit);
+    }
     final data =
     await _post(_op('fetchPlaylist', SpotifyConfig.fetchPlaylistHash, {
       'uri': uri,
@@ -315,12 +413,12 @@ class SpotifyLibrary {
       'limit': limit,
       'enableWatchFeedEntrypoint': false,
     }));
-    if (data == null) return [];
+    if (data == null) return SpotifyPlaylistDetail();
 
     final root = data['data'];
     if (root is! Map) {
       _log('fetchPlaylist $uri -> no data. top keys: ${data.keys.toList()}');
-      return [];
+      return SpotifyPlaylistDetail();
     }
 
     final candidateLists = <List?>[
@@ -341,7 +439,9 @@ class SpotifyLibrary {
     if (items.isEmpty) {
       _log('fetchPlaylist $uri -> 0 items. root keys: '
           '${root.keys.toList()}');
-      return [];
+      return SpotifyPlaylistDetail(
+          name: _plName(root), description: _plDesc(root),
+          owner: _plOwner(root), coverUrl: _plCover(root));
     }
 
     final songs = <Map<String, dynamic>>[];
@@ -350,7 +450,62 @@ class SpotifyLibrary {
       if (song != null) songs.add(song);
     }
     _log('fetchPlaylist $uri -> ${songs.length}/${items.length} parsed');
-    return songs;
+    return SpotifyPlaylistDetail(
+      name: _plName(root),
+      description: _plDesc(root),
+      owner: _plOwner(root),
+      coverUrl: _plCover(root),
+      totalCount: ((root['playlistV2'] as Map?)?['content'] as Map?)
+              ?['totalCount'] is num
+          ? (((root['playlistV2'] as Map)['content'] as Map)['totalCount']
+                  as num)
+              .toInt()
+          : songs.length,
+      songs: songs,
+    );
+  }
+
+  Map? _pl(Map root) => (root['playlistV2'] ?? root['playlist']) as Map?;
+
+  String _plName(Map root) => _pl(root)?['name']?.toString() ?? '';
+
+  String _plDesc(Map root) {
+    final d = _pl(root)?['description']?.toString() ?? '';
+    // Descriptions can contain HTML links/entities.
+    return d
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&#x27;', "'")
+        .replaceAll('&quot;', '"')
+        .trim();
+  }
+
+  String _plOwner(Map root) {
+    final o = _pl(root)?['ownerV2'] ?? _pl(root)?['owner'];
+    if (o is Map) {
+      return ((o['data'] as Map?)?['name'] ?? o['name'] ?? '').toString();
+    }
+    return '';
+  }
+
+  String _plCover(Map root) {
+    final imgs = (_pl(root)?['images'] as Map?)?['items'] as List?;
+    if (imgs == null || imgs.isEmpty) return '';
+    final sources = (imgs.first as Map?)?['sources'] as List? ?? const [];
+    String best = '';
+    num bestW = 0;
+    for (final src in sources) {
+      if (src is! Map) continue;
+      final w = (src['width'] as num?) ?? 0;
+      final u = src['url']?.toString() ?? '';
+      if (u.isEmpty) continue;
+      // Prefer the largest source up to ~640px, else whatever exists.
+      if (best.isEmpty || (w <= 640 && w > bestW)) {
+        best = u;
+        bestW = w;
+      }
+    }
+    return best;
   }
 
 
@@ -735,6 +890,10 @@ class SpotifyLibrary {
   }
 
   Future<List<Map<String, dynamic>>> fetchAlbumTracks(String uri,
+          {int limit = 50, int offset = 0}) async =>
+      (await fetchAlbumDetail(uri, limit: limit, offset: offset)).songs;
+
+  Future<SpotifyPlaylistDetail> fetchAlbumDetail(String uri,
       {int limit = 50, int offset = 0}) async {
     final data = await _post(_op('getAlbum', SpotifyConfig.getAlbumHash, {
       'uri': uri,
@@ -742,15 +901,22 @@ class SpotifyLibrary {
       'offset': offset,
       'limit': limit,
     }));
-    if (data == null) return [];
+    if (data == null) return SpotifyPlaylistDetail(kind: 'Album');
     final album = ((data['data'] as Map?)?['albumUnion']) as Map?;
     if (album == null) {
       _log('getAlbum $uri -> no albumUnion. root keys: '
           '${(data['data'] as Map?)?.keys?.toList() ?? 'null'}');
-      return [];
+      return SpotifyPlaylistDetail(kind: 'Album');
     }
     final albumName = album['name']?.toString() ?? 'Album';
     final cover = _deepFirstSourceUrl(album['coverArt']);
+    final albumArtists = <String>[];
+    for (final a
+        in ((album['artists'] as Map?)?['items'] as List? ?? const [])) {
+      final n = ((a as Map?)?['profile'] as Map?)?['name']?.toString() ?? '';
+      if (n.isNotEmpty) albumArtists.add(n);
+    }
+    final year = ((album['date'] as Map?)?['year'] ?? '').toString();
     final tracks =
         (((album['tracksV2'] as Map?)?['items'])) as List? ?? const [];
     final out = <Map<String, dynamic>>[];
@@ -790,7 +956,15 @@ class SpotifyLibrary {
       });
     }
     _log('getAlbum $uri -> ${out.length}/${tracks.length} parsed');
-    return out;
+    return SpotifyPlaylistDetail(
+      kind: 'Album',
+      name: albumName,
+      owner: albumArtists.join(', '),
+      coverUrl: cover,
+      year: year,
+      totalCount: out.length,
+      songs: out,
+    );
   }
 
 
