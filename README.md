@@ -559,6 +559,18 @@ Yes. ZenMusic supports source extensions.
 
 <div align="center">
 
+## Web Player
+
+A browser edition lives in `lib/web/` (separate from the Android/Windows apps). It searches, plays a queue and shows synced lyrics.
+
+```bash
+flutter build web -t lib/web/web_main.dart --release
+```
+
+- `functions/api/[[path]].js` is a Cloudflare Pages Function that forwards `/api/*` to the JioSaavn API worker, so the browser needs no CORS access.
+- `.github/workflows/web.yml` builds and deploys to Cloudflare Pages on pushes to `main`. Add repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (optional variable `CLOUDFLARE_PROJECT`, default `zenmusic-d6t`).
+- Not included in the web edition: YouTube Music, downloads, native equalizer, offline cache.
+
 ## Support the Project
 
 ZenMusic is free and open source, and it is built in spare time. If you enjoy it and want to help keep it improving, you can buy me a chai. It is completely optional, and starring the repo or sharing the app helps just as much.
