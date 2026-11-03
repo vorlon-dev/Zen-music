@@ -13,6 +13,7 @@ dependencies:
   flutter:
     sdk: flutter
   crypto: ^3.0.7
+  cupertino_icons: ^1.0.8
   just_audio:
     path: packages/just_audio
   youtube_explode_dart:
