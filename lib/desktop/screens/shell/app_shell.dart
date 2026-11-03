@@ -189,6 +189,10 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
+    // The on-screen keyboard (Android) covers the lower part of the screen;
+    // keep the nav bar and mini player out of the way so they do not float
+    // above the keyboard and squeeze the page (e.g. the Search results).
+    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
     final pageAbove = ShellOverlaysBus.fullPageAbove.value;
     final settings = GetIt.I<SettingsManager>();
     final liquid = settings.liquidGlass;
@@ -280,7 +284,10 @@ class _AppShellState extends State<AppShell> {
             duration: _kChromeAnim,
             curve: Curves.easeInOutCubic,
             alignment: Alignment.bottomCenter,
-            child: (_chromeHidden || _playerSheetOpen || pageAbove)
+            child: (_chromeHidden ||
+                    _playerSheetOpen ||
+                    pageAbove ||
+                    keyboardOpen)
                 ? const SizedBox(width: double.infinity, height: 0)
                 : bar,
           ),
@@ -316,7 +323,8 @@ class _AppShellState extends State<AppShell> {
         ? ZenGlassPanel(radius: 20, child: bottomPlayer)
         : bottomPlayer;
     if (_isMobile) {
-      final hidden = _chromeHidden || _playerSheetOpen || pageAbove;
+      final hidden =
+          _chromeHidden || _playerSheetOpen || pageAbove || keyboardOpen;
       miniPlayer = IgnorePointer(
         ignoring: hidden,
         child: AnimatedSlide(
