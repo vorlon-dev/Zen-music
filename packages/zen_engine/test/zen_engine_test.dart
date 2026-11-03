@@ -90,4 +90,23 @@ void main() {
       expect(updated.isPlaying, true);
     });
   });
+
+  group('InnerTube and poToken tests', () {
+    test('PoTokenService tracks token validity', () {
+      final po = PoTokenService();
+      expect(po.isTokenValid, false);
+      po.setTokens(poToken: 'test_token', visitorData: 'test_visitor');
+      expect(po.isTokenValid, true);
+      expect(po.currentPoToken, 'test_token');
+      expect(po.currentVisitorData, 'test_visitor');
+    });
+
+    test('ZenJSSolver deciphers signature correctly', () {
+      final solver = ZenJSSolver();
+      expect(
+        solver.solve('https://youtube.com/s/player/dummy', JSChallengeType.n, 'raw_n'),
+        completion('raw_n'),
+      );
+    });
+  });
 }

@@ -7,6 +7,9 @@ class YouTubeEngine {
 
   final YoutubeExplode _yt;
 
+  /// Underlying YoutubeExplode instance
+  YoutubeExplode get client => _yt;
+
   /// Search YouTube songs / videos
   Future<List<ZenSong>> search(String query, {int limit = 20}) async {
     try {
