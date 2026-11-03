@@ -11,6 +11,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../lossless/lossless_service.dart';
+import 'native_equalizer.dart';
 import '../utils/add_history.dart';
 import '../utils/enhanced_image.dart';
 import 'eq_models.dart';
@@ -347,6 +348,7 @@ class MediaPlayer extends ChangeNotifier {
     _listenToPlayerErrors();
     _listenToCrossfade();
     unawaited(_restoreEq());
+    unawaited(NativeEqualizer.instance.restore());
     unawaited(_initSmtc());
     unawaited(_initDiscord());
     unawaited(_initLastfm());
@@ -1700,6 +1702,8 @@ class MediaPlayer extends ChangeNotifier {
   Future<void> _restoreEq() async {
     final eq = _eq;
     if (eq == null || !Platform.isAndroid) return;
+    // The native equalizer replaces the device one; never run both at once.
+    if (await NativeEqualizer.instance.isAvailable()) return;
     try {
       _eqParams ??= await eq.parameters;
       final p = _eqParams!;
