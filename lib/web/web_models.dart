@@ -24,6 +24,32 @@ class WebSong {
 
   bool get playable => streamUrl.isNotEmpty;
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'artist': artist,
+        'album': album,
+        'image': image,
+        'streamUrl': streamUrl,
+        'duration': duration.inSeconds,
+      };
+
+  /// Restores a song written by [toJson]. Returns null for malformed data.
+  static WebSong? fromStored(Object? raw) {
+    if (raw is! Map) return null;
+    final id = '${raw['id'] ?? ''}';
+    if (id.isEmpty) return null;
+    return WebSong(
+      id: id,
+      title: '${raw['title'] ?? ''}',
+      artist: '${raw['artist'] ?? ''}',
+      album: '${raw['album'] ?? ''}',
+      image: '${raw['image'] ?? ''}',
+      streamUrl: '${raw['streamUrl'] ?? ''}',
+      duration: Duration(seconds: int.tryParse('${raw['duration'] ?? ''}') ?? 0),
+    );
+  }
+
   /// Builds a song from one JioSaavn-style result object.
   factory WebSong.fromJson(Map<String, dynamic> map) {
     final rawArtists = map['artists'];
@@ -54,6 +80,8 @@ class WebSong {
 
   static int _quality(Object? q) =>
       int.tryParse('$q'.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+
+  static String pickImage(Object? raw) => _pickImage(raw);
 
   static String _pickImage(Object? raw) {
     if (raw is! List || raw.isEmpty) return '';
@@ -155,3 +183,43 @@ String clock(Duration d) {
   final h = d.inHours, m = d.inMinutes.remainder(60), s = d.inSeconds.remainder(60);
   return h > 0 ? '$h:${two(m)}:${two(s)}' : '$m:${two(s)}';
 }
+
+
+/// An album or a playlist shown as a card.
+class WebCollection {
+  const WebCollection({
+    required this.id,
+    required this.title,
+    required this.subtitle,
+    required this.image,
+    required this.isAlbum,
+  });
+
+  final String id;
+  final String title;
+  final String subtitle;
+  final String image;
+  final bool isAlbum;
+
+  factory WebCollection.fromJson(
+    Map<String, dynamic> map, {
+    required bool isAlbum,
+  }) {
+    return WebCollection(
+      id: '${map['id'] ?? ''}',
+      title: unescapeHtml('${map['name'] ?? map['title'] ?? ''}'),
+      subtitle: unescapeHtml('${map['subtitle'] ?? map['description'] ?? ''}'),
+      image: WebSong.pickImage(map['image']),
+      isAlbum: isAlbum,
+    );
+  }
+}
+
+/// A collection together with its songs.
+class WebDetail {
+  const WebDetail(this.collection, this.songs);
+  final WebCollection collection;
+  final List<WebSong> songs;
+}
+
+enum RepeatMode { off, all, one }
