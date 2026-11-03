@@ -36,10 +36,14 @@ class WebApi {
       throw http.ClientException('Search failed (${res.statusCode})', uri);
     }
     final data = jsonDecode(utf8.decode(res.bodyBytes));
-    final results = (data is Map ? data['data']?['results'] : null) as List?;
+    Object? results;
+    if (data is Map && data['data'] is Map) {
+      results = (data['data'] as Map)['results'];
+    }
     return [
-      for (final item in results ?? const [])
-        if (item is Map<String, dynamic>) WebSong.fromJson(item),
+      if (results is List)
+        for (final item in results)
+          if (item is Map<String, dynamic>) WebSong.fromJson(item),
     ].where((s) => s.id.isNotEmpty && s.playable).toList();
   }
 
