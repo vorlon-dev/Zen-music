@@ -3,7 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:zenmusic/desktop/screens/settings/player/native_eq_view.dart';
 import 'package:zenmusic/desktop/services/eq_models.dart';
+import 'package:zenmusic/desktop/services/native_equalizer.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 
 class EqualizerPage extends StatefulWidget {
@@ -19,6 +21,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
   EqParams? _params;
   bool _enabled = false;
   List<double> _gains = const [];
+  bool _native = false;
   bool _loading = true;
   String? _error;
 
@@ -29,6 +32,16 @@ class _EqualizerPageState extends State<EqualizerPage> {
   }
 
   Future<void> _load() async {
+    // Prefer the native 15-band equalizer; fall back to the device equalizer
+    // below when it is not available.
+    if (await NativeEqualizer.instance.isAvailable()) {
+      if (!mounted) return;
+      setState(() {
+        _native = true;
+        _loading = false;
+      });
+      return;
+    }
     final params = await _player.getEqParameters();
     if (!mounted) return;
     if (params == null) {
@@ -68,7 +81,9 @@ class _EqualizerPageState extends State<EqualizerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Equalizer')),
-      body: _loading
+      body: _native
+          ? const NativeEqView()
+          : _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
           ? Center(
