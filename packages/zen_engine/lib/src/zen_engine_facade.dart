@@ -1,9 +1,13 @@
 import 'package:flutter/widgets.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'jiosaavn/jiosaavn_service.dart';
 import 'ytmusic/yt_engine.dart';
+import 'ytmusic/innertube_service.dart';
+import 'ytmusic/potoken_service.dart';
+import 'ytmusic/js_solver.dart';
 import 'lossless/lossless_engine.dart';
 import 'lyrics/lyrics_engine.dart';
 import 'downloads/download_engine.dart';
@@ -29,6 +33,9 @@ class ZenEngine {
 
   late final JioSaavnService _jioSaavn;
   late final YouTubeEngine _youtube;
+  late final InnerTubeService _innertube;
+  late final PoTokenService _poToken;
+  late final ZenJSSolver _jsSolver;
   late final SearchEngine _search;
   late final LosslessEngine _lossless;
   late final LyricsEngine _lyrics;
@@ -42,6 +49,15 @@ class ZenEngine {
 
   /// YouTube Explode extraction service
   static YouTubeEngine get youtube => _instance._youtube;
+
+  /// InnerTube client with poToken support
+  static InnerTubeService get innertube => _instance._innertube;
+
+  /// Proof-of-Origin token solver & manager
+  static PoTokenService get poToken => _instance._poToken;
+
+  /// JavaScript challenge solver for signature cipher & n-parameter
+  static ZenJSSolver get jsSolver => _instance._jsSolver;
 
   /// Multi-source unified Search engine
   static SearchEngine get search => _instance._search;
@@ -67,6 +83,7 @@ class ZenEngine {
   /// Initialize all ZenEngine subsystems, local Hive databases, and audio pipeline.
   Future<void> init({
     AudioPlayer? customAudioPlayer,
+    YoutubeExplode? customYoutubeExplode,
     String? jamServerUrl,
     String? losslessEndpoint,
   }) async {
@@ -75,8 +92,15 @@ class ZenEngine {
     WidgetsFlutterBinding.ensureInitialized();
     await Hive.initFlutter();
 
+    _poToken = PoTokenService();
+    _jsSolver = ZenJSSolver();
+    _innertube = InnerTubeService(poTokenService: _poToken);
+
+    _youtube = YouTubeEngine(
+      yt: customYoutubeExplode ?? YoutubeExplode(),
+    );
+
     _jioSaavn = JioSaavnService();
-    _youtube = YouTubeEngine();
     _lossless = LosslessEngine(
       endpoint: losslessEndpoint ?? 'https://jobfolw.antideploy.app/',
     );
@@ -115,6 +139,9 @@ class ZenEngine {
     _jam.dispose();
     _lyrics.dispose();
     _youtube.dispose();
+    _innertube.dispose();
+    _poToken.dispose();
+    _jsSolver.dispose();
     _jioSaavn.dispose();
     _spotify.dispose();
     _initialized = false;
