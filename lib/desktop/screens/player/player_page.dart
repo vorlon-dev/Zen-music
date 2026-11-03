@@ -725,7 +725,10 @@ class _PlayerPageState extends State<PlayerPage>
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 112),
+              // Leave room for the 46 px buttons on each side (inside the
+              // 20 px bar padding) but no more, so "NOW PLAYING" fits on one
+              // line on narrow phones.
+              padding: const EdgeInsets.symmetric(horizontal: 72),
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () => _key.currentState?.openEndDrawer(),
@@ -734,6 +737,9 @@ class _PlayerPageState extends State<PlayerPage>
                   children: [
                     Text(
                       'NOW PLAYING',
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
                         letterSpacing: 0.9,
