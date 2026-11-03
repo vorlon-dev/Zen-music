@@ -77,6 +77,7 @@ dependencies:
   smtc_windows: ^1.1.0
   flutter_discord_rpc: ^1.1.0
   desktop_multi_window: 0.2.1
+  connectivity_plus: ^7.3.2
 dependency_overrides:
   flutter_inappwebview_windows_fx:
     path: ./windows_webview_stub
