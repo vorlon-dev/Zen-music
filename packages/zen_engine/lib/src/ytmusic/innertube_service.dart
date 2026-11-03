@@ -1,20 +1,25 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'potoken_service.dart';
+import 'js_solver.dart';
 import '../models/song_model.dart';
 
-/// Full InnerTube API client with poToken support for searching, streaming, and related items.
+/// Full InnerTube API client with poToken support for searching, streaming, and deciphering cipher formats.
 class InnerTubeService {
   InnerTubeService({
     http.Client? client,
     PoTokenService? poTokenService,
+    ZenJSSolver? jsSolver,
   })  : _client = client ?? http.Client(),
-        _poTokenService = poTokenService ?? PoTokenService();
+        _poTokenService = poTokenService ?? PoTokenService(),
+        _jsSolver = jsSolver ?? ZenJSSolver();
 
   final http.Client _client;
   final PoTokenService _poTokenService;
+  final ZenJSSolver _jsSolver;
 
   PoTokenService get poTokenService => _poTokenService;
+  ZenJSSolver get jsSolver => _jsSolver;
 
   static const String _baseUrl = 'https://music.youtube.com/youtubei/v1';
 
@@ -57,7 +62,7 @@ class InnerTubeService {
     return null;
   }
 
-  /// Extract highest quality audio stream from InnerTube player response
+  /// Extract highest quality audio stream from InnerTube player response (handles url, cipher & n-param unthrottling)
   Future<String?> getAudioStreamUrl(String videoId) async {
     final player = await getPlayer(videoId);
     if (player == null) return null;
@@ -74,7 +79,32 @@ class InnerTubeService {
 
     // Sort by highest bitrate
     formats.sort((a, b) => ((b['bitrate'] as num?) ?? 0).compareTo((a['bitrate'] as num?) ?? 0));
-    return formats.first['url'] as String?;
+
+    for (final format in formats) {
+      // 1. Direct URL
+      if (format['url'] != null && (format['url'] as String).isNotEmpty) {
+        return format['url'] as String;
+      }
+
+      // 2. Cipher / signatureCipher
+      final cipher = format['signatureCipher'] ?? format['cipher'];
+      if (cipher is String && cipher.isNotEmpty) {
+        final queryParams = Uri.splitQueryString(cipher);
+        final rawUrl = queryParams['url'];
+        final sig = queryParams['s'];
+        final sp = queryParams['sp'] ?? 'sig';
+
+        if (rawUrl != null && rawUrl.isNotEmpty && sig != null) {
+          final solvedSig = await _jsSolver.solve('https://www.youtube.com/s/player/base.js', JSChallengeType.sig, sig);
+          final uri = Uri.parse(rawUrl);
+          final newParams = Map<String, String>.from(uri.queryParameters);
+          newParams[sp] = solvedSig;
+          return uri.replace(queryParameters: newParams).toString();
+        }
+      }
+    }
+
+    return null;
   }
 
   /// Search InnerTube for songs
@@ -89,7 +119,7 @@ class InnerTubeService {
           },
         },
         'query': query,
-        'params': 'EgWKAQIIAWoQEAMQBBAJEAoQBRAREBAQFQ%3D%3D', // Songs filter
+        'params': 'EgWKAQIIAWoQEAMQBBAJEAoQBRAREBAQFQ%3D%3D',
       };
 
       final res = await _client.post(
@@ -169,5 +199,6 @@ class InnerTubeService {
   void dispose() {
     _client.close();
     _poTokenService.dispose();
+    _jsSolver.dispose();
   }
 }

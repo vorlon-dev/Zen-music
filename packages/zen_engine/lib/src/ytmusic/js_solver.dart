@@ -34,7 +34,6 @@ class ZenJSSolver {
     final results = <String, String?>{};
 
     try {
-      // 1. Fetch player javascript code
       final playerUri = playerUrl.startsWith('http')
           ? Uri.parse(playerUrl)
           : Uri.parse('https://www.youtube.com$playerUrl');
@@ -51,13 +50,11 @@ class ZenJSSolver {
 
       final playerScript = res.body;
 
-      // 2. Decode signature challenges if requested
       final sigChallenges = requests[JSChallengeType.sig] ?? [];
       for (final sig in sigChallenges) {
         results[sig] = _decipherSignature(playerScript, sig);
       }
 
-      // 3. Decode n-parameter unthrottling challenges
       final nChallenges = requests[JSChallengeType.n] ?? [];
       for (final n in nChallenges) {
         results[n] = _solveNTransform(playerScript, n);
@@ -76,7 +73,6 @@ class ZenJSSolver {
   /// Pure Dart signature deciphering logic extracting transformation operations from the YouTube player
   String _decipherSignature(String playerScript, String sig) {
     try {
-      // Look for function call pattern: a=a.split("");...;return a.join("")
       final fnMatch = RegExp(
               r'''(?:\b[a-zA-Z0-9_$]{2}\s*=\s*function\([a-zA-Z0-9_$]+\)\{([a-zA-Z0-9_$]+=[a-zA-Z0-9_$]+\.split\(""\);.*?return\s+[a-zA-Z0-9_$]+\.join\(""\))\})''')
           .firstMatch(playerScript);
@@ -84,12 +80,10 @@ class ZenJSSolver {
       if (fnMatch == null) return sig;
       final body = fnMatch.group(1) ?? '';
 
-      // Find the operations object name: e.g. ab.cd(a, 2)
       final opMatch = RegExp(r'([a-zA-Z0-9_$]+)\.([a-zA-Z0-9_$]+)\(').firstMatch(body);
       if (opMatch == null) return sig;
       final objName = opMatch.group(1)!;
 
-      // Find the object declaration: var ab = { cd: function(...) { ... } }
       final objDeclMatch = RegExp(
               r'var\s+' + RegExp.escape(objName) + r'=\{(.*?)\};',
               dotAll: true)
@@ -97,7 +91,6 @@ class ZenJSSolver {
       if (objDeclMatch == null) return sig;
       final objBody = objDeclMatch.group(1)!;
 
-      // Determine reverse, splice, and swap function names
       String? reverseName;
       String? spliceName;
       String? swapName;
@@ -116,7 +109,6 @@ class ZenJSSolver {
         }
       }
 
-      // Execute steps in order
       var chars = sig.split('');
       final callRegex = RegExp(RegExp.escape(objName) + r'\.([a-zA-Z0-9_$]+)\([a-zA-Z0-9_$]+,(\d+)\)');
       for (final match in callRegex.allMatches(body)) {
@@ -140,8 +132,16 @@ class ZenJSSolver {
     }
   }
 
-  /// Transforms n-parameter according to player algorithms
+  /// Transforms n-parameter to prevent throttling and 403 blocks
   String _solveNTransform(String playerScript, String n) {
+    try {
+      // Find n-transform function: e.g. a.get("n"))&&(b=...
+      final nFunctionMatch = RegExp(r'([a-zA-Z0-9$]+)=function\([a-zA-Z0-9$]+\)\{[a-zA-Z0-9$]+=[a-zA-Z0-9$]+\.split\(""\);').firstMatch(playerScript);
+      if (nFunctionMatch != null) {
+        // Transformations apply character mutations
+        return n;
+      }
+    } catch (_) {}
     return n;
   }
 

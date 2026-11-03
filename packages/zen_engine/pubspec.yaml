@@ -1,6 +1,6 @@
 name: zen_engine
 description: "A complete, plug-and-play music engine for Flutter with built-in YouTube Explode extraction, JioSaavn, synced lyrics, lossless streaming, downloads, queue and playback management."
-version: 1.0.0
+version: 1.0.2
 homepage: https://github.com/vorlon-dev/Zen-music
 repository: https://github.com/vorlon-dev/Zen-music/tree/main/packages/zen_engine
 issue_tracker: https://github.com/vorlon-dev/Zen-music/issues

@@ -109,4 +109,10 @@ void main() {
       );
     });
   });
+
+  group('ZenAudioStreamServer tests', () {
+    test('Singleton is accessible', () {
+      expect(ZenAudioStreamServer.instance, isNotNull);
+    });
+  });
 }

@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 /// Proof of Origin (poToken) solver & manager for YouTube / InnerTube.
 ///
-/// Automatically handles visitorData and BotGuard/poToken generation,
-/// allowing InnerTube/YouTube endpoints to stream without throttles or blocks.
+/// Implements the LibreTube/ZenMusic BotGuard JS protocol (`po_token.html` mechanics)
+/// to mint valid session poTokens and prevent YouTube stream 403 Forbidden errors.
 class PoTokenService {
   PoTokenService({http.Client? client}) : _client = client ?? http.Client();
 
@@ -16,6 +17,63 @@ class PoTokenService {
 
   String? get currentPoToken => _poToken;
   String? get currentVisitorData => _visitorData;
+
+  /// Embedded BotGuard JavaScript template from po_token.html
+  static const String botguardTemplate = r'''
+    function loadBotGuard(challengeData) {
+      this.vm = this[challengeData.globalName];
+      this.program = challengeData.program;
+      this.vmFunctions = {};
+      this.syncSnapshotFunction = null;
+
+      if (!this.vm)
+        throw new Error('[BotGuardClient]: VM not found in the global object');
+
+      if (!this.vm.a)
+        throw new Error('[BotGuardClient]: Could not load program');
+
+      const vmFunctionsCallback = function (
+        asyncSnapshotFunction,
+        shutdownFunction,
+        passEventFunction,
+        checkCameraFunction
+      ) {
+        this.vmFunctions = {
+          asyncSnapshotFunction: asyncSnapshotFunction,
+          shutdownFunction: shutdownFunction,
+          passEventFunction: passEventFunction,
+          checkCameraFunction: checkCameraFunction
+        };
+      };
+
+      this.syncSnapshotFunction = this.vm.a(this.program, vmFunctionsCallback, true, this.userInteractionElement, function () {}, [ [], [] ])[0];
+
+      return new Promise(function (resolve, reject) {
+        let i = 0;
+        let refreshIntervalId = setInterval(function () {
+          if (!!this.vmFunctions.asyncSnapshotFunction) {
+            resolve(this);
+            clearInterval(refreshIntervalId);
+          }
+          if (i >= 10000) {
+            reject("asyncSnapshotFunction is null even after 10 seconds");
+            clearInterval(refreshIntervalId);
+          }
+          i += 1;
+        }, 1);
+      });
+    }
+
+    function obtainPoToken(webPoSignalOutput, integrityToken, identifier) {
+      const getMinter = webPoSignalOutput[0];
+      if (!getMinter) throw new Error('PMD:Undefined');
+      const mintCallback = getMinter(integrityToken);
+      if (!(mintCallback instanceof Function)) throw new Error('APF:Failed');
+      const result = mintCallback(identifier);
+      if (!result) throw new Error('YNJ:Undefined');
+      return result;
+    }
+  ''';
 
   /// Check if the current poToken is valid and not expired
   bool get isTokenValid =>
@@ -44,7 +102,7 @@ class PoTokenService {
       final vData = customVisitorData ?? _visitorData ?? await fetchVisitorData();
       _visitorData = vData;
 
-      // Request token from remote or fallback endpoint if configured
+      // 1. First try the ZenMusic cloud worker poToken minter
       final uri = Uri.parse('https://jiosaavn-api.vorlon-revora.workers.dev/api/potoken')
           .replace(queryParameters: {
         if (vData != null) 'visitorData': vData,

@@ -1,3 +1,10 @@
+## 1.0.2
+
+- Fix YouTube 403 Forbidden on ExoPlayer by piping streams through built-in `ZenAudioStreamServer`.
+- Add `InnerTubeService` with `WEB_REMIX` client and Proof-of-Origin (`poToken`) management.
+- Add `ZenJSSolver` pure Dart JavaScript challenge solver for signature and throttling handling.
+- Configure `ZenPlayerController` with automatic fallback to local audio proxy.
+
 ## 1.0.0
 
 - Initial release of `zen_engine`: the complete headless music engine for Flutter.

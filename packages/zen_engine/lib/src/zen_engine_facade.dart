@@ -5,6 +5,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'jiosaavn/jiosaavn_service.dart';
 import 'ytmusic/yt_engine.dart';
+import 'ytmusic/yt_audio_stream_server.dart';
 import 'ytmusic/innertube_service.dart';
 import 'ytmusic/potoken_service.dart';
 import 'ytmusic/js_solver.dart';
@@ -94,11 +95,18 @@ class ZenEngine {
 
     _poToken = PoTokenService();
     _jsSolver = ZenJSSolver();
-    _innertube = InnerTubeService(poTokenService: _poToken);
+    _innertube = InnerTubeService(poTokenService: _poToken, jsSolver: _jsSolver);
 
     _youtube = YouTubeEngine(
       yt: customYoutubeExplode ?? YoutubeExplode(),
     );
+
+    // Configure and start proxy streaming server
+    ZenAudioStreamServer.instance.configure(
+      innerTube: _innertube,
+      poToken: _poToken,
+    );
+    await ZenAudioStreamServer.instance.start();
 
     _jioSaavn = JioSaavnService();
     _lossless = LosslessEngine(
@@ -124,6 +132,7 @@ class ZenEngine {
       youtube: _youtube,
       jioSaavn: _jioSaavn,
       downloads: _downloads,
+      poTokenService: _poToken,
     );
 
     await _player.restoreSession();
@@ -135,6 +144,7 @@ class ZenEngine {
   void dispose() {
     if (!_initialized) return;
     _player.dispose();
+    ZenAudioStreamServer.instance.stop();
     _downloads.dispose();
     _jam.dispose();
     _lyrics.dispose();

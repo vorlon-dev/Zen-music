@@ -8,6 +8,8 @@ import 'package:hive/hive.dart';
 import '../models/song_model.dart';
 import '../lossless/lossless_engine.dart';
 import '../ytmusic/yt_engine.dart';
+import '../ytmusic/yt_audio_stream_server.dart';
+import '../ytmusic/potoken_service.dart';
 import '../jiosaavn/jiosaavn_service.dart';
 import '../downloads/download_engine.dart';
 import 'player_state.dart';
@@ -20,19 +22,22 @@ class ZenPlayerController extends ChangeNotifier {
     YouTubeEngine? youtube,
     JioSaavnService? jioSaavn,
     DownloadEngine? downloads,
+    PoTokenService? poTokenService,
   })  : _player = audioPlayer ?? ja.AudioPlayer(),
         _lossless = lossless ?? LosslessEngine(),
-        _youtube = youtube ?? YouTubeEngine(),
+        youtube = youtube ?? YouTubeEngine(),
         _jioSaavn = jioSaavn ?? JioSaavnService(),
-        _downloads = downloads ?? DownloadEngine() {
+        _downloads = downloads ?? DownloadEngine(),
+        poTokenService = poTokenService ?? PoTokenService() {
     _initSubscriptions();
   }
 
   final ja.AudioPlayer _player;
   final LosslessEngine _lossless;
-  final YouTubeEngine _youtube;
+  final YouTubeEngine youtube;
   final JioSaavnService _jioSaavn;
   final DownloadEngine _downloads;
+  final PoTokenService poTokenService;
 
   ZenPlayerState _state = const ZenPlayerState();
   ZenPlayerState get state => _state;
@@ -204,13 +209,10 @@ class ZenPlayerController extends ChangeNotifier {
       return ja.AudioSource.uri(Uri.parse(losslessUrl), tag: mediaItem);
     }
 
-    // 4. YouTube Explode stream extractor
-    final ytUrl = await _youtube.getAudioStreamUrl(song.id);
-    if (ytUrl != null && ytUrl.isNotEmpty) {
-      return ja.AudioSource.uri(Uri.parse(ytUrl), tag: mediaItem);
-    }
-
-    throw Exception('No playable audio stream found for track: ${song.id}');
+    // 4. Safe YouTube stream proxy through local server (guarantees no 403 HTTP error)
+    final serverUrl = await ZenAudioStreamServer.instance.start();
+    final proxyUri = Uri.parse('$serverUrl?id=${song.id}');
+    return ja.AudioSource.uri(proxyUri, tag: mediaItem);
   }
 
   Future<void> pause() async {

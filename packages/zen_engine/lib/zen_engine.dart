@@ -26,6 +26,7 @@ export 'src/player/player_controller.dart';
 export 'src/services/search_service.dart';
 export 'src/jiosaavn/jiosaavn_service.dart';
 export 'src/ytmusic/yt_engine.dart';
+export 'src/ytmusic/yt_audio_stream_server.dart';
 export 'src/ytmusic/innertube_service.dart';
 export 'src/ytmusic/potoken_service.dart';
 export 'src/ytmusic/js_solver.dart';
