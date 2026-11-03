@@ -41,6 +41,10 @@ class SpotifyConfig {
       '7c5a69420e2bfae3da5cc4e14cbc8bb3f6090f80afc00ffc179177f19be3f33d';
   static const profileAttributesHash =
       '53bcb064f6cd18c23f752bc324a791194d20df612d8e1239c735144ab0399ced';
+  // Used by Stopify to read liked songs without touching the rate-limited
+  // REST /me/tracks endpoint.
+  static const fetchLibraryTracksHash =
+      '087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240';
   static const recentsHash =
       '698be5892a3cc95331deebeff463d05dfdd5febf5254bea30b895b5a93dfb584';
 

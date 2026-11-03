@@ -8,16 +8,17 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zenmusic/desktop/screens/home/cubit/home_cubit.dart';
 import 'package:zenmusic/desktop/core/widgets/section_item.dart';
+import 'package:zenmusic/desktop/core/widgets/zen_top_bar.dart';
 import 'package:zenmusic/desktop/utils/internet_guard.dart';
 import 'package:zenmusic/desktop/utils/smooth_scroll.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
-import '../../themes/text_styles.dart';
 import '../../utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:get_it/get_it.dart';
 import 'package:zenmusic/desktop/spotify/spotify_home_section.dart';
 import 'package:zenmusic/desktop/ytmusic/ytm_account_section.dart';
+
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -41,10 +42,10 @@ class _HomePageState extends State<_HomePage> {
   late ScrollController _scrollController;
 
   final GlobalKey<SpotifyHomeSectionState> _spotifySectionKey =
-      GlobalKey<SpotifyHomeSectionState>();
+  GlobalKey<SpotifyHomeSectionState>();
 
   final GlobalKey<YtmAccountSectionState> _ytmSectionKey =
-      GlobalKey<YtmAccountSectionState>();
+  GlobalKey<YtmAccountSectionState>();
 
   @override
   void initState() {
@@ -65,7 +66,6 @@ class _HomePageState extends State<_HomePage> {
     _scrollController.dispose();
     super.dispose();
   }
-
 
   Future<void> _scrollListener() async {
     if (_scrollController.position.pixels ==
@@ -111,23 +111,15 @@ class _HomePageState extends State<_HomePage> {
     return InternetGuard(
       onInternetRestored: context.read<HomeCubit>().fetch,
       child: Scaffold(
-        appBar: PreferredSize(
-          preferredSize: AppBar().preferredSize,
-          child: AppBar(
-            automaticallyImplyLeading: false,
-            title: Text(
-              'ZenMusic',
-              style: appBarTitleStyle(),
+        appBar: ZenTopBar(
+          title: 'ZenMusic',
+          actions: [
+            ZenTopBarAction(
+              icon: Icons.groups_rounded,
+              tooltip: 'Listen Together',
+              onTap: () => context.push('/listen'),
             ),
-            centerTitle: true,
-            actions: [
-              IconButton(
-                tooltip: 'Listen Together',
-                onPressed: () => context.push('/listen'),
-                icon: const Icon(Icons.groups_rounded),
-              ),
-            ],
-          ),
+          ],
         ),
         body: ExpressiveRefreshIndicator(
           onRefresh: () async {
@@ -154,27 +146,27 @@ class _HomePageState extends State<_HomePage> {
                       controller: _scrollController,
                       child: SafeArea(
                           child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _horizontalChipsRow(state.chips),
-                            SpotifyHomeSection(key: _spotifySectionKey),
-                            YtmAccountSection(key: _ytmSectionKey),
-                            Column(
-                              children: [
-                                ...state.sections.map((section) {
-                                  return SectionItem(section: section);
-                                }),
-                                if (!state.loadingMore &&
-                                    state.continuation != null)
-                                  const SizedBox(height: 50),
-                                if (state.loadingMore)
-                                  const Padding(
-                                      padding: EdgeInsets.all(8.0),
-                                      child: ExpressiveLoadingIndicator()),
-                              ],
-                            ),
-                          ],
-                        )),
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _horizontalChipsRow(state.chips),
+                              SpotifyHomeSection(key: _spotifySectionKey),
+                              YtmAccountSection(key: _ytmSectionKey),
+                              Column(
+                                children: [
+                                  ...state.sections.map((section) {
+                                    return SectionItem(section: section);
+                                  }),
+                                  if (!state.loadingMore &&
+                                      state.continuation != null)
+                                    const SizedBox(height: 50),
+                                  if (state.loadingMore)
+                                    const Padding(
+                                        padding: EdgeInsets.all(8.0),
+                                        child: ExpressiveLoadingIndicator()),
+                                ],
+                              ),
+                            ],
+                          )),
                     ),
                   );
               }

@@ -1,0 +1,93 @@
+# ZenMusic · iOS Beta build (unsigned IPA)
+#
+# Builds the committed ios/ project on GitHub's free macOS runners, so no Mac or iPhone is needed to
+# produce the file. The IPA is UNSIGNED on purpose: users sign it themselves
+# with AltStore / SideStore / Sideloadly (free Apple ID) or install it with
+# TrollStore. See "iOS (Beta)" in the README.
+#
+# Triggers
+#   - push a tag like v31.10.2026   -> builds and attaches the IPA to that release
+#   - Actions tab -> "iOS Beta" -> Run workflow
+#       (optionally fill `release_tag` to attach the IPA to an existing release)
+
+name: iOS Beta
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing release tag to attach the IPA to (leave empty to only keep it as a workflow artifact)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-beta-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      # ios/ is committed to the repo (Runner project, Podfile, Info.plist with
+      # background-audio + local-network keys, app icons).
+      - name: Check ios/ folder
+        run: test -f ios/Runner.xcodeproj/project.pbxproj
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS (no code signing)
+        run: |
+          flutter build ios --release --no-codesign \
+            --build-number ${{ github.run_number }}
+
+      - name: Package unsigned IPA
+        id: pack
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VER="${{ github.ref_name }}"
+          elif [ -n "${{ inputs.release_tag }}" ]; then
+            VER="${{ inputs.release_tag }}"
+          else
+            VER="beta-run${{ github.run_number }}"
+          fi
+          mkdir -p release Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
+          zip -qry "release/zenmusic-${VER}-ios-unsigned.ipa" Payload
+          ls -lh release
+          echo "ver=${VER}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload IPA (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenmusic-ios-unsigned-${{ steps.pack.outputs.ver }}
+          path: release/*.ipa
+          if-no-files-found: error
+
+      - name: Attach IPA to GitHub Release
+        if: github.ref_type == 'tag' || inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+          files: release/*.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
