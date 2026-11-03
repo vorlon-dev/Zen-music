@@ -1,10 +1,13 @@
 /// ZenEngine: The complete, plug-and-play music brain for Flutter.
 ///
-/// Provides multi-source search (JioSaavn & YouTube), high-fidelity lossless
-/// stream resolution, synced LRC lyrics (LRCLIB & Kugou), background-ready
+/// Provides built-in YouTube Explode extraction, multi-source search (JioSaavn & YouTube),
+/// high-fidelity lossless stream resolution, synced LRC lyrics (LRCLIB & Kugou), background-ready
 /// audio playback & queue controller, offline downloads, and synchronized
 /// Listen Together rooms.
 library;
+
+// Re-export youtube_explode_dart so consumers have everything built-in
+export 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 // Core Facade
 export 'src/zen_engine_facade.dart';
