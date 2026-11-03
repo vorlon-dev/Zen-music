@@ -41,7 +41,7 @@ jobs:
       - run: flutter pub get
 
       - name: Test web code
-        run: flutter test test/web_models_test.dart
+        run: flutter test test/web_models_test.dart test/web_store_test.dart
 
       - name: Build web
         run: flutter build web -t lib/web/web_main.dart --release

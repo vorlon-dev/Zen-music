@@ -23,28 +23,102 @@ class WebApi {
   final String _api;
   final String _lyrics;
 
+  Future<Object?> _getJson(String path, Map<String, String> query) async {
+    final uri = Uri.parse('$_api$path').replace(queryParameters: query);
+    final res = await _client.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) {
+      throw http.ClientException('Request failed (${res.statusCode})', uri);
+    }
+    return jsonDecode(utf8.decode(res.bodyBytes));
+  }
+
+  static Object? _data(Object? json) {
+    if (json is Map) return json['data'];
+    return null;
+  }
+
+  static List<Object?> _results(Object? json) {
+    final data = _data(json);
+    if (data is Map) {
+      final r = data['results'];
+      if (r is List) return r;
+    }
+    return const [];
+  }
+
+  static List<WebSong> _songs(Object? list) {
+    final out = <WebSong>[];
+    if (list is List) {
+      for (final item in list) {
+        if (item is Map<String, dynamic>) {
+          final s = WebSong.fromJson(item);
+          if (s.id.isNotEmpty && s.playable) out.add(s);
+        }
+      }
+    }
+    return out;
+  }
+
   Future<List<WebSong>> search(String query, {int limit = 20}) async {
     final q = query.trim();
     if (q.isEmpty) return const [];
-    final uri = Uri.parse('$_api/search/songs').replace(queryParameters: {
-      'query': q,
-      'limit': '$limit',
-      'page': '0',
-    });
-    final res = await _client.get(uri).timeout(const Duration(seconds: 15));
-    if (res.statusCode != 200) {
-      throw http.ClientException('Search failed (${res.statusCode})', uri);
+    final json = await _getJson(
+      '/search/songs',
+      {'query': q, 'limit': '$limit', 'page': '0'},
+    );
+    return _songs(_results(json));
+  }
+
+  Future<List<WebCollection>> searchCollections(
+    String query, {
+    required bool albums,
+    int limit = 20,
+  }) async {
+    final q = query.trim();
+    if (q.isEmpty) return const [];
+    final json = await _getJson(
+      albums ? '/search/albums' : '/search/playlists',
+      {'query': q, 'limit': '$limit', 'page': '0'},
+    );
+    final out = <WebCollection>[];
+    for (final item in _results(json)) {
+      if (item is Map<String, dynamic>) {
+        final c = WebCollection.fromJson(item, isAlbum: albums);
+        if (c.id.isNotEmpty) out.add(c);
+      }
     }
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
-    Object? results;
-    if (data is Map && data['data'] is Map) {
-      results = (data['data'] as Map)['results'];
+    return out;
+  }
+
+  Future<WebDetail?> collection(WebCollection c) async {
+    final json = await _getJson(
+      c.isAlbum ? '/albums' : '/playlists',
+      {'id': c.id, 'limit': '100'},
+    );
+    final data = _data(json);
+    if (data is! Map<String, dynamic>) return null;
+    final full = WebCollection.fromJson(data, isAlbum: c.isAlbum);
+    return WebDetail(
+      WebCollection(
+        id: c.id,
+        title: full.title.isEmpty ? c.title : full.title,
+        subtitle: full.subtitle.isEmpty ? c.subtitle : full.subtitle,
+        image: full.image.isEmpty ? c.image : full.image,
+        isAlbum: c.isAlbum,
+      ),
+      _songs(data['songs']),
+    );
+  }
+
+  /// Fetches a song again, to get a fresh stream link.
+  Future<WebSong?> song(String id) async {
+    try {
+      final json = await _getJson('/songs/$id', {});
+      final list = _songs(_data(json));
+      return list.isEmpty ? null : list.first;
+    } catch (_) {
+      return null;
     }
-    return [
-      if (results is List)
-        for (final item in results)
-          if (item is Map<String, dynamic>) WebSong.fromJson(item),
-    ].where((s) => s.id.isNotEmpty && s.playable).toList();
   }
 
   /// Synced lyrics from LRCLIB (it allows browser requests). Empty if none.
