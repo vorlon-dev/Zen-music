@@ -1,6 +1,6 @@
 # ZenMusic API (v1)
 
-A small JSON API served by the Cloudflare Pages Function in `functions/v1`, so other apps can search and read playlists from **JioSaavn**, **YouTube Music** and **YouTube** in one format.
+A small JSON API served by the Cloudflare Pages Function in `backend/functions/v1`, so other apps can search and read playlists from **JioSaavn**, **YouTube Music** and **YouTube** in one format.
 
 Base URL: `https://<your-pages-domain>/v1`
 
@@ -41,6 +41,6 @@ Set `API_KEY` in the Pages project's environment variables to require `x-api-key
 
 - Results are cached for 5 minutes at the edge.
 - YouTube parsing uses undocumented web endpoints and can break when YouTube changes them.
-- Self-hosting guide: [SELF_HOSTING.md](SELF_HOSTING.md). Kotlin client: [`zen-api-client`](../zen-api-client/README.md).
+- Self-hosting guide: [SELF_HOSTING.md](SELF_HOSTING.md). Kotlin client: [`zen-kit`](../zen-kit/README.md).
 - Tests: `node test/api/v1.test.mjs` (mocked network).
 - Please respect the rights of artists and the terms of the services you connect to.

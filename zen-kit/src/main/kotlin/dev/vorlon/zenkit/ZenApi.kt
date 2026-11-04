@@ -3,7 +3,7 @@
 // Kotlin client for the ZenMusic API (see docs/API.md).
 // Every call blocks: run it off the main thread (coroutines, executor...).
 
-package dev.vorlon.zenapi
+package dev.vorlon.zenkit
 
 import org.json.JSONArray
 import org.json.JSONObject

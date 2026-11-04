@@ -2,7 +2,7 @@
 
 You can run your own copy of the API (`/v1/...`, see [API.md](API.md)) on a free Cloudflare account. Then your apps only talk to **your** endpoint and you do not depend on anyone else's public server.
 
-Everything on the client side is Kotlin: see [`zen-api-client`](../zen-api-client/README.md).
+Everything on the client side is Kotlin: see [`zen-kit`](../zen-kit/README.md).
 
 ## What you need
 
@@ -11,7 +11,7 @@ Everything on the client side is Kotlin: see [`zen-api-client`](../zen-api-clien
 
 ## 1. Fork the repository
 
-Fork `vorlon-dev/Zen-music` on GitHub. The API lives in the `functions/` folder and is deployed together with the web player by `.github/workflows/web.yml`.
+Fork `vorlon-dev/Zen-music` on GitHub. The API lives in the [`backend/`](../backend/README.md) folder and is deployed together with the web player by `.github/workflows/web.yml`. You can also deploy `backend/` on its own (see its README).
 
 ## 2. Create the Cloudflare token and find the account ID
 
@@ -34,9 +34,9 @@ The site and API will be at `https://<CLOUDFLARE_PROJECT>.pages.dev`.
 
 ## 4. Deploy
 
-Open **Actions > Web Player > Run workflow**. The workflow runs the tests, builds the web player and deploys everything, including `functions/`. If the Pages project does not exist yet, it is created.
+Open **Actions > Web Player > Run workflow**. The workflow runs the tests, builds the web player and deploys everything, including `backend/functions`. If the Pages project does not exist yet, it is created.
 
-Prefer the command line? After `flutter build web -t lib/web/web_main.dart --release`, run `npx wrangler pages deploy build/web --project-name=<name>` from the repository root (the `functions/` folder is picked up automatically).
+Prefer the command line? After `flutter build web -t lib/web/web_main.dart --release`, copy `backend/functions` to `functions` in the repository root and run `npx wrangler pages deploy build/web --project-name=<name>`.
 
 ## 5. Protect it with an API key (recommended)
 
@@ -56,36 +56,26 @@ curl -H "x-api-key: YOUR_KEY" "https://my-zen-music.pages.dev/v1/playlist?source
 
 You should get `{"ok":true,"data":...}`.
 
-## 7. Use it from Kotlin
+## 7. Connect your app
+
+Copy `zen-kit/` and `innertube/` into your project, add the Gradle lines and put your URL in `MainActivity`. Step by step: [`zen-kit/README.md`](../zen-kit/README.md).
 
 ```kotlin
-val api = ZenApi("https://my-zen-music.pages.dev", apiKey = "YOUR_KEY")
-
-// run off the main thread
-val songs = api.searchSongs(Source.JIO, "arijit")
-when (val p = songs.first().playback) {
-  is Playback.Direct -> player.play(p.url)            // any audio player (ExoPlayer, MediaPlayer...)
-  is Playback.YouTube -> youtubePlayer.load(p.videoId) // official YouTube player
-}
-
-val playlist = api.playlist(Source.YTM, "PLxxxxxxxx")
+ZenKit.init(this, backendUrl = "https://my-zen-music.pages.dev", apiKey = "YOUR_KEY")
+val songs = ZenKit.api.searchSongs(Source.JIO, "arijit")   // off the main thread
 ```
-
-Setup of the client module: [`zen-api-client/README.md`](../zen-api-client/README.md).
 
 ## What about PO tokens?
 
-The API does **not** use, store or accept PO token files, and it does not return raw YouTube audio URLs. Reasons:
+Your backend has **no** PO token files and never returns raw YouTube audio URLs. Everything that needs a token runs in the app:
 
-- A PO token is minted for a specific client and expires within minutes. A token "file" placed on a server is stale almost immediately.
-- YouTube stream links are tied to the IP address that requested them. A link resolved on Cloudflare cannot be played from your phone.
-- Resolving and relaying YouTube audio for other apps circumvents YouTube's protections and its terms, and Cloudflare's terms restrict proxying large amounts of audio and video, so the account could be suspended.
+- The PO token is minted on the device by the bundled bridge in `zen-kit` (a hidden WebView). You do not place any token file anywhere.
+- Stream resolving and signature solving also run on the device, so the stream link is valid for that device's IP address.
+- The backend only fetches data: search results, playlists, albums, song details and JioSaavn links.
 
-What to do instead:
+Why not on the server: tokens expire within minutes, YouTube stream links are tied to the IP that requested them (a link resolved on Cloudflare would not play on a phone), and relaying YouTube audio through Cloudflare breaks its terms and can get the account suspended.
 
-- **YouTube / YouTube Music items:** the API returns `videoId` and an `embedUrl`. Play them with the official YouTube player (IFrame API or a WebView). No PO token is needed.
-- **ZenMusic Android app:** the app handles its own YouTube playback on the device in Kotlin (`potoken/ZenPoTokenBridge.kt`). You do not place any files anywhere.
-- **JioSaavn:** `playback.url` is a direct link; any player can use it.
+Apps that do not use `zen-kit` can play YouTube items with the official embedded player: the API returns `embedUrl` for them.
 
 ## Costs and limits
 

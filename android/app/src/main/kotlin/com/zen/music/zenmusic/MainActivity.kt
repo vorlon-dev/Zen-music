@@ -34,7 +34,7 @@ import com.zen.music.zenmusic.dsp.core.parser.ParametricEQParser
 import com.zen.music.zenmusic.innertube.ZenInnertubeResolver
 import com.zen.music.zenmusic.lossless.NativeAudioEngine
 import com.zen.music.zenmusic.lossless.broadcastNativeEqualizer
-import com.zen.music.zenmusic.potoken.ZenPoTokenBridge
+import dev.vorlon.zenkit.ZenKit
 import com.zen.music.zenmusic.liquid.ZenLiquidGlassEngine
 import com.zen.music.zenmusic.liquid.ZenLiquidGlassViewFactory
 import com.zen.music.zenmusic.material3.Material3Tokens
@@ -45,6 +45,15 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import timber.log.Timber
+
+/**
+ * URL of your self-hosted ZenMusic backend (see docs/SELF_HOSTING.md), for
+ * example "https://my-zen-music.pages.dev". Leave empty to run without one.
+ */
+private const val ZEN_BACKEND_URL = ""
+
+/** The backend's API_KEY value, or empty if you did not set one. */
+private const val ZEN_BACKEND_KEY = ""
 
 class MainActivity : AudioServiceActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -118,12 +127,15 @@ class MainActivity : AudioServiceActivity() {
         val isDebuggable =
             (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (isDebuggable) Timber.plant(Timber.DebugTree())
-        ZenInnertubeResolver.debugLogs = isDebuggable
-        ZenInnertubeResolver.init(applicationContext)
-        // Video token bridge: attach its WebView to this window so
-        // the page actually evaluates on this device (an unattached
-        // application-context WebView never ran its scripts).
-        ZenPoTokenBridge.attachActivity(this)
+        // zen-kit: starts the on-device engine (resolver + token bridge,
+        // whose WebView is attached to this window so its page actually
+        // evaluates) and, when a backend URL is set, the data client.
+        ZenKit.init(
+            activity = this,
+            backendUrl = ZEN_BACKEND_URL,
+            apiKey = ZEN_BACKEND_KEY,
+            debug = isDebuggable,
+        )
     }
 
 

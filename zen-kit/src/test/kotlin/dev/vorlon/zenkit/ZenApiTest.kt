@@ -1,6 +1,6 @@
 // ZenMusic · vorlon-dev
 
-package dev.vorlon.zenapi
+package dev.vorlon.zenkit
 
 import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress

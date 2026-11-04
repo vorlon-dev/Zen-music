@@ -1,0 +1,6 @@
+# ZenMusic · vorlon-dev
+# Standalone deploy of the backend (API only):
+#   cd backend && npx wrangler pages deploy public --project-name=<your-project>
+name = "zen-music-backend"
+pages_build_output_dir = "./public"
+compatibility_date = "2025-01-01"

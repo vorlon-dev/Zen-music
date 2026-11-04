@@ -571,7 +571,7 @@ A browser edition lives in `lib/web/` (separate from the Android/Windows apps).
 flutter build web -t lib/web/web_main.dart --release
 ```
 
-- `functions/api/[[path]].js` is a Cloudflare Pages Function that forwards `/api/*` to the JioSaavn API worker, so the browser needs no CORS access.
+- `backend/functions/api/[[path]].js` is a Cloudflare Pages Function that forwards `/api/*` to the JioSaavn API worker, so the browser needs no CORS access.
 - `.github/workflows/web.yml` builds and deploys to Cloudflare Pages on pushes to `main`. Add repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (optional variable `CLOUDFLARE_PROJECT`, default `zenmusic-d6t`).
 
 ## Support the Project

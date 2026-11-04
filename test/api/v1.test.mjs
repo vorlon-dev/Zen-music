@@ -1,4 +1,4 @@
-import { onRequest } from '../../functions/v1/[[path]].js';
+import { onRequest } from '../../backend/functions/v1/[[path]].js';
 import assert from 'node:assert';
 const jioSong = { id: 'j1', name: 'A &amp; B', artists: { primary: [{ name: 'X' }, { name: 'Y' }] }, album: { name: 'Alb' }, duration: '200',
   image: [{ quality: '50x50', url: 'http://i/50' }, { quality: '500x500', url: 'http://i/500' }],

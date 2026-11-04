@@ -1,7 +1,7 @@
 name: Web Player
 
 # Builds the web player (lib/web/web_main.dart) and deploys it, together with
-# the proxy in functions/, to Cloudflare Pages. Android/Windows are untouched.
+# the backend in backend/functions, to Cloudflare Pages. Android/Windows are untouched.
 #
 # Repository secrets needed for deploy (Settings > Secrets > Actions):
 #   CLOUDFLARE_API_TOKEN   token with "Cloudflare Pages: Edit"
@@ -14,7 +14,7 @@ on:
     paths:
       - 'lib/web/**'
       - 'web/**'
-      - 'functions/**'
+      - 'backend/**'
       - '.github/workflows/web.yml'
   workflow_dispatch:
 
@@ -58,6 +58,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Add backend functions to the deploy
+        run: cp -r backend/functions functions
 
       - name: Deploy to Cloudflare Pages
         if: ${{ env.CF_TOKEN != '' }}

@@ -82,6 +82,9 @@ dependencies {
     // through ZenInnertubeResolver on the legacy 'zen/innertubex'
     // channel. Replaced the innertubex JitPack artifact (removed).
     implementation(project(":innertube"))
+    // On-device PO token + stream resolver and the backend data client
+    // (moved out of the app module; packages unchanged).
+    implementation(project(":zen-kit"))
     implementation(project(":lossless"))
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
