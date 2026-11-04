@@ -7,6 +7,7 @@ import 'package:zenmusic/web/web_api.dart';
 import 'package:zenmusic/web/web_models.dart';
 import 'package:zenmusic/web/web_player.dart';
 import 'package:zenmusic/web/web_store.dart';
+import 'package:zenmusic/web/web_theme.dart';
 
 /// Gives every page access to the API, player and saved data.
 class WebScope extends InheritedWidget {
@@ -68,15 +69,29 @@ class Art extends StatelessWidget {
   }
 }
 
-/// Section title with optional trailing widget.
+/// Section title with an optional small trailing text.
 class SectionTitle extends StatelessWidget {
-  const SectionTitle(this.text, {super.key});
+  const SectionTitle(this.text, {super.key, this.trailing});
   final String text;
+  final String? trailing;
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-        child: Text(text, style: Theme.of(context).textTheme.titleLarge),
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (trailing != null)
+              Text(trailing!, style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
       );
 }
 
@@ -105,12 +120,16 @@ class SongTile extends StatelessWidget {
     final active = scope.player.current?.id == song.id;
     final primary = Theme.of(context).colorScheme.primary;
     return ListTile(
-      leading: Art(url: song.image, size: 48),
+      leading: Art(url: song.image, size: 56, radius: 12),
       title: Text(
         song.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: active ? TextStyle(color: primary) : null,
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+          color: active ? primary : null,
+        ),
       ),
       subtitle: Text(
         song.artist,
@@ -222,7 +241,7 @@ Future<String?> promptText(BuildContext context, String title, String hint) {
   );
 }
 
-/// Square card used in horizontal rows.
+/// Large artwork card with a play button, used in horizontal rows.
 class MediaCard extends StatelessWidget {
   const MediaCard({
     super.key,
@@ -240,23 +259,35 @@ class MediaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(18),
       onTap: onTap,
       child: SizedBox(
-        width: 150,
+        width: 168,
         child: Padding(
           padding: const EdgeInsets.all(4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Art(url: image, size: 142, radius: 12),
-              const SizedBox(height: 6),
-              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              Stack(
+                children: [
+                  Art(url: image, size: 160, radius: 18),
+                  const Positioned(right: 8, bottom: 8, child: PlayDot()),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
               Text(
                 subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey,
+                    ),
               ),
             ],
           ),
@@ -274,7 +305,7 @@ class CardRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 210,
+      height: 238,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -284,7 +315,169 @@ class CardRow extends StatelessWidget {
   }
 }
 
-/// Mini player shown above the navigation.
+/// Compact tile with a small cover, a title and a play button (quick picks).
+class QuickTile extends StatelessWidget {
+  const QuickTile({
+    super.key,
+    required this.image,
+    required this.title,
+    required this.onTap,
+  });
+
+  final String image;
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: kCard,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Row(
+          children: [
+            Art(url: image, size: 56, radius: 0),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              child: PlayDot(size: 34),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Wide video-style result: 16:9 cover with a duration badge.
+class VideoCard extends StatelessWidget {
+  const VideoCard({
+    super.key,
+    required this.song,
+    required this.onTap,
+  });
+
+  final WebSong song;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    song.image.isEmpty
+                        ? Container(color: kCard)
+                        : Image.network(
+                            song.image,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                Container(color: kCard),
+                          ),
+                    if (song.duration > Duration.zero)
+                      Positioned(
+                        right: 10,
+                        bottom: 10,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black87,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            clock(song.duration),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              song.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+            ),
+            Text(
+              song.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Rounded icon button on a dark square, as in the app's player.
+class SquareButton extends StatelessWidget {
+  const SquareButton({
+    super.key,
+    required this.icon,
+    required this.onTap,
+    this.tooltip,
+    this.size = 48,
+    this.color,
+    this.iconColor,
+  });
+
+  final IconData icon;
+  final VoidCallback? onTap;
+  final String? tooltip;
+  final double size;
+  final Color? color;
+  final Color? iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final button = Material(
+      color: color ?? Colors.white10,
+      borderRadius: BorderRadius.circular(size * 0.33),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Icon(icon, color: iconColor, size: size * 0.5),
+        ),
+      ),
+    );
+    return tooltip == null ? button : Tooltip(message: tooltip!, child: button);
+  }
+}
+
+/// Floating mini player shown above the navigation.
 class PlayerBar extends StatelessWidget {
   const PlayerBar({super.key, required this.onOpen});
   final VoidCallback onOpen;
@@ -297,64 +490,102 @@ class PlayerBar extends StatelessWidget {
     if (song == null) return const SizedBox.shrink();
     final total = player.duration.inMilliseconds;
     final pos = player.position.inMilliseconds.clamp(0, total > 0 ? total : 1);
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHigh,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          LinearProgressIndicator(
-            value: total > 0 ? pos / total : 0,
-            minHeight: 2,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+      child: Material(
+        borderRadius: BorderRadius.circular(28),
+        clipBehavior: Clip.antiAlias,
+        color: Colors.transparent,
+        child: Ink(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(colors: [kMiniStart, kMiniEnd]),
           ),
-          ListTile(
+          child: InkWell(
             onTap: onOpen,
-            leading: Art(url: song.image, size: 44),
-            title: Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text(
-              player.error ?? song.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: Row(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  tooltip: 'Favourite',
-                  icon: Icon(scope.store.isFavourite(song.id)
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded),
-                  onPressed: () => scope.store.toggleFavourite(song),
-                ),
-                IconButton(
-                  tooltip: 'Previous',
-                  icon: const Icon(Icons.skip_previous_rounded),
-                  onPressed: player.previous,
-                ),
-                player.loading
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 10, 8, 8),
+                  child: Row(
+                    children: [
+                      Art(url: song.image, size: 52, radius: 14),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              song.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                            Text(
+                              player.error ?? song.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white60),
+                            ),
+                          ],
                         ),
-                      )
-                    : IconButton.filled(
-                        tooltip: player.playing ? 'Pause' : 'Play',
-                        icon: Icon(player.playing
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded),
-                        onPressed: player.toggle,
                       ),
-                IconButton(
-                  tooltip: 'Next',
-                  icon: const Icon(Icons.skip_next_rounded),
-                  onPressed: player.hasNext ? player.next : null,
+                      IconButton(
+                        tooltip: 'Favourite',
+                        color: Colors.white,
+                        icon: Icon(scope.store.isFavourite(song.id)
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded),
+                        onPressed: () => scope.store.toggleFavourite(song),
+                      ),
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white38, width: 2),
+                        ),
+                        child: player.loading
+                            ? const Padding(
+                                padding: EdgeInsets.all(13),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : IconButton(
+                                tooltip: player.playing ? 'Pause' : 'Play',
+                                padding: EdgeInsets.zero,
+                                color: Colors.white,
+                                icon: Icon(player.playing
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded),
+                                onPressed: player.toggle,
+                              ),
+                      ),
+                      IconButton(
+                        tooltip: 'Next',
+                        color: Colors.white,
+                        icon: const Icon(Icons.skip_next_rounded),
+                        onPressed: player.hasNext ? player.next : null,
+                      ),
+                    ],
+                  ),
+                ),
+                LinearProgressIndicator(
+                  value: total > 0 ? pos / total : 0,
+                  minHeight: 3,
+                  color: kAccent,
+                  backgroundColor: Colors.white12,
                 ),
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
