@@ -164,8 +164,8 @@ class _Controls extends StatelessWidget {
             ),
             IconButton(
               tooltip: 'Repeat',
-              color: player.repeat == RepeatMode.off ? null : primary,
-              icon: Icon(player.repeat == RepeatMode.one
+              color: player.repeat == WebRepeat.off ? null : primary,
+              icon: Icon(player.repeat == WebRepeat.one
                   ? Icons.repeat_one_rounded
                   : Icons.repeat_rounded),
               onPressed: player.cycleRepeat,

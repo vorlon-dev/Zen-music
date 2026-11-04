@@ -46,7 +46,7 @@ class WebPlayer extends ChangeNotifier {
   List<LyricLine> lyrics = const [];
   int lyricIndex = -1;
   bool shuffle = false;
-  RepeatMode repeat = RepeatMode.off;
+  WebRepeat repeat = WebRepeat.off;
   double volume = 1.0;
   double speed = 1.0;
   DateTime? sleepEndsAt;
@@ -165,7 +165,7 @@ class WebPlayer extends ChangeNotifier {
   }
 
   Future<void> _onCompleted() async {
-    if (repeat == RepeatMode.one) {
+    if (repeat == WebRepeat.one) {
       await _audio.seek(Duration.zero);
       await _audio.play();
       return;
@@ -174,7 +174,7 @@ class WebPlayer extends ChangeNotifier {
       await _load(_randomOther());
     } else if (index + 1 < queue.length) {
       await _load(index + 1);
-    } else if (repeat == RepeatMode.all && queue.isNotEmpty) {
+    } else if (repeat == WebRepeat.all && queue.isNotEmpty) {
       await _load(0);
     } else {
       playing = false;
@@ -203,7 +203,7 @@ class WebPlayer extends ChangeNotifier {
       await _load(_randomOther());
     } else if (index + 1 < queue.length) {
       await _load(index + 1);
-    } else if (repeat == RepeatMode.all) {
+    } else if (repeat == WebRepeat.all) {
       await _load(0);
     }
   }
@@ -224,7 +224,7 @@ class WebPlayer extends ChangeNotifier {
   }
 
   void cycleRepeat() {
-    repeat = RepeatMode.values[(repeat.index + 1) % RepeatMode.values.length];
+    repeat = WebRepeat.values[(repeat.index + 1) % WebRepeat.values.length];
     notifyListeners();
   }
 

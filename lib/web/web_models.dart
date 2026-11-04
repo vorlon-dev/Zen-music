@@ -222,4 +222,4 @@ class WebDetail {
   final List<WebSong> songs;
 }
 
-enum RepeatMode { off, all, one }
+enum WebRepeat { off, all, one }
