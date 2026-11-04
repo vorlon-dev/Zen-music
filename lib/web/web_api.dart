@@ -64,10 +64,18 @@ class WebApi {
   }
 
   /// Songs from YouTube Music, via the same-origin proxy.
-  Future<List<WebSong>> searchYtm(String query) async {
+  Future<List<WebSong>> searchYtm(String query) => _searchYt(query, false);
+
+  /// Plain YouTube videos (played as audio), via the same-origin proxy.
+  Future<List<WebSong>> searchYoutube(String query) => _searchYt(query, true);
+
+  Future<List<WebSong>> _searchYt(String query, bool video) async {
     final q = query.trim();
     if (q.isEmpty) return const [];
-    final uri = Uri.parse('$_ytBase/search').replace(queryParameters: {'q': q});
+    final uri = Uri.parse('$_ytBase/search').replace(queryParameters: {
+      'q': q,
+      if (video) 'type': 'video',
+    });
     final res = await _client.get(uri).timeout(const Duration(seconds: 15));
     if (res.statusCode != 200) {
       throw http.ClientException('YouTube Music search failed', uri);
