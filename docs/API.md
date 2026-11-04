@@ -41,5 +41,6 @@ Set `API_KEY` in the Pages project's environment variables to require `x-api-key
 
 - Results are cached for 5 minutes at the edge.
 - YouTube parsing uses undocumented web endpoints and can break when YouTube changes them.
+- Self-hosting guide: [SELF_HOSTING.md](SELF_HOSTING.md). Kotlin client: [`zen-api-client`](../zen-api-client/README.md).
 - Tests: `node test/api/v1.test.mjs` (mocked network).
 - Please respect the rights of artists and the terms of the services you connect to.
