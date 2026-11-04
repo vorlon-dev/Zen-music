@@ -160,6 +160,7 @@ class _SearchPageState extends State<SearchPage> {
   final TextEditingController _query = TextEditingController();
   Timer? _debounce;
   _SearchKind _kind = _SearchKind.songs;
+  bool _ytm = false;
 
   List<WebSong> _songs = const [];
   List<WebCollection> _collections = const [];
@@ -198,7 +199,7 @@ class _SearchPageState extends State<SearchPage> {
     });
     try {
       if (_kind == _SearchKind.songs) {
-        final r = await api.search(q);
+        final r = _ytm ? await api.searchYtm(q) : await api.search(q);
         if (id != _run || !mounted) return;
         setState(() {
           _songs = r;
@@ -248,6 +249,34 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Wrap(
+            spacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('JioSaavn'),
+                selected: !_ytm,
+                onSelected: (_) {
+                  setState(() => _ytm = false);
+                  _search();
+                },
+              ),
+              ChoiceChip(
+                label: const Text('YouTube Music'),
+                selected: _ytm,
+                onSelected: (_) {
+                  setState(() {
+                    _ytm = true;
+                    _kind = _SearchKind.songs;
+                  });
+                  _search();
+                },
+              ),
+            ],
+          ),
+        ),
+        if (!_ytm)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: SegmentedButton<_SearchKind>(

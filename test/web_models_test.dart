@@ -72,6 +72,36 @@ void main() {
     });
   });
 
+  group('YouTube Music songs', () {
+    test('fromYtJson builds a playable yt song', () {
+      final s = WebSong.fromYtJson({
+        'id': 'abc123',
+        'title': 'Tom &amp; Jerry',
+        'artist': 'A & B',
+        'album': 'Alb',
+        'image': 'http://i/x.jpg',
+        'duration': 205,
+      })!;
+      expect(s.yt, isTrue);
+      expect(s.playable, isTrue);
+      expect(s.streamUrl, '');
+      expect(s.title, 'Tom & Jerry');
+      expect(s.image, 'https://i/x.jpg');
+      expect(s.duration, const Duration(seconds: 205));
+    });
+
+    test('fromYtJson rejects incomplete items', () {
+      expect(WebSong.fromYtJson(null), isNull);
+      expect(WebSong.fromYtJson({'id': 'x'}), isNull);
+      expect(WebSong.fromYtJson({'title': 't'}), isNull);
+    });
+
+    test('the yt flag survives storage', () {
+      final s = WebSong.fromYtJson({'id': 'v', 'title': 't'})!;
+      expect(WebSong.fromStored(s.toJson())!.yt, isTrue);
+    });
+  });
+
   test('clock formats', () {
     expect(clock(const Duration(seconds: 65)), '1:05');
     expect(clock(const Duration(hours: 1, seconds: 3)), '1:00:03');
