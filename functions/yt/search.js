@@ -7,6 +7,9 @@
 // player plays tracks with the official YouTube embedded player.
 
 const ENDPOINT = 'https://music.youtube.com/youtubei/v1/search?prettyPrint=false';
+const VIDEO_ENDPOINT = 'https://www.youtube.com/youtubei/v1/search?prettyPrint=false';
+// "Videos" filter, so playlists/channels/shorts shelves are skipped.
+const VIDEOS_FILTER = 'EgIQAQ==';
 const SONGS_FILTER = 'EgWKAQIIAWoKEAkQBRAKEAMQBA==';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -15,7 +18,9 @@ const UA =
 export async function onRequest({ request }) {
   if (request.method !== 'GET') return json({ error: 'method not allowed' }, 405);
 
-  const q = (new URL(request.url).searchParams.get('q') || '').trim();
+  const params = new URL(request.url).searchParams;
+  const q = (params.get('q') || '').trim();
+  const video = params.get('type') === 'video';
   if (!q || q.length > 200) return json({ results: [] });
 
   const d = new Date();
@@ -23,25 +28,28 @@ export async function onRequest({ request }) {
   const clientVersion = `1.${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}.01.00`;
 
   try {
-    const res = await fetch(ENDPOINT, {
+    const res = await fetch(video ? VIDEO_ENDPOINT : ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Origin: 'https://music.youtube.com',
-        Referer: 'https://music.youtube.com/',
+        Origin: video ? 'https://www.youtube.com' : 'https://music.youtube.com',
+        Referer: video ? 'https://www.youtube.com/' : 'https://music.youtube.com/',
         'User-Agent': UA,
       },
       body: JSON.stringify({
         context: {
-          client: { clientName: 'WEB_REMIX', clientVersion, hl: 'en', gl: 'US' },
+          client: video
+            ? { clientName: 'WEB', clientVersion: `2.${clientVersion.slice(2, 10)}.00.00`, hl: 'en', gl: 'US' }
+            : { clientName: 'WEB_REMIX', clientVersion, hl: 'en', gl: 'US' },
         },
         query: q,
-        params: SONGS_FILTER,
+        ...(video ? { params: VIDEOS_FILTER } : { params: SONGS_FILTER }),
       }),
       cf: { cacheTtl: 300, cacheEverything: true },
     });
     if (!res.ok) return json({ error: 'upstream ' + res.status }, 502);
-    return json({ results: parseSearch(await res.json()) }, 200, 300);
+    const data = await res.json();
+    return json({ results: video ? parseVideos(data) : parseSearch(data) }, 200, 300);
   } catch (_) {
     return json({ error: 'upstream unavailable' }, 502);
   }
@@ -132,6 +140,27 @@ export function parseSearch(data) {
       image,
       duration,
     });
+  }
+  return out;
+}
+
+// Plain YouTube video results (videoRenderer).
+export function parseVideos(data) {
+  const out = [];
+  const seen = new Set();
+  for (const v of walk(data, 'videoRenderer')) {
+    const id = v && v.videoId;
+    if (!id || seen.has(id)) continue;
+    const title = text(v.title && v.title.runs).trim();
+    if (!title) continue;
+    const owner = text(v.ownerText && v.ownerText.runs).trim() ||
+      text(v.longBylineText && v.longBylineText.runs).trim();
+    const length = (v.lengthText && v.lengthText.simpleText) || '';
+    const duration = /^\d{1,2}(:\d{2}){1,2}$/.test(length) ? toSeconds(length) : 0;
+    const thumbs = (v.thumbnail && v.thumbnail.thumbnails) || [];
+    const image = thumbs.length ? thumbs[thumbs.length - 1].url || '' : '';
+    seen.add(id);
+    out.push({ id, title, artist: owner, album: '', image, duration });
   }
   return out;
 }

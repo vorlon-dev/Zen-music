@@ -149,6 +149,8 @@ void openCollection(BuildContext context, WebCollection c) {
 
 enum _SearchKind { songs, albums, playlists }
 
+enum _Source { saavn, ytm, youtube }
+
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
 
@@ -160,7 +162,7 @@ class _SearchPageState extends State<SearchPage> {
   final TextEditingController _query = TextEditingController();
   Timer? _debounce;
   _SearchKind _kind = _SearchKind.songs;
-  bool _ytm = false;
+  _Source _source = _Source.saavn;
 
   List<WebSong> _songs = const [];
   List<WebCollection> _collections = const [];
@@ -199,7 +201,11 @@ class _SearchPageState extends State<SearchPage> {
     });
     try {
       if (_kind == _SearchKind.songs) {
-        final r = _ytm ? await api.searchYtm(q) : await api.search(q);
+        final r = switch (_source) {
+          _Source.saavn => await api.search(q),
+          _Source.ytm => await api.searchYtm(q),
+          _Source.youtube => await api.searchYoutube(q),
+        };
         if (id != _run || !mounted) return;
         setState(() {
           _songs = r;
@@ -254,29 +260,28 @@ class _SearchPageState extends State<SearchPage> {
           child: Wrap(
             spacing: 8,
             children: [
-              ChoiceChip(
-                label: const Text('JioSaavn'),
-                selected: !_ytm,
-                onSelected: (_) {
-                  setState(() => _ytm = false);
-                  _search();
-                },
-              ),
-              ChoiceChip(
-                label: const Text('YouTube Music'),
-                selected: _ytm,
-                onSelected: (_) {
-                  setState(() {
-                    _ytm = true;
-                    _kind = _SearchKind.songs;
-                  });
-                  _search();
-                },
-              ),
+              for (final entry in const {
+                _Source.saavn: 'JioSaavn',
+                _Source.ytm: 'YouTube Music',
+                _Source.youtube: 'YouTube',
+              }.entries)
+                ChoiceChip(
+                  label: Text(entry.value),
+                  selected: _source == entry.key,
+                  onSelected: (_) {
+                    setState(() {
+                      _source = entry.key;
+                      if (entry.key != _Source.saavn) {
+                        _kind = _SearchKind.songs;
+                      }
+                    });
+                    _search();
+                  },
+                ),
             ],
           ),
         ),
-        if (!_ytm)
+        if (_source == _Source.saavn)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: SegmentedButton<_SearchKind>(
