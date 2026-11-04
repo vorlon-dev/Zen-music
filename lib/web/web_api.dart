@@ -19,6 +19,10 @@ class WebApi {
   static const String _defaultApi =
       String.fromEnvironment('API_BASE', defaultValue: '/api');
 
+  /// Base of the YouTube Music search proxy (`functions/yt/search.js`).
+  static const String _ytBase =
+      String.fromEnvironment('YT_BASE', defaultValue: '/yt');
+
   final http.Client _client;
   final String _api;
   final String _lyrics;
@@ -54,6 +58,26 @@ class WebApi {
           final s = WebSong.fromJson(item);
           if (s.id.isNotEmpty && s.playable) out.add(s);
         }
+      }
+    }
+    return out;
+  }
+
+  /// Songs from YouTube Music, via the same-origin proxy.
+  Future<List<WebSong>> searchYtm(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return const [];
+    final uri = Uri.parse('$_ytBase/search').replace(queryParameters: {'q': q});
+    final res = await _client.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) {
+      throw http.ClientException('YouTube Music search failed', uri);
+    }
+    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final out = <WebSong>[];
+    if (data is Map && data['results'] is List) {
+      for (final item in data['results'] as List) {
+        final s = WebSong.fromYtJson(item);
+        if (s != null) out.add(s);
       }
     }
     return out;

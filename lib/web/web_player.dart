@@ -10,18 +10,20 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:zenmusic/web/web_api.dart';
 import 'package:zenmusic/web/web_models.dart';
+import 'package:zenmusic/web/web_yt_bridge.dart';
 
 class WebPlayer extends ChangeNotifier {
   WebPlayer(this._api) {
     _subs.add(_audio.playerStateStream.listen(_onState));
     _subs.add(_audio.positionStream.listen((p) {
+      if (_isYt) return;
       position = p;
       final i = activeLyricIndex(lyrics, p);
       if (i != lyricIndex) lyricIndex = i;
       notifyListeners();
     }));
     _subs.add(_audio.durationStream.listen((d) {
-      if (d != null) {
+      if (d != null && !_isYt) {
         duration = d;
         notifyListeners();
       }
@@ -52,9 +54,12 @@ class WebPlayer extends ChangeNotifier {
   DateTime? sleepEndsAt;
   Timer? _sleepTimer;
   int _token = 0;
+  Timer? _ytPoll;
+  bool _ytEndedHandled = false;
 
   WebSong? get current =>
       index >= 0 && index < queue.length ? queue[index] : null;
+  bool get _isYt => current?.yt == true;
   bool get hasNext => queue.length > 1 || index + 1 < queue.length;
   bool get hasPrevious => index > 0;
 
@@ -123,6 +128,13 @@ class WebPlayer extends ChangeNotifier {
       notifyListeners();
     }));
 
+    if (song.yt) {
+      await _audio.pause();
+      _startYt(song, token);
+      return;
+    }
+    _stopYt();
+
     var ok = await _tryUrl(song.streamUrl);
     if (!ok && token == _token) {
       // Saved links can expire; fetch a fresh one once.
@@ -146,6 +158,64 @@ class WebPlayer extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _startYt(WebSong song, int token) {
+    _ytPoll?.cancel();
+    _ytEndedHandled = false;
+    try {
+      YtBridge.setVolume(volume);
+      YtBridge.setRate(speed);
+      YtBridge.load(song.id);
+    } catch (_) {
+      loading = false;
+      error = 'YouTube playback is not available here.';
+      notifyListeners();
+      return;
+    }
+    _ytPoll = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (token != _token) {
+        _ytPoll?.cancel();
+        return;
+      }
+      _pollYt();
+    });
+  }
+
+  void _pollYt() {
+    final YtState st;
+    try {
+      st = YtBridge.state();
+    } catch (_) {
+      return;
+    }
+    if (st.error != 0) {
+      _ytPoll?.cancel();
+      loading = false;
+      playing = false;
+      error = 'This track cannot be played in the embedded YouTube player.';
+      notifyListeners();
+      return;
+    }
+    playing = st.playing;
+    loading = st.state == 3 && st.position == Duration.zero;
+    position = st.position;
+    if (st.duration > Duration.zero) duration = st.duration;
+    final i = activeLyricIndex(lyrics, position);
+    if (i != lyricIndex) lyricIndex = i;
+    if (st.ended && !_ytEndedHandled) {
+      _ytEndedHandled = true;
+      unawaited(_onCompleted());
+    }
+    notifyListeners();
+  }
+
+  void _stopYt() {
+    _ytPoll?.cancel();
+    _ytPoll = null;
+    try {
+      YtBridge.stop();
+    } catch (_) {}
+  }
+
   Future<bool> _tryUrl(String url) async {
     if (url.isEmpty) return false;
     try {
@@ -157,6 +227,7 @@ class WebPlayer extends ChangeNotifier {
   }
 
   void _onState(PlayerState s) {
+    if (_isYt) return;
     playing = s.playing;
     if (s.processingState == ProcessingState.completed) {
       unawaited(_onCompleted());
@@ -166,8 +237,14 @@ class WebPlayer extends ChangeNotifier {
 
   Future<void> _onCompleted() async {
     if (repeat == WebRepeat.one) {
-      await _audio.seek(Duration.zero);
-      await _audio.play();
+      if (_isYt) {
+        _ytEndedHandled = false;
+        YtBridge.seek(Duration.zero);
+        YtBridge.play();
+      } else {
+        await _audio.seek(Duration.zero);
+        await _audio.play();
+      }
       return;
     }
     if (shuffle && queue.length > 1) {
@@ -190,6 +267,14 @@ class WebPlayer extends ChangeNotifier {
 
   Future<void> toggle() async {
     if (current == null) return;
+    if (_isYt) {
+      if (playing) {
+        YtBridge.pause();
+      } else {
+        YtBridge.play();
+      }
+      return;
+    }
     if (_audio.playing) {
       await _audio.pause();
     } else {
@@ -210,13 +295,19 @@ class WebPlayer extends ChangeNotifier {
 
   Future<void> previous() async {
     if (position > const Duration(seconds: 3) || !hasPrevious) {
-      await _audio.seek(Duration.zero);
+      await seek(Duration.zero);
     } else {
       await _load(index - 1);
     }
   }
 
-  Future<void> seek(Duration to) => _audio.seek(to);
+  Future<void> seek(Duration to) async {
+    if (_isYt) {
+      YtBridge.seek(to);
+      return;
+    }
+    await _audio.seek(to);
+  }
 
   void toggleShuffle() {
     shuffle = !shuffle;
@@ -231,12 +322,18 @@ class WebPlayer extends ChangeNotifier {
   Future<void> setVolume(double v) async {
     volume = v.clamp(0.0, 1.0).toDouble();
     await _audio.setVolume(volume);
+    try {
+      YtBridge.setVolume(volume);
+    } catch (_) {}
     notifyListeners();
   }
 
   Future<void> setSpeed(double v) async {
     speed = v;
     await _audio.setSpeed(v);
+    try {
+      YtBridge.setRate(v);
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -250,6 +347,9 @@ class WebPlayer extends ChangeNotifier {
       _sleepTimer = Timer(after, () {
         sleepEndsAt = null;
         unawaited(_audio.pause());
+        try {
+          YtBridge.pause();
+        } catch (_) {}
         notifyListeners();
       });
     }
@@ -259,6 +359,7 @@ class WebPlayer extends ChangeNotifier {
   @override
   void dispose() {
     _sleepTimer?.cancel();
+    _stopYt();
     for (final s in _subs) {
       s.cancel();
     }

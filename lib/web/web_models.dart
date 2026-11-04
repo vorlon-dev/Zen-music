@@ -12,6 +12,7 @@ class WebSong {
     required this.image,
     required this.streamUrl,
     required this.duration,
+    this.yt = false,
   });
 
   final String id;
@@ -22,7 +23,11 @@ class WebSong {
   final String streamUrl;
   final Duration duration;
 
-  bool get playable => streamUrl.isNotEmpty;
+  /// True for YouTube Music tracks, which play in the YouTube embed (no
+  /// stream URL) and use [id] as the video id.
+  final bool yt;
+
+  bool get playable => yt || streamUrl.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -32,6 +37,7 @@ class WebSong {
         'image': image,
         'streamUrl': streamUrl,
         'duration': duration.inSeconds,
+        'yt': yt,
       };
 
   /// Restores a song written by [toJson]. Returns null for malformed data.
@@ -47,6 +53,25 @@ class WebSong {
       image: '${raw['image'] ?? ''}',
       streamUrl: '${raw['streamUrl'] ?? ''}',
       duration: Duration(seconds: int.tryParse('${raw['duration'] ?? ''}') ?? 0),
+      yt: raw['yt'] == true,
+    );
+  }
+
+  /// Builds a YouTube Music song from one result of the `/yt/search` proxy.
+  static WebSong? fromYtJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = '${raw['id'] ?? ''}';
+    final title = unescapeHtml('${raw['title'] ?? ''}');
+    if (id.isEmpty || title.isEmpty) return null;
+    return WebSong(
+      id: id,
+      title: title,
+      artist: unescapeHtml('${raw['artist'] ?? ''}'),
+      album: unescapeHtml('${raw['album'] ?? ''}'),
+      image: _https('${raw['image'] ?? ''}'),
+      streamUrl: '',
+      duration: Duration(seconds: int.tryParse('${raw['duration'] ?? ''}') ?? 0),
+      yt: true,
     );
   }
 
