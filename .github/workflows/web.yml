@@ -40,6 +40,9 @@ jobs:
 
       - run: flutter pub get
 
+      - name: Test API functions
+        run: node test/api/v1.test.mjs
+
       - name: Test web code
         run: flutter test test/web_models_test.dart test/web_store_test.dart
 
