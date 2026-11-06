@@ -19,6 +19,8 @@ class AppearancePrefs {
   static final thumbRadius = ValueNotifier<double>(14);
   static final hideThumbnail = ValueNotifier<bool>(false);
   static final showQualityBadge = ValueNotifier<bool>(true);
+  // classic | water_drop — lyrics animation & visual style
+  static final lyricsStyle = ValueNotifier<String>('water_drop');
   // left | center | right — current lyric line alignment
   static final lyricsPosition = ValueNotifier<String>('left');
   // 16..36 sp — lyrics text size
@@ -60,6 +62,7 @@ class AppearancePrefs {
     thumbRadius.value = p.getDouble('ap_thumb_radius') ?? 14;
     hideThumbnail.value = p.getBool('ap_hide_thumb') ?? false;
     showQualityBadge.value = p.getBool('ap_show_badge') ?? true;
+    lyricsStyle.value = p.getString('ap_lyrics_style') ?? 'water_drop';
     lyricsPosition.value = p.getString('ap_lyrics_pos') ?? 'left';
     lyricsTextSize.value = p.getDouble('ap_lyrics_size') ?? 19;
     lyricsLineSpacing.value = p.getDouble('ap_lyrics_gap') ?? 1.3;
@@ -123,6 +126,11 @@ class AppearancePrefs {
   static Future<void> setShowQualityBadge(bool v) async {
     showQualityBadge.value = v;
     await _write('ap_show_badge', v);
+  }
+
+  static Future<void> setLyricsStyle(String v) async {
+    lyricsStyle.value = v;
+    await _write('ap_lyrics_style', v);
   }
 
   static Future<void> setLyricsPosition(String v) async {

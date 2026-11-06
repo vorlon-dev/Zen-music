@@ -8,7 +8,9 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 
+import '../../services/appearance_prefs.dart';
 import '../../services/lyrics_service.dart';
+import 'widgets/water_drops_overlay.dart';
 
 class SyncedLyricsView extends StatefulWidget {
   const SyncedLyricsView({
@@ -309,7 +311,26 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
       return _center(_Breath(color: _accent(context), scale: widget.textScale));
     }
 
-    if (lyrics.hasSynced) return _syncedList(context, lyrics.synced!);
+    if (lyrics.hasSynced) {
+      return ValueListenableBuilder<String>(
+        valueListenable: AppearancePrefs.lyricsStyle,
+        builder: (context, style, _) {
+          final isWaterDrop = style == 'water_drop';
+          final listWidget = _syncedList(context, lyrics.synced!, isWaterDrop: isWaterDrop);
+          if (!isWaterDrop) return listWidget;
+
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              listWidget,
+              const Positioned.fill(
+                child: WaterDropsOverlay(),
+              ),
+            ],
+          );
+        },
+      );
+    }
 
     final plain = lyrics.plain;
     if (plain != null && plain.trim().isNotEmpty) {
@@ -343,7 +364,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
     );
   }
 
-  Widget _syncedList(BuildContext context, List<LyricLine> lines) {
+  Widget _syncedList(BuildContext context, List<LyricLine> lines, {bool isWaterDrop = false}) {
     if (_keys.length != lines.length) {
       _keys = List<GlobalKey>.generate(lines.length, (_) => GlobalKey());
     }
@@ -378,7 +399,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
                 c.maxHeight.isFinite ? c.maxHeight * 0.7 : 300,
               ),
               itemCount: lines.length,
-              itemBuilder: (context, i) => _item(context, lines, i),
+              itemBuilder: (context, i) => _item(context, lines, i, isWaterDrop: isWaterDrop),
             );
           },
         ),
@@ -401,7 +422,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
         l[i].timeMs - l[i - 1].timeMs >= 3800;
   }
 
-  Widget _item(BuildContext context, List<LyricLine> lines, int i) {
+  Widget _item(BuildContext context, List<LyricLine> lines, int i, {bool isWaterDrop = false}) {
     final line = lines[i];
     final isActive = i == _active;
     final isPast = _active >= 0 && i < _active;
@@ -425,7 +446,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
       duration: const Duration(milliseconds: 420),
       curve: _ease,
       builder: (context, fx, _) {
-        Widget body = _body(context, line, isActive, style, accent, fx.alpha);
+        Widget body = _body(context, line, isActive, style, accent, fx.alpha, isWaterDrop: isWaterDrop);
         if (fx.blur > 0.05) {
           body = ImageFiltered(
             imageFilter: ui.ImageFilter.blur(
@@ -494,7 +515,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
   }
 
   Widget _body(BuildContext context, LyricLine line, bool isActive,
-      TextStyle style, Color accent, double alpha) {
+      TextStyle style, Color accent, double alpha, {bool isWaterDrop = false}) {
     final text = line.text.trim().isEmpty ? '♪' : line.text;
 
     if (isActive && line.hasWords) {
@@ -503,19 +524,49 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
         pos: _posNotifier,
         style: style,
         accent: accent,
-        dim: _inactive(context, 0.40),
+        dim: _inactive(context, isWaterDrop ? 0.35 : 0.40),
+        isWaterDrop: isWaterDrop,
       );
     }
 
     if (isActive) {
-      final active = style.copyWith(color: accent);
+      final active = style.copyWith(
+        color: accent,
+        shadows: isWaterDrop
+            ? [
+                Shadow(
+                  color: accent.withValues(alpha: 0.85),
+                  blurRadius: 18,
+                ),
+                Shadow(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  blurRadius: 8,
+                ),
+                const Shadow(
+                  color: Colors.black38,
+                  blurRadius: 4,
+                  offset: Offset(1.5, 2.0),
+                ),
+              ]
+            : null,
+      );
+
+      final rowContent = isWaterDrop
+          ? _WetGlassText(text: text, style: active)
+          : Text(text, style: active, textAlign: TextAlign.left);
+
       return Stack(
         clipBehavior: Clip.none,
         children: [
           Positioned.fill(
-            child: _Glow(text: text, style: style.copyWith(color: accent)),
+            child: _Glow(
+              text: text,
+              style: style.copyWith(color: accent),
+              sigma: isWaterDrop ? 10.0 : 6.0,
+              opacity: isWaterDrop ? 0.75 : 0.5,
+            ),
           ),
-          Text(text, style: active, textAlign: TextAlign.left),
+          rowContent,
         ],
       );
     }
@@ -613,24 +664,86 @@ class _FxTween extends Tween<_Fx> {
 
 
 class _Glow extends StatelessWidget {
-  const _Glow({required this.text, required this.style});
+  const _Glow({
+    required this.text,
+    required this.style,
+    this.sigma = 6.0,
+    this.opacity = 0.5,
+  });
+
   final String text;
   final TextStyle style;
+  final double sigma;
+  final double opacity;
 
   @override
   Widget build(BuildContext context) {
     return RepaintBoundary(
       child: ImageFiltered(
         imageFilter:
-        ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6, tileMode: TileMode.decal),
+            ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma, tileMode: TileMode.decal),
         child: Text(
           text,
           textAlign: TextAlign.left,
-          style: style.copyWith(color: (style.color ?? Colors.white).withOpacity(0.5)),
+          style: style.copyWith(
+            color: (style.color ?? Colors.white).withOpacity(opacity),
+          ),
         ),
       ),
     );
   }
+}
+
+/// Renders lyric text with subtle water droplets resting on the letters,
+/// giving an authentic rainy glass appearance matching the reference image.
+class _WetGlassText extends StatelessWidget {
+  const _WetGlassText({required this.text, required this.style});
+  final String text;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      foregroundPainter: _TextDropletsPainter(text: text, style: style),
+      child: Text(text, style: style, textAlign: TextAlign.left),
+    );
+  }
+}
+
+class _TextDropletsPainter extends CustomPainter {
+  _TextDropletsPainter({required this.text, required this.style});
+  final String text;
+  final TextStyle style;
+
+  static final Paint _highlightPaint = Paint()..color = Colors.white.withValues(alpha: 0.85);
+  static final Paint _shadowPaint = Paint()..color = Colors.black.withValues(alpha: 0.4);
+  static final Paint _glintPaint = Paint()..color = Colors.white;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0) return;
+
+    // Deterministic random generator based on the text hash so droplets stay stable per line
+    final rng = math.Random(text.hashCode);
+    final dropCount = (text.length * 0.45).clamp(4, 16).toInt();
+
+    for (var i = 0; i < dropCount; i++) {
+      final x = (rng.nextDouble() * 0.9 + 0.05) * size.width;
+      final y = (rng.nextDouble() * 0.7 + 0.15) * size.height;
+      final r = 1.2 + rng.nextDouble() * 2.2;
+
+      // Shadow
+      canvas.drawCircle(Offset(x + 0.5, y + 0.6), r, _shadowPaint);
+      // Droplet body
+      canvas.drawCircle(Offset(x, y), r, _highlightPaint);
+      // Specular shine point
+      canvas.drawCircle(Offset(x - r * 0.35, y - r * 0.35), r * 0.35, _glintPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TextDropletsPainter oldDelegate) =>
+      oldDelegate.text != text || oldDelegate.style != style;
 }
 
 
@@ -641,6 +754,7 @@ class _KaraokeLine extends StatefulWidget {
     required this.style,
     required this.accent,
     required this.dim,
+    this.isWaterDrop = false,
   });
 
   final LyricLine line;
@@ -648,6 +762,7 @@ class _KaraokeLine extends StatefulWidget {
   final TextStyle style;
   final Color accent;
   final Color dim;
+  final bool isWaterDrop;
 
   @override
   State<_KaraokeLine> createState() => _KaraokeLineState();
@@ -758,6 +873,8 @@ class _KaraokeLineState extends State<_KaraokeLine> {
                 child: _Glow(
                   text: _full,
                   style: widget.style.copyWith(color: widget.accent),
+                  sigma: widget.isWaterDrop ? 10.0 : 6.0,
+                  opacity: widget.isWaterDrop ? 0.75 : 0.5,
                 ),
               ),
               CustomPaint(
@@ -772,6 +889,9 @@ class _KaraokeLineState extends State<_KaraokeLine> {
                   textLength: _full.length,
                   pos: widget.pos,
                 ),
+                foregroundPainter: widget.isWaterDrop
+                    ? _TextDropletsPainter(text: _full, style: widget.style)
+                    : null,
               ),
             ],
           ),
