@@ -174,16 +174,18 @@ class _JustAudioBackgroundPlugin extends JustAudioPlatform {
 
   _JustAudioPlayer? _player;
   String? _playerId;
+  final Set<String> _secondaryIds = <String>{};
 
   _JustAudioBackgroundPlugin();
 
   @override
   Future<AudioPlayerPlatform> init(InitRequest request) async {
     if (_playerId != null) {
-      throw PlatformException(
-        code: "error",
-        message: "just_audio_background supports only a single player instance",
-      );
+      // ZenMusic: the first player owns the media session and notification.
+      // Any further player (the crossfade engine's second deck) is handed
+      // straight to the real platform, with no session of its own.
+      _secondaryIds.add(request.id);
+      return _platform.init(request);
     }
     _playerId = request.id;
     _player ??= _JustAudioPlayer(initRequest: request);
@@ -193,6 +195,9 @@ class _JustAudioBackgroundPlugin extends JustAudioPlatform {
   @override
   Future<DisposePlayerResponse> disposePlayer(
       DisposePlayerRequest request) async {
+    if (_secondaryIds.remove(request.id)) {
+      return _platform.disposePlayer(request);
+    }
     if (request.id == _playerId) {
       _playerId = null;
       final player = _player;

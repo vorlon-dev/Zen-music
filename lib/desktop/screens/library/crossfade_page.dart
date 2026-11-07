@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 
+import 'package:zenmusic/desktop/services/automix.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 
 class CrossfadePage extends StatefulWidget {
@@ -17,6 +18,7 @@ class CrossfadePage extends StatefulWidget {
 class _CrossfadePageState extends State<CrossfadePage> {
   int _seconds = 0;
   bool _playerAvailable = true;
+  bool _automix = AutomixPrefs.enabled;
 
   @override
   void initState() {
@@ -104,6 +106,23 @@ class _CrossfadePageState extends State<CrossfadePage> {
               ),
               const SizedBox(height: 4),
               Card(
+                child: SwitchListTile(
+                  title: const Text('Automix',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text(
+                      'DJ-style blends: looks up both tempos, stretches the '
+                      'tracks toward each other and sizes the overlap to '
+                      'whole bars. Needs no fade length. Tempo-matched, not '
+                      'beat-phase-locked.'),
+                  value: _automix,
+                  onChanged: (bool v) async {
+                    setState(() => _automix = v);
+                    await AutomixPrefs.setEnabled(v);
+                  },
+                ),
+              ),
+              const SizedBox(height: 4),
+              Card(
                 child: Padding(
                   padding: const EdgeInsets.all(20),
                   child: Column(
@@ -113,13 +132,12 @@ class _CrossfadePageState extends State<CrossfadePage> {
                           style: TextStyle(fontWeight: FontWeight.bold)),
                       SizedBox(height: 8),
                       Text(
-                        'The current track fades out over its last seconds '
-                        'and the next track fades in over its first seconds. '
-                        'Works on every source — YouTube, JioSaavn and '
-                        'offline files — and on automatic advances, skips '
-                        'and the end of the queue alike. The volume always '
-                        'restores itself if you pause, seek or stop '
-                        'mid-fade.',
+                        'Near the end of a track a second player takes over '
+                        'its tail while the next track starts, and the two '
+                        'are blended with an equal-power curve, so both are '
+                        'audible together. It applies to automatic '
+                        'advances; a manual skip cuts straight to the next '
+                        'track and the volume restores itself.',
                         style: TextStyle(height: 1.5),
                       ),
                       SizedBox(height: 12),
@@ -130,8 +148,9 @@ class _CrossfadePageState extends State<CrossfadePage> {
                         '• Off by default — drag the slider to switch it on.\n'
                         '• Spotify tracks played by the Spotify engine keep '
                         'their own audio path and are not faded.\n'
-                        '• A single track on loop-one replays without a fade '
-                        '(v1).',
+                        '• A single track on loop-one replays without a fade.\n'
+                        '• If the next track cannot be prepared in time, '
+                        'playback just moves on without an overlap.',
                         style: TextStyle(height: 1.5),
                       ),
                     ],

@@ -15,6 +15,8 @@ import 'native_equalizer.dart';
 import '../utils/add_history.dart';
 import '../utils/enhanced_image.dart';
 import 'eq_models.dart';
+import 'automix.dart';
+import 'crossfade_engine.dart';
 import 'settings_manager.dart';
 import 'yt_audio_stream.dart';
 import 'song_cache_service.dart';
@@ -670,23 +672,34 @@ class MediaPlayer extends ChangeNotifier {
                   ?.toInt() ??
               0;
     } catch (_) {}
-    _player.positionStream.listen((_) {
-      if (_engineOwnsPlayback) return;
-      _maybeStartFadeOut();
-    });
-    _player.currentIndexStream.listen((int? index) {
-      if (_engineOwnsPlayback) return;
-      if (index == null) {
-        // Queue cleared (stop / fresh play) — never leave a ramp running.
-        _cancelFade(restore: true);
-        return;
-      }
-      // Every track boundary (auto-advance or manual skip) starts a fresh
-      // fade-in when crossfade is on. Registered AFTER
-      // _listenToChangesInSong, so _currentSongNotifier is already the new
-      // track by the time this runs.
-      _maybeStartFadeIn();
-    });
+    // True two-deck overlap (see crossfade_engine.dart). It replaces the old
+    // single-player fade-out/fade-in, which only ever dipped to silence.
+    _xf = CrossfadeEngine(
+      player: _player,
+      buildSource: _getAudioSource,
+      songAt: _songMapAt,
+      isBlocked: () =>
+          _engineOwnsPlayback || _loopMode.value == LoopMode.one,
+      plan: (outgoing, incoming) async {
+        if (AutomixPrefs.enabled) return _automix.plan(outgoing, incoming);
+        if (_crossfadeSeconds > 0) {
+          return CrossfadePlan.plain(_crossfadeSeconds);
+        }
+        return null;
+      },
+    )..attach();
+  }
+
+  CrossfadeEngine? _xf;
+  final Automix _automix = Automix();
+
+  Map<String, dynamic>? _songMapAt(int index) {
+    final seq = _player.sequence;
+    if (index < 0 || index >= seq.length) return null;
+    final tag = seq[index].tag;
+    if (tag is! MediaItem) return null;
+    final extras = tag.extras;
+    return extras == null ? null : Map<String, dynamic>.from(extras);
   }
 
   void _maybeStartFadeOut() {
@@ -814,6 +827,7 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   void _disposeCrossfade() {
+    unawaited(_xf?.dispose());
     _cancelFade(restore: true);
   }
 
