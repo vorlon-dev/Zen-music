@@ -160,7 +160,8 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
     super.initState();
     MediaKit.ensureInitialized();
     _p = Player(
-        configuration: const PlayerConfiguration(bufferSize: 32 * 1024 * 1024));
+        configuration: PlayerConfiguration(
+            bufferSize: (Platform.isAndroid ? 12 : 32) * 1024 * 1024));
     _vc = VideoController(_p);
     _subs.addAll([
       _p.stream.position.listen((d) => _pos.value = d),

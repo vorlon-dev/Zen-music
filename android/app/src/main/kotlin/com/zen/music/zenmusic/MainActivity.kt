@@ -78,6 +78,20 @@ class MainActivity : AudioServiceActivity() {
         }
     }
 
+    override fun onDestroy() {
+        ZenPoTokenBridge.detachActivity(this)
+        super.onDestroy()
+    }
+
+    /// Back at the root screen used to FINISH the activity and destroy the
+    /// Flutter engine, so reopening the app paid a full cold start again
+    /// (engine + Hive + auth + feeds). Moving the task to the background keeps
+    /// everything warm: reopening is instant, and music keeps playing.
+    override fun popSystemNavigator(): Boolean {
+        moveTaskToBack(true)
+        return true
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 

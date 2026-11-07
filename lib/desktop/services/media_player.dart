@@ -649,9 +649,6 @@ class MediaPlayer extends ChangeNotifier {
 
   static const String _crossfadeKey = 'CROSSFADE_SECS';
   int _crossfadeSeconds = 0;
-  Timer? _fadeTimer;
-  int _fadeToken = 0;
-  bool _fadedOut = false;
 
   int get crossfadeSeconds => _crossfadeSeconds;
 
@@ -661,8 +658,8 @@ class MediaPlayer extends ChangeNotifier {
     try {
       await Hive.box('SETTINGS').put(_crossfadeKey, v);
     } catch (_) {}
-    // Changing the setting mid-fade returns to a clean state.
-    _cancelFade(restore: true);
+    // Changing the setting mid-blend returns to a clean state.
+    unawaited(_xf?.cancel());
   }
 
   void _listenToCrossfade() {
@@ -678,6 +675,8 @@ class MediaPlayer extends ChangeNotifier {
       player: _player,
       buildSource: _getAudioSource,
       songAt: _songMapAt,
+      nextSong: _nextSongMap,
+      advance: skipNext,
       isBlocked: () =>
           _engineOwnsPlayback || _loopMode.value == LoopMode.one,
       plan: (outgoing, incoming) async {
@@ -693,6 +692,17 @@ class MediaPlayer extends ChangeNotifier {
   CrossfadeEngine? _xf;
   final Automix _automix = Automix();
 
+  Map<String, dynamic>? _nextSongMap(int index) {
+    final inSequence = _songMapAt(index + 1);
+    if (inSequence != null) return inSequence;
+    // Not preloaded yet: look in the wider queue.
+    final snapshot = queueSnapshot.value;
+    final currentId = _songMapAt(index)?['videoId'];
+    final at = snapshot.indexWhere((s) => s['videoId'] == currentId);
+    if (at < 0 || at + 1 >= snapshot.length) return null;
+    return Map<String, dynamic>.from(snapshot[at + 1]);
+  }
+
   Map<String, dynamic>? _songMapAt(int index) {
     final seq = _player.sequence;
     if (index < 0 || index >= seq.length) return null;
@@ -702,133 +712,8 @@ class MediaPlayer extends ChangeNotifier {
     return extras == null ? null : Map<String, dynamic>.from(extras);
   }
 
-  void _maybeStartFadeOut() {
-    final int window = _crossfadeSeconds;
-    if (window <= 0 || _fadedOut) return;
-    if (_buttonState.value != ButtonState.playing) return;
-    final ProgressBarState p = _progressBarState.value;
-    final Duration total = p.total;
-    if (total <= Duration.zero || total <= Duration(seconds: window * 2)) {
-      return;
-    }
-    final Duration remaining = total - p.current;
-    if (remaining <= Duration.zero ||
-        remaining > Duration(seconds: window)) {
-      return;
-    }
-    final String? trackId = _currentSongNotifier.value?.id;
-    if (trackId == null) return;
-    _startFadeOut(trackId, Duration(seconds: window));
-  }
-
-  void _startFadeOut(String trackId, Duration window) {
-    ++_fadeToken;
-    _fadeTimer?.cancel();
-    final int token = _fadeToken;
-    final DateTime start = DateTime.now();
-    _fadeTimer = Timer.periodic(const Duration(milliseconds: 80), (Timer t) {
-      final ProgressBarState p = _progressBarState.value;
-      final bool invalid = token != _fadeToken ||
-          _engineOwnsPlayback ||
-          _crossfadeSeconds <= 0 ||
-          _currentSongNotifier.value?.id != trackId ||
-          _buttonState.value != ButtonState.playing ||
-          p.total <= Duration.zero ||
-          (p.total - p.current) > window + const Duration(milliseconds: 600);
-      if (invalid) {
-        t.cancel();
-        _restoreVolume();
-        return;
-      }
-      final double f = DateTime.now().difference(start).inMilliseconds /
-          window.inMilliseconds;
-      if (f >= 1.0) {
-        t.cancel();
-        try {
-          unawaited(_player.setVolume(0.0));
-        } catch (_) {}
-        _fadedOut = true;
-        // Queue end (or loop-one): nothing advances and the completed
-        // handler pauses at 0 — bring the volume back shortly after so
-        // replay is never silent. If a next track IS advancing, the
-        // fade-in below owns the volume anyway.
-        Future.delayed(const Duration(milliseconds: 2500), () {
-          if (token == _fadeToken &&
-              _currentSongNotifier.value?.id == trackId &&
-              !_engineOwnsPlayback) {
-            _fadedOut = false;
-            _restoreVolume();
-          }
-        });
-        return;
-      }
-      try {
-        unawaited(_player.setVolume((1.0 - f).clamp(0.0, 1.0)));
-      } catch (_) {}
-    });
-  }
-
-  void _maybeStartFadeIn() {
-    // Any boundary cancels whatever ramp was running.
-    ++_fadeToken;
-    _fadeTimer?.cancel();
-    _fadedOut = false;
-    final int window = _crossfadeSeconds;
-    final String? trackId = _currentSongNotifier.value?.id;
-    if (window <= 0 || trackId == null) {
-      _restoreVolume();
-      return;
-    }
-    _startFadeIn(trackId, Duration(seconds: window));
-  }
-
-  void _startFadeIn(String trackId, Duration window) {
-    final int token = _fadeToken;
-    final DateTime start = DateTime.now();
-    try {
-      unawaited(_player.setVolume(0.0));
-    } catch (_) {}
-    _fadeTimer = Timer.periodic(const Duration(milliseconds: 80), (Timer t) {
-      final bool invalid = token != _fadeToken ||
-          _engineOwnsPlayback ||
-          _crossfadeSeconds <= 0 ||
-          _currentSongNotifier.value?.id != trackId ||
-          _buttonState.value == ButtonState.paused;
-      if (invalid) {
-        t.cancel();
-        _restoreVolume();
-        return;
-      }
-      final double f = DateTime.now().difference(start).inMilliseconds /
-          window.inMilliseconds;
-      if (f >= 1.0) {
-        t.cancel();
-        _restoreVolume();
-        return;
-      }
-      try {
-        unawaited(_player.setVolume(f.clamp(0.0, 1.0)));
-      } catch (_) {}
-    });
-  }
-
-  void _restoreVolume() {
-    try {
-      unawaited(_player.setVolume(1.0));
-    } catch (_) {}
-  }
-
-  void _cancelFade({bool restore = true}) {
-    ++_fadeToken;
-    _fadeTimer?.cancel();
-    _fadeTimer = null;
-    _fadedOut = false;
-    if (restore) _restoreVolume();
-  }
-
   void _disposeCrossfade() {
     unawaited(_xf?.dispose());
-    _cancelFade(restore: true);
   }
 
 

@@ -1,6 +1,7 @@
 // ZenMusic · vorlon-dev
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -49,8 +50,8 @@ class _YtShortsFeedState extends State<YtShortsFeed>
     super.initState();
     MediaKit.ensureInitialized();
     _player = Player(
-        configuration:
-            const PlayerConfiguration(bufferSize: 16 * 1024 * 1024));
+        configuration: PlayerConfiguration(
+            bufferSize: (Platform.isAndroid ? 6 : 16) * 1024 * 1024));
     _controller = VideoController(_player);
     // Shorts loop until the user swipes on (media_kit's playlist loop).
     _player.setPlaylistMode(PlaylistMode.single);

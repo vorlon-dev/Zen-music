@@ -22,13 +22,25 @@ class _YtHomePageState extends State<YtHomePage> {
 
   static const List<String> _tabNames = ['Home', 'Trending', 'Shorts'];
 
+  /// Tabs are built lazily. IndexedStack builds EVERY child up front, which
+  /// used to start the Shorts tab (an mpv Player + auto-play) and two feed
+  /// downloads the instant the YouTube tab opened — even though only "Home"
+  /// was visible. Now a tab is built the first time it is selected.
   Widget _tabBody(int i) {
+    // Shorts owns a libmpv player: only alive while it is the visible tab, so
+    // it never competes with the watch page's player (two mpv instances at
+    // once crashed 32-bit low-RAM phones inside libmpv.so).
+    if (i == 2) {
+      return _tab == 2 ? const YtShortsFeed() : const SizedBox.shrink();
+    }
+    if (i != _tab && !_builtTabs.containsKey(i)) {
+      return const SizedBox.shrink();
+    }
     return _builtTabs.putIfAbsent(
       i,
       () => switch (i) {
         0 => const _YtFeedTab(browseId: YtBrowse.home),
-        1 => const _YtTrendingTab(),
-        _ => const YtShortsFeed(),
+        _ => const _YtTrendingTab(),
       },
     );
   }
