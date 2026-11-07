@@ -223,10 +223,12 @@ Future<void> initialiseHive() async {
   }
   await Hive.initFlutter(applicationDataDirectoryPath);
   Hive.registerAdapter(ZenDurationAdapter());
-  await Hive.openBox('SETTINGS');
-  await Hive.openBox('LIBRARY');
-  await Hive.openBox('SEARCH_HISTORY');
-  await Hive.openBox('SONG_HISTORY');
-  await Hive.openBox('FAVOURITES');
-  await Hive.openBox('DOWNLOADS');
+  await Future.wait<void>([
+    Hive.openBox('SETTINGS'),
+    Hive.openBox('LIBRARY'),
+    Hive.openBox('SEARCH_HISTORY'),
+    Hive.openBox('SONG_HISTORY'),
+    Hive.openBox('FAVOURITES'),
+    Hive.openBox('DOWNLOADS'),
+  ]);
 }

@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:zenmusic/desktop/core/utils/bg_json.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_config.dart';
 
@@ -92,7 +93,7 @@ class SpotifyLibrary {
         _log('pathfinder HTTP ${r.statusCode}: ${_short(r.body)}');
         return (null, r.statusCode, token);
       }
-      final root = jsonDecode(r.body) as Map<String, dynamic>;
+      final root = await decodeJsonBg(r.body) as Map<String, dynamic>;
       final errs = root['errors'];
       if (errs is List && errs.isNotEmpty) {
         _log('errors: ${_short(jsonEncode(errs), 400)}');
@@ -330,7 +331,7 @@ class SpotifyLibrary {
           _log('liked REST HTTP ${r.statusCode}: ${_short(r.body)}');
           break;
         }
-        final body = jsonDecode(r.body) as Map<String, dynamic>;
+        final body = await decodeJsonBg(r.body) as Map<String, dynamic>;
         final items = body['items'] as List? ?? const [];
         for (final it in items) {
           final t = _trackFromRest(it);

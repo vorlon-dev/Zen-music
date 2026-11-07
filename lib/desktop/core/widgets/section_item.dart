@@ -359,6 +359,7 @@ class SongTile extends StatelessWidget {
             imageUrl: _pickThumbnailUrl(thumbnails),
             height: height,
             width: 50,
+            memCacheWidth: 160,
             fit: BoxFit.cover,
           ),
         ),

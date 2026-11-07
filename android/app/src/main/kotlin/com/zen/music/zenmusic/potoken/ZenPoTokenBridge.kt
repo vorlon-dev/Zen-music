@@ -48,6 +48,20 @@ object ZenPoTokenBridge {
     private val started = AtomicBoolean(false)
     private var webView: WebView? = null
 
+    /// WebView creation loads the whole Chromium stack (~450 ms on the main
+    /// thread + a renderer process, ~100 MB RAM). Doing that during launch
+    /// competes with Flutter's first frames and froze low-end phones for
+    /// seconds. The po-token is only needed for video playback and already
+    /// degrades to "tokenless" when not ready, so we start it a few seconds
+    /// AFTER launch (or immediately if a token is requested earlier).
+    private const val START_DELAY_MS = 6_000L
+    private val webViewRequested = AtomicBoolean(false)
+
+    /// True once the page load was issued — prevents the duplicate
+    /// loadDataWithBaseURL that attachActivity() + startWebView() both did.
+    @Volatile
+    private var pageLoadRequested = false
+
     @Volatile
     private var sessionReady = false
 
@@ -86,6 +100,14 @@ object ZenPoTokenBridge {
         if (!started.compareAndSet(false, true)) return
         val app = context.applicationContext
         appContext = app
+        main.postDelayed({ requestWebViewStart() }, START_DELAY_MS)
+    }
+
+    /// Starts the WebView now (idempotent). Used by the delayed start and by
+    /// [playerTokenBlocking] when a token is wanted before the delay elapsed.
+    private fun requestWebViewStart() {
+        val app = appContext ?: return
+        if (!webViewRequested.compareAndSet(false, true)) return
         main.post { startWebView(app) }
     }
 
@@ -95,6 +117,18 @@ object ZenPoTokenBridge {
     fun attachActivity(a: Activity) {
         activity = a
         main.post { attachAndLoad() }
+    }
+
+    /// Called from MainActivity.onDestroy: the WebView is a process-wide
+    /// singleton, so without this it keeps the dead Activity's whole view
+    /// tree alive (a multi-MB leak per back-press / relaunch).
+    fun detachActivity(a: Activity) {
+        if (activity !== a) return
+        activity = null
+        main.post {
+            val wv = webView ?: return@post
+            (wv.parent as? ViewGroup)?.removeView(wv)
+        }
     }
 
     private fun readHtml(): String? = try {
@@ -152,9 +186,10 @@ object ZenPoTokenBridge {
                 Log.w(TAG, "attach failed: ${t.message}")
             }
         }
-        if (bootstrapStarted) return
+        if (bootstrapStarted || pageLoadRequested) return
         val html = readHtml()
         if (html == null) return
+        pageLoadRequested = true
         Log.d(TAG, "loading page (${html.length} chars)")
         wv.loadDataWithBaseURL(
             "https://www.youtube.com",
@@ -173,6 +208,7 @@ object ZenPoTokenBridge {
             try {
                 sessionReady = false
                 bootstrapStarted = false
+                pageLoadRequested = true
                 val html = readHtml()
                 if (html == null) {
                     Log.w(TAG, "recreate: no html")
@@ -274,6 +310,7 @@ object ZenPoTokenBridge {
     /// is unused (their contract: identifier = videoId alone).
     fun playerTokenBlocking(videoId: String, visitorData: String?): String? {
         if (!started.get()) return null
+        requestWebViewStart() // no-op if already started
 
         val cached = tokenCache[videoId]
         if (cached != null && System.currentTimeMillis() - cached.second < tokenTtlMs) {

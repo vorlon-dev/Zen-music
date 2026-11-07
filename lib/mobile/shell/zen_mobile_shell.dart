@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 import 'package:just_audio_background/just_audio_background.dart' show MediaItem;
 
 import 'package:zenmusic/desktop/liquid/glass_panel.dart';
+import 'package:zenmusic/mobile/diwali/diwali_welcome_dialog.dart';
 import 'package:zenmusic/desktop/screens/shell/widgets/bottom_player.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/settings_manager.dart';
@@ -31,6 +32,15 @@ class ZenMobileShell extends StatefulWidget {
 
 class _ZenMobileShellState extends State<ZenMobileShell> {
   bool _chromeHidden = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Diwali welcome dialog: shows only once (first launch around Diwali).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showDiwaliWelcomeIfFirstTime(context);
+    });
+  }
 
   void _goBranch(int branch) {
     if (_chromeHidden) _show();
