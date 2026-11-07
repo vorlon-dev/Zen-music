@@ -65,6 +65,8 @@ class CrossfadeEngine {
     required AudioPlayer player,
     required this.buildSource,
     required this.songAt,
+    required this.nextSong,
+    required this.advance,
     required this.plan,
     required this.isBlocked,
     this.onPlanStarted,
@@ -78,6 +80,13 @@ class CrossfadeEngine {
   /// The song map at a queue index, or null.
   final Map<String, dynamic>? Function(int index) songAt;
 
+  /// The song that follows the one at [index]: from the loaded sequence, or
+  /// from the wider queue when the player has not preloaded it yet.
+  final Map<String, dynamic>? Function(int index) nextSong;
+
+  /// Moves playback to the next track (the app's own skip logic).
+  final Future<void> Function() advance;
+
   /// Plan for the coming transition.
   final PlanProvider plan;
 
@@ -87,7 +96,7 @@ class CrossfadeEngine {
 
   final void Function(CrossfadePlan)? onPlanStarted;
 
-  static const Duration _lead = Duration(seconds: 4);
+  static const Duration _lead = Duration(seconds: 8);
   static const Duration _tick = Duration(milliseconds: 40);
 
   StreamSubscription<Duration>? _posSub;
@@ -99,7 +108,7 @@ class CrossfadeEngine {
   int _token = 0;
   bool _preparing = false;
   bool _blending = false;
-  bool _selfAdvance = false;
+  DateTime _ignoreIndexUntil = DateTime.fromMillisecondsSinceEpoch(0);
   int? _preparedFor; // queue index we already handled
 
   bool get active => _preparing || _blending;
@@ -118,10 +127,9 @@ class CrossfadeEngine {
   }
 
   void _onIndex(int? i) {
-    if (_selfAdvance) {
-      _selfAdvance = false;
-      return;
-    }
+    // Our own advance can emit several index events (stop, then the new
+    // track); ignore them for a few seconds.
+    if (DateTime.now().isBefore(_ignoreIndexUntil)) return;
     // A manual skip / stop / new queue while a blend is in flight.
     if (active) unawaited(cancel());
   }
@@ -135,9 +143,14 @@ class CrossfadeEngine {
   }
 
   void _onPosition(Duration pos) {
+    // Safety net: outside a blend the main player is always at full volume
+    // and normal speed, so a missed restore can never leave a track quiet.
+    if (!active && _player.volume < 0.999) {
+      unawaited(_player.setVolume(1.0));
+    }
     if (active || isBlocked() || !_player.playing) return;
     final index = _player.currentIndex;
-    if (index == null || !_player.hasNext || _preparedFor == index) return;
+    if (index == null || _preparedFor == index) return;
     final total = _player.duration;
     if (total == null || total <= Duration.zero) return;
     final remaining = total - pos;
@@ -156,7 +169,7 @@ class CrossfadeEngine {
     AudioPlayer? deck;
     try {
       final out = songAt(index);
-      final inn = songAt(index + 1);
+      final inn = nextSong(index);
       if (out == null || inn == null) return;
       final p = await plan(out, inn);
       if (p == null || p.window <= Duration.zero) return;
@@ -202,8 +215,11 @@ class CrossfadeEngine {
       await deck.setVolume(1.0);
       unawaited(deck.play());
       await _player.setVolume(0.0);
-      _selfAdvance = true;
-      unawaited(_player.seekToNext());
+      _ignoreIndexUntil = DateTime.now().add(const Duration(seconds: 4));
+      unawaited(advance().catchError((Object e) {
+        debugPrint('[crossfade] advance failed: $e');
+        unawaited(cancel());
+      }));
       if (p.incomingStartSpeed != 1.0) {
         unawaited(_player.setSpeed(p.incomingStartSpeed));
       }
