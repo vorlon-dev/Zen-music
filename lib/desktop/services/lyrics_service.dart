@@ -8,6 +8,8 @@ import 'package:hive/hive.dart';
 
 import 'better_lyrics.dart';
 import 'kugou_lyrics.dart';
+import 'lyrics_providers/lyric_doc.dart';
+import 'lyrics_providers/lyrics_repository.dart';
 
 
 class LyricWord {
@@ -1032,13 +1034,15 @@ class LyricsService {
     required String artist,
     int? durationMs,
     String? album,
+    String? isrc,
+    String? videoId,
     bool forceRefresh = false,
   }) {
     final clean = MetadataCleaner.clean(title, artist);
     final key = 'v1|${clean.primaryArtist.toLowerCase()}|'
         '${clean.cleanTitle.toLowerCase()}|${album?.toLowerCase() ?? ''}';
     if (_inflight.containsKey(key)) return _inflight[key]!;
-    final fut = _lookupImpl(clean, key, durationMs, album, forceRefresh)
+    final fut = _lookupImpl(clean, key, durationMs, album, forceRefresh, isrc, videoId)
         .whenComplete(() {
       _inflight.remove(key);
     });
@@ -1052,6 +1056,8 @@ class LyricsService {
       int? durationMs,
       String? album,
       bool forceRefresh,
+      String? isrc,
+      String? videoId,
       ) async {
     try {
       if (!forceRefresh) {
@@ -1065,6 +1071,32 @@ class LyricsService {
         }
       }
       if (_misses.contains(key)) return null;
+
+      // Multi-source stage (BitChord-style): every enabled source asked at
+      // once, read in the user's order, a word-timed answer wins.
+      RepoResult? repo;
+      try {
+        repo = await LyricsRepository.resolve(
+          query: LyricQuery(
+            title: clean.cleanTitle,
+            artist: clean.primaryArtist,
+            album: album,
+            durationMs: durationMs,
+            videoId: videoId,
+            isrc: isrc,
+          ),
+          trackName: clean.cleanTitle,
+          artistName: clean.primaryArtist,
+        );
+        final w = repo.wordSynced;
+        if (w != null) {
+          final box = await _cache();
+          await box.put(key, w.toMap());
+          return w;
+        }
+      } catch (e) {
+        print('[yt_lyrics] multi-source stage failed: $e');
+      }
 
       LyricsData? betterLineSynced;
       try {
@@ -1196,6 +1228,13 @@ class LyricsService {
         print('[yt_lyrics] kugou fallback failed: $e');
       }
 
+      final repoFallback = repo?.lineSynced ?? repo?.plain;
+      if (repoFallback != null && repoFallback.hasAny) {
+        final box = await _cache();
+        await box.put(key, repoFallback.toMap());
+        return repoFallback;
+      }
+
       if (betterLineSynced != null && betterLineSynced.hasAny) {
         final box = await _cache();
         await box.put(key, betterLineSynced.toMap());
@@ -1214,6 +1253,10 @@ class LyricsService {
       return null;
     }
   }
+
+  /// Public hook for the multi-source repository.
+  static List<LyricLine> parseWordDocument(String payload) =>
+      _parseWordDocument(payload);
 
   static List<LyricLine> _parseWordDocument(String payload) {
     final lower = payload.toLowerCase();
