@@ -559,6 +559,18 @@ Yes. ZenMusic supports source extensions.
 
 <div align="center">
 
+## Credits for the BitChord-derived features
+
+The extra lyric providers (lrc.red, BiniLyrics, PaxSenix, LyricsPlus,
+Unison, Musixmatch, Megalobiz, Genius), the multi-source lyric ordering and
+the two-deck crossfade / Automix design follow
+[BitChord](https://github.com/kushagrasinghx/BitChord) by kushagrasinghx
+(GPL-3.0), reimplemented in Dart. The lyric data itself comes from those
+services; thanks to BetterLyrics, binimum (BiniLyrics, am-lyrics), PaxSenix,
+LyricsPlus, Unison (boidu.dev), Megalobiz, KuGou, LRCLIB, Musixmatch and
+Genius. Automix here is tempo-matched using a tempo lookup; BitChord's
+on-device beat tracker (ONNX + native analysis) is not ported.
+
 ## Support the Project
 
 ZenMusic is free and open source, and it is built in spare time. If you enjoy it and want to help keep it improving, you can buy me a chai. It is completely optional, and starring the repo or sharing the app helps just as much.
