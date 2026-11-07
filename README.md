@@ -559,20 +559,17 @@ Yes. ZenMusic supports source extensions.
 
 <div align="center">
 
-## Web Player
+## Credits for the BitChord-derived features
 
-A browser edition lives in `lib/web/` (separate from the Android/Windows apps).
-
-**Features:** Home (recent, favourites, browse rows), search for songs / albums / playlists, album and playlist pages, queue (play next, add, remove), shuffle, repeat, volume, playback speed, sleep timer, synced lyrics, favourites, your own playlists, listening history, dark/light theme. Library data is saved in the browser only.
-
-**Not on the web:** YouTube Music, downloads, native equalizer, offline cache, background notifications.
-
-```bash
-flutter build web -t lib/web/web_main.dart --release
-```
-
-- `functions/api/[[path]].js` is a Cloudflare Pages Function that forwards `/api/*` to the JioSaavn API worker, so the browser needs no CORS access.
-- `.github/workflows/web.yml` builds and deploys to Cloudflare Pages on pushes to `main`. Add repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (optional variable `CLOUDFLARE_PROJECT`, default `zenmusic-d6t`).
+The extra lyric providers (lrc.red, BiniLyrics, PaxSenix, LyricsPlus,
+Unison, Musixmatch, Megalobiz, Genius), the multi-source lyric ordering and
+the two-deck crossfade / Automix design follow
+[BitChord](https://github.com/kushagrasinghx/BitChord) by kushagrasinghx
+(GPL-3.0), reimplemented in Dart. The lyric data itself comes from those
+services; thanks to BetterLyrics, binimum (BiniLyrics, am-lyrics), PaxSenix,
+LyricsPlus, Unison (boidu.dev), Megalobiz, KuGou, LRCLIB, Musixmatch and
+Genius. Automix here is tempo-matched using a tempo lookup; BitChord's
+on-device beat tracker (ONNX + native analysis) is not ported.
 
 ## Support the Project
 

@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:zenmusic/desktop/screens/library/backdrop_page.dart';
 import 'package:zenmusic/desktop/screens/library/crossfade_page.dart';
+import 'package:zenmusic/desktop/screens/settings/lyric_sources_page.dart';
 import 'package:zenmusic/desktop/screens/library/lastfm_page.dart';
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 import 'package:zenmusic/desktop/lossless/lossless_quality_page.dart';
@@ -132,6 +133,15 @@ class _SettingsBodyState extends State<_SettingsBody> {
           keywords: const ['crossfade', 'fade', 'transition', 'gapless'],
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const CrossfadePage()),
+          ),
+        ),
+        _Entry(
+          icon: Icons.lyrics,
+          title: 'Lyric sources',
+          subtitle: 'Choose and order where lyrics come from',
+          keywords: const ['lyrics', 'sources', 'word sync', 'syllable'],
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const LyricSourcesPage()),
           ),
         ),
         _Entry(
