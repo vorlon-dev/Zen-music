@@ -6,7 +6,8 @@
 //  • Double-tap = like. Thin seek bar at the bottom (tap / drag to seek).
 //  • Shell (dock + mini player) is hidden while Discover is open.
 //  • Back arrow (top-left) or horizontal swipe leaves to another tab.
-//  • Video: YouTube / YT Music. Spotify canvas is used only when logged in.
+//  • Video: YouTube / YT Music (Indian-first). Spotify canvas only when logged in.
+//  • Mobile only. Data is preloaded at app start (DiscoverFeed.warm).
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -19,13 +20,12 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:zenmusic/desktop/core/widgets/video_backdrop.dart';
+import 'package:zenmusic/desktop/services/discover_feed.dart';
 import 'package:zenmusic/desktop/services/download_manager.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
-import 'package:zenmusic/desktop/services/yt_video_engine.dart';
 import 'package:zenmusic/desktop/spotify/spotify_canvas.dart';
 import 'package:zenmusic/desktop/utils/enhanced_image.dart';
-import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
 /// Branch indexes of the shell (Home, Search, Discover, Saved, Settings).
 const int _kHomeBranch = 0;
@@ -41,20 +41,10 @@ class DiscoverPage extends StatefulWidget {
 
 class _DiscoverPageState extends State<DiscoverPage>
     with AutomaticKeepAliveClientMixin {
-  static const _seedQueries = [
-    'trending music videos',
-    'new songs official video',
-    'top hits music video',
-    'viral songs',
-    'chill songs music video',
-  ];
-
+  final DiscoverFeed _feed = DiscoverFeed.instance;
   final PageController _pages = PageController();
-  final List<Map<String, dynamic>> _songs = [];
-  final Set<String> _seen = {};
   final Map<String, String?> _canvas = {};
   final Set<String> _canvasLoading = {};
-  final Map<String, YtVideoStreams?> _streams = {};
 
   late final Player _player;
   late final VideoController _video;
@@ -62,7 +52,6 @@ class _DiscoverPageState extends State<DiscoverPage>
   StreamSubscription? _errSub;
 
   bool _loading = true;
-  bool _loadingMore = false;
   bool _failed = false;
   int _index = 0;
 
@@ -88,7 +77,10 @@ class _DiscoverPageState extends State<DiscoverPage>
       if (mounted && p != _playing) setState(() => _playing = p);
     });
     _errSub = _player.stream.error.listen((_) {
-      if (mounted && !_mediaLoading) setState(() => _mediaError = true);
+      if (mounted && !_mediaLoading) {
+        setState(() => _mediaError = true);
+        _skipBroken();
+      }
     });
     _loadInitial();
   }
@@ -132,47 +124,15 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   // ───────────────────────── data ─────────────────────────
 
-  bool _add(Map raw) {
-    final id = raw['videoId']?.toString();
-    if (id == null || id.isEmpty || !_seen.add(id)) return false;
-    _songs.add(Map<String, dynamic>.from(raw));
-    return true;
-  }
+  List<Map<String, dynamic>> get _songs => _feed.songs;
 
-  Future<List<Map>> _search(String q, String filter) async {
-    for (var attempt = 0; attempt < 2; attempt++) {
-      try {
-        final res = await GetIt.I<YTMusic>().search(q, filter: filter);
-        final sections = res['sections'] as List?;
-        if (sections == null || sections.isEmpty) continue;
-        final list = ((sections[0]['contents'] as List?) ?? const [])
-            .whereType<Map>()
-            .toList();
-        if (list.isNotEmpty) return list;
-      } catch (_) {
-        // retry once (the YT Music API sometimes drops the connection)
-      }
-    }
-    return <Map>[];
-  }
-
-  Future<void> _loadInitial() async {
-    setState(() {
-      _loading = true;
-      _failed = false;
-    });
-    final queries = [..._seedQueries]..shuffle();
-    // Music videos first (real video), songs mixed in for variety.
-    final results = await Future.wait([
-      _search(queries[0], 'videos'),
-      _search(queries[1], 'videos'),
-      _search(queries[2], 'songs'),
-    ]);
-    final longest = results.fold<int>(0, (m, l) => math.max(m, l.length));
-    for (var i = 0; i < longest; i++) {
-      for (final l in results) {
-        if (i < l.length) _add(l[i]);
-      }
+  Future<void> _loadInitial({bool retry = false}) async {
+    if (!_feed.ready || retry) {
+      setState(() {
+        _loading = true;
+        _failed = false;
+      });
+      await _feed.warm(force: retry);
     }
     if (!mounted) return;
     if (_songs.isEmpty) {
@@ -187,36 +147,22 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   Future<void> _loadMore() async {
-    if (_loadingMore || _songs.isEmpty) return;
-    _loadingMore = true;
-    try {
-      final seed = _songs[_songs.length - 1]['videoId'];
-      final more = await GetIt.I<YTMusic>()
-          .getNextSongList(videoId: seed, radio: true, limit: 25);
-      var added = false;
-      for (final s in more) {
-        if (s is Map && _add(s)) added = true;
-      }
-      if (added && mounted) setState(() {});
-    } catch (_) {
-      // feed simply ends
-    } finally {
-      _loadingMore = false;
-    }
+    if (await _feed.loadMore() && mounted) setState(() {});
   }
 
   // ───────────────────────── playback ─────────────────────────
 
-  Future<YtVideoStreams?> _resolveStreams(String id) async {
-    if (_streams.containsKey(id)) return _streams[id];
-    YtVideoStreams? s;
-    try {
-      s = await YtVideoEngine.extractVideo(id, maxHeight: 480);
-    } catch (_) {
-      s = null;
-    }
-    _streams[id] = s;
-    return s;
+  /// A song that cannot play is skipped automatically (reels never stall).
+  void _skipBroken() {
+    final at = _index;
+    Future.delayed(const Duration(milliseconds: 900), () {
+      if (!mounted || _index != at || !_mediaError) return;
+      if (at + 1 < _songs.length && _pages.hasClients) {
+        _pages.nextPage(
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOut);
+      }
+    });
   }
 
   void _pauseMainPlayer() {
@@ -236,7 +182,7 @@ class _DiscoverPageState extends State<DiscoverPage>
       _playing = false;
       _userPaused = false;
     });
-    final s = await _resolveStreams(id);
+    final s = await _feed.streams(id);
     if (!mounted || token != _openToken) return;
     final url = s?.videoUrl;
     if (url == null) {
@@ -244,13 +190,14 @@ class _DiscoverPageState extends State<DiscoverPage>
         _mediaLoading = false;
         _mediaError = true;
       });
+      _skipBroken();
       return;
     }
     try {
       final autoplay = _active == true;
       if (autoplay) _pauseMainPlayer();
-      await _player.open(Media(url), play: autoplay);
-      final audio = s?.audioUrl;
+      await _player.open(Media(url, httpHeaders: s!.headers), play: autoplay);
+      final audio = s.audioUrl;
       if (audio != null) {
         await _player.setAudioTrack(AudioTrack.uri(audio));
       }
@@ -261,6 +208,7 @@ class _DiscoverPageState extends State<DiscoverPage>
           _mediaLoading = false;
           _mediaError = true;
         });
+        _skipBroken();
       }
       return;
     }
@@ -289,7 +237,7 @@ class _DiscoverPageState extends State<DiscoverPage>
     // Prefetch the next two so swiping starts instantly.
     for (var k = 1; k <= 2; k++) {
       if (i + k < _songs.length) {
-        _resolveStreams(_songs[i + k]['videoId'] as String);
+        _feed.streams(_songs[i + k]['videoId'] as String);
       }
     }
     if (i >= _songs.length - 4) _loadMore();
@@ -406,7 +354,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                       style: TextStyle(color: Colors.white70)),
                   const SizedBox(height: 12),
                   OutlinedButton(
-                    onPressed: _loadInitial,
+                    onPressed: () => _loadInitial(retry: true),
                     child: const Text('Retry',
                         style: TextStyle(color: Colors.white)),
                   ),

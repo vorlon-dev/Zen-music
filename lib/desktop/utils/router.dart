@@ -35,6 +35,7 @@ import 'package:zenmusic/desktop/screens/listen_together/jam_page.dart';
 import 'package:zenmusic/desktop/screens/chart/chart_details_page.dart';
 import 'package:zenmusic/desktop/services/chart_model.dart';
 import 'package:zenmusic/desktop/screens/discover/discover_page.dart';
+import 'package:zenmusic/desktop/screens/youtube/yt_home_page.dart';
 import 'package:zenmusic/desktop/screens/youtube/yt_search_page.dart';
 import 'package:zenmusic/desktop/screens/youtube/yt_channel_page.dart';
 import 'package:zenmusic/desktop/screens/youtube/yt_playlist_page.dart';
@@ -274,8 +275,11 @@ List<StatefulShellBranch> branches = [
   StatefulShellBranch(
     routes: [
       GoRoute(
-        path: '/discover',
-        builder: (context, state) => const DiscoverPage(),
+        // Discover is mobile-only; desktop keeps the YouTube tab.
+        path: (Platform.isAndroid || Platform.isIOS) ? '/discover' : '/youtube',
+        builder: (context, state) => (Platform.isAndroid || Platform.isIOS)
+            ? const DiscoverPage()
+            : const YtHomePage(),
       ),
     ],
   ),

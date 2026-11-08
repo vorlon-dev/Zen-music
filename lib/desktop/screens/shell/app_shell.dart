@@ -218,10 +218,10 @@ class _AppShellState extends State<AppShell> {
                       label: const Text('Search'),
                     ),
                     NavigationRailDestination(
-                      icon: const Icon(Icons.explore_outlined),
-                      selectedIcon: Icon(Icons.explore,
+                      icon: const Icon(Icons.smart_display_outlined),
+                      selectedIcon: Icon(Icons.smart_display,
                           color: m3 ? null : Colors.black),
-                      label: const Text('Discover'),
+                      label: const Text('YouTube'),
                     ),
                     NavigationRailDestination(
                       icon: _savedIcon(selected: false),
@@ -254,10 +254,10 @@ class _AppShellState extends State<AppShell> {
             label: 'Search',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.explore_outlined),
-            selectedIcon: Icon(Icons.explore,
+            icon: const Icon(Icons.smart_display_outlined),
+            selectedIcon: Icon(Icons.smart_display,
                 color: m3 ? null : Colors.black),
-            label: 'Discover',
+            label: 'YouTube',
           ),
           NavigationDestination(
             icon: _savedIcon(selected: false),
