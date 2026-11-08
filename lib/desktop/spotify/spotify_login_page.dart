@@ -276,6 +276,28 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
   }
 
 
+  /// The page claims to be desktop Chrome, but a hard-coded version number
+  /// stops matching the phone's real WebView whenever it auto-updates (the
+  /// UA says 155, the browser's own client hints say 156). Spotify's sign-in
+  /// bot check (reCAPTCHA Enterprise) can reject that mismatch, so use the
+  /// installed WebView's real major version.
+  Future<void> _alignUserAgent(InAppWebViewController c) async {
+    try {
+      final raw = await c.evaluateJavascript(source: 'navigator.userAgent');
+      final m = RegExp(r'Chrome/(\d+)\.').firstMatch('$raw');
+      if (m == null) return;
+      final major = m.group(1)!;
+      if (major == '155') return; // already matches the built-in string
+      final ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+          'AppleWebKit/537.36 (KHTML, like Gecko) '
+          'Chrome/$major.0.0.0 Safari/537.36';
+      await c.setSettings(settings: InAppWebViewSettings(userAgent: ua));
+      await c.reload();
+    } catch (e) {
+      debugPrint('[zen-login] user-agent align failed: $e');
+    }
+  }
+
   Future<void> _finishLogin(String spDcCookie) async {
     final err = await SpotifyAuth.instance.login(spDcCookie);
     if (!mounted) return;
@@ -407,7 +429,10 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
                   javaScriptEnabled: true,
                   domStorageEnabled: true,
                 ),
-                onWebViewCreated: (c) => _controller = c,
+                onWebViewCreated: (c) {
+                  _controller = c;
+                  _alignUserAgent(c);
+                },
                 onUpdateVisitedHistory: (controller, url, isReload) {
                   _controller = controller;
                   _harvest();
