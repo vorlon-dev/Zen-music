@@ -1,6 +1,7 @@
 // ZenMusic · vorlon-dev
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -99,7 +100,9 @@ Future<void> main() async {
   GetIt.I.registerSingleton<YTMusic>(ytMusic);
 
   // Discover: load songs + resolve first streams now, so the tab is instant.
-  unawaited(DiscoverFeed.instance.warm());
+  if (Platform.isAndroid || Platform.isIOS) {
+    unawaited(DiscoverFeed.instance.warm());
+  }
 
   JamService.instance.start(mediaPlayer);
 
