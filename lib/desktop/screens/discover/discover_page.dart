@@ -2,7 +2,7 @@
 //
 // Discover — full-screen, reels-style vertical feed of music videos.
 //  • Plays INSIDE this page (own player, real audio) — never the mini player.
-//  • A song starts only when the user taps the video (tap again = pause).
+//  • Songs autoplay as you swipe (like reels). Tap = pause / play.
 //  • Double-tap = like. Thin seek bar at the bottom (tap / drag to seek).
 //  • Shell (dock + mini player) is hidden while Discover is open.
 //  • Back arrow (top-left) or horizontal swipe leaves to another tab.
@@ -71,6 +71,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   bool _mediaError = false;
   int _openToken = 0;
   bool? _active; // is the Discover tab the visible one?
+  bool _userPaused = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -99,7 +100,15 @@ class _DiscoverPageState extends State<DiscoverPage>
     final active = TickerMode.of(context);
     if (active != _active) {
       _active = active;
-      if (!active) _player.pause();
+      if (!active) {
+        _player.pause();
+      } else if (!_userPaused &&
+          _songs.isNotEmpty &&
+          !_mediaLoading &&
+          !_mediaError) {
+        _pauseMainPlayer();
+        _player.play();
+      }
       // Hide / show the shell (dock + mini player) after this frame.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_active == active) {
@@ -131,16 +140,20 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   Future<List<Map>> _search(String q, String filter) async {
-    try {
-      final res = await GetIt.I<YTMusic>().search(q, filter: filter);
-      final sections = res['sections'] as List?;
-      if (sections == null || sections.isEmpty) return <Map>[];
-      return ((sections[0]['contents'] as List?) ?? const [])
-          .whereType<Map>()
-          .toList();
-    } catch (_) {
-      return <Map>[];
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final res = await GetIt.I<YTMusic>().search(q, filter: filter);
+        final sections = res['sections'] as List?;
+        if (sections == null || sections.isEmpty) continue;
+        final list = ((sections[0]['contents'] as List?) ?? const [])
+            .whereType<Map>()
+            .toList();
+        if (list.isNotEmpty) return list;
+      } catch (_) {
+        // retry once (the YT Music API sometimes drops the connection)
+      }
     }
+    return <Map>[];
   }
 
   Future<void> _loadInitial() async {
@@ -198,7 +211,7 @@ class _DiscoverPageState extends State<DiscoverPage>
     if (_streams.containsKey(id)) return _streams[id];
     YtVideoStreams? s;
     try {
-      s = await YtVideoEngine.extractVideo(id, maxHeight: 720);
+      s = await YtVideoEngine.extractVideo(id, maxHeight: 480);
     } catch (_) {
       s = null;
     }
@@ -206,7 +219,13 @@ class _DiscoverPageState extends State<DiscoverPage>
     return s;
   }
 
-  /// Loads the song PAUSED. It only plays when the user taps the video.
+  void _pauseMainPlayer() {
+    try {
+      GetIt.I<MediaPlayer>().player.pause();
+    } catch (_) {}
+  }
+
+  /// Loads the song and starts it right away (reels style).
   Future<void> _openMedia(int i) async {
     if (i < 0 || i >= _songs.length) return;
     final id = _songs[i]['videoId'] as String;
@@ -215,8 +234,8 @@ class _DiscoverPageState extends State<DiscoverPage>
       _mediaLoading = true;
       _mediaError = false;
       _playing = false;
+      _userPaused = false;
     });
-    await _player.pause();
     final s = await _resolveStreams(id);
     if (!mounted || token != _openToken) return;
     final url = s?.videoUrl;
@@ -228,7 +247,9 @@ class _DiscoverPageState extends State<DiscoverPage>
       return;
     }
     try {
-      await _player.open(Media(url), play: false);
+      final autoplay = _active == true;
+      if (autoplay) _pauseMainPlayer();
+      await _player.open(Media(url), play: autoplay);
       final audio = s?.audioUrl;
       if (audio != null) {
         await _player.setAudioTrack(AudioTrack.uri(audio));
@@ -249,11 +270,11 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   void _togglePlay() {
     if (_mediaLoading || _mediaError) return;
-    if (!_playing) {
-      // Discover owns the audio now: stop the app's main player.
-      try {
-        GetIt.I<MediaPlayer>().player.pause();
-      } catch (_) {}
+    if (_playing) {
+      _userPaused = true;
+    } else {
+      _userPaused = false;
+      _pauseMainPlayer();
     }
     _player.playOrPause();
   }
@@ -265,8 +286,11 @@ class _DiscoverPageState extends State<DiscoverPage>
     _index = i;
     _openMedia(i);
     _resolveCanvas(i);
-    if (i + 1 < _songs.length) {
-      _resolveStreams(_songs[i + 1]['videoId'] as String); // prefetch
+    // Prefetch the next two so swiping starts instantly.
+    for (var k = 1; k <= 2; k++) {
+      if (i + k < _songs.length) {
+        _resolveStreams(_songs[i + k]['videoId'] as String);
+      }
     }
     if (i >= _songs.length - 4) _loadMore();
   }
@@ -548,7 +572,7 @@ class _DiscoverCardState extends State<_DiscoverCard>
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Backdrop: dimmed drifting cover art behind the (16:9) video.
+        // Backdrop: dimmed cover art, visible until the first video frame.
         _CoverStage(cover: widget.cover),
 
         // Video / Spotify canvas (current page only).
@@ -561,11 +585,12 @@ class _DiscoverCardState extends State<_DiscoverCard>
               playing: widget.playing,
             )
           else if (!widget.error)
-            Center(
+            Positioned.fill(
               child: Video(
                 controller: widget.video,
                 controls: NoVideoControls,
-                fit: BoxFit.contain,
+                fit: BoxFit.cover, // fill the 9:16 screen
+                fill: Colors.transparent,
               ),
             ),
 
