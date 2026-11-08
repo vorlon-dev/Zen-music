@@ -76,7 +76,6 @@ class MainActivity : AudioServiceActivity() {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 }
         }
-        }
         requestHighRefreshRate()
     }
 
