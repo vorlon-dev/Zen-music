@@ -94,6 +94,7 @@ class _DiscoverPageState extends State<DiscoverPage>
     final active = TickerMode.of(context);
     if (active != _active) {
       _active = active;
+      if (!active) _mp.flowActive = false; // normal auto-fetch resumes
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_active == active) ShellOverlaysBus.fullPageAbove.value = active;
       });
@@ -139,6 +140,7 @@ class _DiscoverPageState extends State<DiscoverPage>
             curve: Curves.easeOutCubic)
         .whenComplete(() => _syncing = false);
     _prefetch(idx);
+    _mp.flowTopUp(_feed.items.map((e) => e.song).toList(), idx);
     setState(() {});
   }
 
@@ -174,8 +176,11 @@ class _DiscoverPageState extends State<DiscoverPage>
     void run() {
       if (!mounted || req != _request || _active != true) return;
       final item = _feed.items[i];
+      final songs = _feed.items.map((e) => e.song).toList();
       if (_currentId == item.id) {
         _owns = true;
+        _mp.flowActive = true;
+        _mp.flowTopUp(songs, i);
         return;
       }
       if (!_owns) {
@@ -184,7 +189,9 @@ class _DiscoverPageState extends State<DiscoverPage>
         _prevPos = _mp.progressBarState.value.current;
       }
       _owns = true;
-      _mp.playAll(_feed.items.map((e) => e.song).toList(), index: i);
+      // One queue: already-loaded songs are a plain seek, the next few are
+      // resolved in the background (see MediaPlayer.flowPlay).
+      _mp.flowPlay(songs, i);
       _prefetch(i);
       if (mounted) setState(() {});
     }

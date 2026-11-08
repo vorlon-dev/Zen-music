@@ -1118,6 +1118,7 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> playSong(Map<String, dynamic> song) async {
     _restoredPending = false;
+    flowActive = false;
     if (song['videoId'] == null) return;
     queueSnapshot.value = [Map<String, dynamic>.from(song)];
     _queueEpoch++;
@@ -1239,6 +1240,7 @@ class MediaPlayer extends ChangeNotifier {
   Future<void> playAll(List songs, {int index = 0}) async {
     if (songs.isEmpty) return;
     _restoredPending = false;
+    flowActive = false;
     queueSnapshot.value =
         songs.map((s) => Map<String, dynamic>.from(s as Map)).toList();
     _queueEpoch++;
@@ -1333,6 +1335,110 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
+  // ───────────────────── Discover ("Music Flow") queue ─────────────────────
+  //
+  // Same idea as Echo Music: the feed is ONE queue. Songs that are already in
+  // the player's sequence are reached with a plain seek (instant); the next
+  // few songs are always resolved in the background, so swiping never waits.
+
+  /// True while Discover owns the queue (turns the radio auto-fetch off, it
+  /// would resolve ~25 extra songs and fight the swipe for bandwidth).
+  bool flowActive = false;
+
+  int _flowEpoch = 0;
+  Future<void> _flowTop = Future.value();
+
+  static const int _flowWindow = 5;
+
+  String? _tagId(IndexedAudioSource s) {
+    final t = s.tag;
+    return t is MediaItem ? t.id : null;
+  }
+
+  int _indexInSequence(String id) {
+    final seq = _player.sequence;
+    for (var i = 0; i < seq.length; i++) {
+      if (_tagId(seq[i]) == id) return i;
+    }
+    return -1;
+  }
+
+  /// Plays [songs][index] as Discover's queue.
+  Future<void> flowPlay(List<Map<String, dynamic>> songs, int index) async {
+    if (index < 0 || index >= songs.length) return;
+    _restoredPending = false;
+    flowActive = true;
+    final epoch = ++_flowEpoch;
+    final target = songs[index];
+    final id = target['videoId']?.toString();
+    if (id == null) return;
+
+    // Already loaded in the player → instant seek, no network at all.
+    final at = _indexInSequence(id);
+    if (at >= 0) {
+      await _player.seek(Duration.zero, index: at);
+      if (!_player.playing) _player.play();
+      flowTopUp(songs, index);
+      return;
+    }
+
+    // Fresh start: load ONLY this song first, the rest streams in behind it.
+    queueSnapshot.value =
+        songs.map((e) => Map<String, dynamic>.from(e)).toList();
+    _queueEpoch++;
+    if (_engineOwnsPlayback) await _releaseEngine();
+    _buttonState.value = ButtonState.loading;
+    notifyListeners();
+    try {
+      await _player.stop();
+      final source = await _getAudioSource(Map<String, dynamic>.from(target));
+      if (epoch != _flowEpoch) return; // a newer swipe took over
+      await _player.setAudioSource(source);
+      if (epoch != _flowEpoch) return;
+      _player.play();
+      _saveCurrentState();
+      flowTopUp(songs, index);
+    } catch (e) {
+      print('Error in flowPlay: $e');
+      if (epoch == _flowEpoch) {
+        _buttonState.value = ButtonState.paused;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Keeps the next [_flowWindow] feed songs loaded behind the playhead.
+  void flowTopUp(List<Map<String, dynamic>> songs, int index) {
+    final epoch = _flowEpoch;
+    _flowTop = _flowTop.then((_) async {
+      try {
+        if (epoch != _flowEpoch || !flowActive) return;
+        final seq = _player.sequence;
+        if (seq.isEmpty) return;
+        final lastId = _tagId(seq.last);
+        final last = songs.indexWhere((s) => s['videoId'] == lastId);
+        if (last < 0) return;
+        final end = index + _flowWindow < songs.length - 1
+            ? index + _flowWindow
+            : songs.length - 1;
+        if (last >= end) return;
+        final batch = songs.sublist(last + 1, end + 1);
+        final sources = await Future.wait(batch.map((s) async {
+          try {
+            return await _getAudioSource(Map<String, dynamic>.from(s));
+          } catch (_) {
+            return null;
+          }
+        }));
+        if (epoch != _flowEpoch || !flowActive) return;
+        final ok = sources.whereType<AudioSource>().toList();
+        if (ok.isNotEmpty) await _player.addAudioSources(ok);
+      } catch (e) {
+        print('flowTopUp error: $e');
+      }
+    });
+  }
+
   Future<void> addToQueue(Map<String, dynamic> mediaItem) async {
     if (mediaItem['videoId'] != null) {
       await _player.addAudioSource(await _getAudioSource(mediaItem));
@@ -1350,6 +1456,7 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> startRelated(Map<String, dynamic> song,
       {bool radio = false, bool shuffle = false, bool isArtist = false}) async {
+    flowActive = false;
     _queueEpoch++;
     if (_engineOwnsPlayback) await _releaseEngine();
     await _player.clearAudioSources();
@@ -1566,6 +1673,7 @@ class MediaPlayer extends ChangeNotifier {
     player.currentIndexStream.listen((index) async {
       if (_engineOwnsPlayback) return;
       if (index == null) return;
+      if (flowActive) return; // Discover keeps its own queue topped up
       if (player.sequence.length - index < 5 &&
           GetIt.I<SettingsManager>().autofetchSongs &&
           autoFetching == false) {
