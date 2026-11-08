@@ -213,6 +213,7 @@ class _EngineQueueTile extends StatelessWidget {
                 imageUrl: thumb,
                 height: 50,
                 width: 50,
+                memCacheWidth: 160,
                 fit: BoxFit.cover,
               ),
               if (isCurrent)

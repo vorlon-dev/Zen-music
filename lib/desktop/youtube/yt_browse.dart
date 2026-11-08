@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/core/utils/bg_json.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -562,7 +563,7 @@ class YtBrowse {
       if (res.statusCode != 200) {
         throw YtBrowseException('browse HTTP ${res.statusCode}');
       }
-      final decoded = jsonDecode(res.body);
+      final decoded = await decodeJsonBg(res.body);
       if (decoded is! Map) {
         throw YtBrowseException('browse returned a non-object body');
       }

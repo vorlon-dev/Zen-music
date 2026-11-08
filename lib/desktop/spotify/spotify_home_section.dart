@@ -521,6 +521,7 @@ class _QuickPlayCard extends StatelessWidget {
                   imageUrl: thumb,
                   width: 52,
                   height: 52,
+                  memCacheWidth: 160,
                   fit: BoxFit.cover),
             ),
             const SizedBox(width: 10),
@@ -640,6 +641,7 @@ class _RecentCard extends StatelessWidget {
                     child: CachedNetworkImage(
                         imageUrl: thumb,
                         fit: BoxFit.cover,
+                        memCacheWidth: 360,
                         width: 164,
                         height: 164),
                   ),
@@ -782,6 +784,7 @@ class _SquareCard extends StatelessWidget {
                     child: CachedNetworkImage(
                         imageUrl: thumb,
                         fit: BoxFit.cover,
+                        memCacheWidth: 360,
                         width: 164,
                         height: 164),
                   ),
@@ -853,6 +856,7 @@ class _ArtistCircleCard extends StatelessWidget {
                 child: CachedNetworkImage(
                     imageUrl: thumb,
                     fit: BoxFit.cover,
+                    memCacheWidth: 240,
                     width: 105,
                     height: 105),
               ),
@@ -1162,6 +1166,7 @@ class _TrackCard extends StatelessWidget {
                     child: CachedNetworkImage(
                         imageUrl: thumb,
                         fit: BoxFit.cover,
+                        memCacheWidth: 300,
                         width: 136,
                         height: 136),
                   ),
@@ -1263,6 +1268,7 @@ class _ChartCard extends StatelessWidget {
               child: CachedNetworkImage(
                   imageUrl: chart.coverUrl,
                   fit: BoxFit.cover,
+                  memCacheWidth: 360,
                   width: 168,
                   height: 168),
             ),
@@ -1442,7 +1448,9 @@ class _PlaylistShelf extends StatelessWidget {
                             : ClipRRect(
                           borderRadius: BorderRadius.circular(10),
                           child: CachedNetworkImage(
-                              imageUrl: thumb, fit: BoxFit.cover),
+                              imageUrl: thumb,
+                              fit: BoxFit.cover,
+                              memCacheWidth: 360),
                         ),
                       ),
                       const SizedBox(height: 6),
