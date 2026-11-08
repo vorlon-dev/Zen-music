@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -71,7 +72,7 @@ class _YtHomePageState extends State<YtHomePage> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Search YouTube',
+            tooltip: 'Search YouTube'.tr,
             icon: const Icon(Icons.search_rounded),
             onPressed: () => context.push('/yt_search'),
           ),

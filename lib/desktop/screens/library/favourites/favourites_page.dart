@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_swipe_action_cell/core/cell.dart';
@@ -19,7 +20,7 @@ class FavouritesPage extends StatelessWidget {
       create: (_) => FavouritesCubit()..load(),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Favourites'),
+          title: Text('Favourites'.tr),
           centerTitle: true,
         ),
         body: BlocBuilder<FavouritesCubit, FavouritesState>(
@@ -65,7 +66,7 @@ class _FavouritesBody extends StatelessWidget {
                       backgroundColor: Colors.transparent,
                       trailingActions: [
                         SwipeAction(
-                          title: 'Remove',
+                          title: 'Remove'.tr,
                           color: Colors.red,
                           onTap: (handler) async {
                             final confirm = await Modals.showConfirmBottomModal(

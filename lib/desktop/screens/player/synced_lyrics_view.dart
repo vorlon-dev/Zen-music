@@ -1,5 +1,8 @@
 // ZenMusic · vorlon-dev
 
+import '../../services/lyrics_romanizer.dart';
+import '../../services/lyric_motion.dart';
+import '../../services/lyric_translation.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -9,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 
 import '../../services/appearance_prefs.dart';
+import '../../services/lyric_styles.dart';
 import '../../services/lyrics_service.dart';
 
 class SyncedLyricsView extends StatefulWidget {
@@ -93,6 +97,10 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
   @override
   void initState() {
     super.initState();
+    LyricStylePrefs.style.addListener(_onStyle);
+    LyricsTranslation.instance.version.addListener(_onTr);
+    LyricMotionPrefs.motion.addListener(_onStyle);
+    LyricsRomanizer.instance.mode.addListener(_onStyle);
     _listen();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -142,6 +150,10 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
     _posNotifier.dispose();
     _sub?.cancel();
     _scroll.dispose();
+    LyricStylePrefs.style.removeListener(_onStyle);
+    LyricsTranslation.instance.version.removeListener(_onTr);
+    LyricMotionPrefs.motion.removeListener(_onStyle);
+    LyricsRomanizer.instance.mode.removeListener(_onStyle);
     super.dispose();
   }
 
@@ -261,11 +273,13 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
       _scroll.jumpTo(target);
       return;
     }
-    final ms = (350 + delta.abs() * 0.35).clamp(350.0, 500.0).round();
+    final spec = _spec;
+    final ms = spec.scrollMs ??
+        (350 + delta.abs() * 0.35).clamp(350.0, 500.0).round();
     _scroll.animateTo(
       target,
       duration: Duration(milliseconds: ms),
-      curve: _ease,
+      curve: spec.scrollCurve ?? _ease,
     );
   }
 
@@ -353,6 +367,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
   }
 
   Widget _syncedList(BuildContext context, List<LyricLine> lines, {bool isWaterDrop = false}) {
+    _ensureTr(lines);
     if (_keys.length != lines.length) {
       _keys = List<GlobalKey>.generate(lines.length, (_) => GlobalKey());
     }
@@ -396,11 +411,35 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
   }
 
 
-  TextStyle _lineStyle(BuildContext context) => _base(context).copyWith(
-    fontSize: _baseSize * widget.textScale,
-    fontWeight: FontWeight.w800,
-    height: 1.3,
-    letterSpacing: -0.2,
+  LyricMotionSpec get _spec => LyricMotionPrefs.motion.value.spec;
+
+  void _onStyle() {
+    if (mounted) setState(() {});
+  }
+
+  List<LyricLine>? _trSrc;
+
+  void _onTr() {
+    _trSrc = null;
+    if (mounted) setState(() {});
+  }
+
+  void _ensureTr(List<LyricLine> lines) {
+    if (identical(_trSrc, lines) || !LyricsTranslation.instance.enabled.value) return;
+    _trSrc = lines;
+    final texts = lines.map((l) => l.text).toList();
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => LyricsTranslation.instance.ensure(texts));
+  }
+
+  TextStyle _lineStyle(BuildContext context) => LyricStyleKit.textStyle(
+    LyricStylePrefs.style.value,
+    _base(context).copyWith(
+      fontSize: _baseSize * widget.textScale,
+      fontWeight: FontWeight.w800,
+      height: 1.3,
+      letterSpacing: -0.2,
+    ),
   );
 
   bool _isStanzaBreak(List<LyricLine> l, int i) {
@@ -411,19 +450,19 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
   }
 
   Widget _item(BuildContext context, List<LyricLine> lines, int i, {bool isWaterDrop = false}) {
-    final line = lines[i];
+    final line = LyricsRomanizer.instance.apply(lines[i]);
     final isActive = i == _active;
     final isPast = _active >= 0 && i < _active;
     final dist = _active < 0 ? 0 : (i - _active).abs();
     final k = math.min(dist, _fallAlpha.length - 1);
 
     final target = _Fx(
-      scale: isActive ? 1.0 : 0.98,
-      alpha: _fallAlpha[k],
+      scale: isActive ? 1.0 : _spec.inactiveScale,
+      alpha: isActive ? _fallAlpha[k] : _fallAlpha[k] * _spec.alphaMul,
       blur: (!_depthOfField || isActive || _dragging || _active < 0)
           ? 0
           : _fallBlur[k],
-      dy: isActive ? -3.5 : (isPast ? -1.5 : 3.5),
+      dy: isActive ? -_spec.dy : (isPast ? -_spec.dy * 0.4 : _spec.dy),
     );
 
     final style = _lineStyle(context);
@@ -431,8 +470,8 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
 
     final fxRow = TweenAnimationBuilder<_Fx>(
       tween: _FxTween(begin: target, end: target),
-      duration: const Duration(milliseconds: 420),
-      curve: _ease,
+      duration: Duration(milliseconds: _spec.fxMs),
+      curve: _spec.curve,
       builder: (context, fx, _) {
         Widget body = _body(context, line, isActive, style, accent, fx.alpha, isWaterDrop: isWaterDrop);
         if (fx.blur > 0.05) {
@@ -493,6 +532,30 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
       children: [
         if (_isStanzaBreak(lines, i)) const SizedBox(height: 22),
         trailed,
+        if (LyricsRomanizer.instance.below(lines[i].text) != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, right: 4, bottom: 4),
+            child: Text(
+              LyricsRomanizer.instance.below(lines[i].text)!,
+              style: style.copyWith(
+                fontSize: (style.fontSize ?? 18) * 0.7,
+                fontWeight: FontWeight.w600,
+                color: isActive ? accent : _inactive(context, 0.4),
+              ),
+            ),
+          ),
+        if (LyricsTranslation.instance.textFor(i, line.text) != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, right: 4, bottom: 6),
+            child: Text(
+              LyricsTranslation.instance.textFor(i, line.text)!,
+              style: style.copyWith(
+                fontSize: (style.fontSize ?? 18) * 0.62,
+                fontWeight: FontWeight.w500,
+                color: isActive ? accent.withOpacity(0.85) : _inactive(context, 0.32),
+              ),
+            ),
+          ),
         if (isActive && _interlude)
           Padding(
             padding: const EdgeInsets.only(top: 6, bottom: 6, left: 4),
@@ -505,6 +568,17 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
   Widget _body(BuildContext context, LyricLine line, bool isActive,
       TextStyle style, Color accent, double alpha, {bool isWaterDrop = false}) {
     final text = line.text.trim().isEmpty ? '♪' : line.text;
+
+    final alt = LyricStyleKit.body(
+      s: LyricStylePrefs.style.value,
+      line: line,
+      active: isActive,
+      style: style,
+      accent: accent,
+      dim: _inactive(context, isActive ? 0.9 : 0.44 * alpha),
+      pos: _posNotifier,
+    );
+    if (alt != null) return alt;
 
     if (isActive && line.hasWords) {
       return _KaraokeLine(
@@ -568,7 +642,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
 
   /// Spring response (damping .72, stiffness 180) of the trail offset.
   double _trailDy(int i) {
-    if (_active < 0) return 0;
+    if (_active < 0 || _spec.trailMul == 0) return 0;
     final rel = i - _active;
     double start;
     double delayMs;
@@ -582,7 +656,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
       return 0;
     }
     final t = (_trail.value * _trailMs - delayMs) / 1000.0;
-    return start * _spring(t);
+    return start * _spec.trailMul * _spring(t);
   }
 
   static double _spring(double t) {
@@ -627,8 +701,8 @@ class _Fx {
 
   static _Fx lerp(_Fx a, _Fx b, double t) => _Fx(
     scale: ui.lerpDouble(a.scale, b.scale, t)!,
-    alpha: ui.lerpDouble(a.alpha, b.alpha, t)!,
-    blur: ui.lerpDouble(a.blur, b.blur, t)!,
+    alpha: ui.lerpDouble(a.alpha, b.alpha, t)!.clamp(0.0, 1.0).toDouble(),
+    blur: math.max(0.0, ui.lerpDouble(a.blur, b.blur, t)!),
     dy: ui.lerpDouble(a.dy, b.dy, t)!,
   );
 

@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -21,7 +22,7 @@ class DownloadsPage extends StatelessWidget {
       create: (_) => DownloadsCubit()..load(),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Downloads'),
+          title: Text('Downloads'.tr),
           centerTitle: true,
           actions: [
             IconButton(
@@ -79,7 +80,7 @@ class _DownloadsBody extends StatelessWidget {
               return AdaptiveListTile(
                 margin: const EdgeInsets.symmetric(vertical: 4),
                 title: playlist['type'] == 'SONGS'
-                    ? const Text('Songs')
+                    ? Text('Songs'.tr)
                     : Text(playlist['title']),
                 leading: _leading(context, playlist),
                 subtitle: Text(

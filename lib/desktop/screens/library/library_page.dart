@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:collection';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -30,7 +31,7 @@ class LibraryPage extends StatelessWidget {
           return InternetGuard(
             child: Scaffold(
               appBar: AppBar(
-                title: Text('Saved', style: appBarTitleStyle()),
+                title: Text('Saved'.tr, style: appBarTitleStyle()),
                 centerTitle: true,
                 automaticallyImplyLeading: false,
                 actions: [

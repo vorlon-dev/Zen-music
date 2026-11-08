@@ -181,18 +181,18 @@ class _ZenDock extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onSelect;
 
-  static const _labels = ['Home', 'Search', 'YouTube', 'Saved', 'Settings'];
+  static const _labels = ['Home', 'Search', 'Discover', 'Saved', 'Settings'];
   static const _icons = [
     Icons.home_outlined,
     Icons.search,
-    Icons.play_circle_outline_rounded,
+    Icons.explore_outlined,
     Icons.bookmark_border_rounded,
     Icons.settings_outlined,
   ];
   static const _activeIcons = [
     Icons.home_rounded,
     Icons.search,
-    Icons.play_circle_fill_rounded,
+    Icons.explore_rounded,
     Icons.bookmark_rounded,
     Icons.settings_rounded,
   ];

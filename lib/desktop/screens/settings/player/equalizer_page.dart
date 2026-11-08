@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -80,7 +81,7 @@ class _EqualizerPageState extends State<EqualizerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Equalizer')),
+      appBar: AppBar(title: Text('Equalizer'.tr)),
       body: _native
           ? const NativeEqView()
           : _loading
@@ -148,7 +149,7 @@ class _Body extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       children: [
         SwitchListTile(
-          title: const Text('Enable Equalizer'),
+          title: Text('Enable Equalizer'.tr),
           secondary: const Icon(Icons.equalizer_rounded),
           value: enabled,
           onChanged: onEnabled,
@@ -180,7 +181,7 @@ class _Body extends StatelessWidget {
           child: OutlinedButton.icon(
             onPressed: enabled ? onReset : null,
             icon: const Icon(Icons.restart_alt_rounded),
-            label: const Text('Reset all bands'),
+            label: Text('Reset all bands'.tr),
           ),
         ),
         const SizedBox(height: 24),

@@ -3,12 +3,22 @@
 import 'package:flutter/material.dart';
 
 import 'package:zenmusic/desktop/services/lyrics_overlay_bridge.dart';
+import 'package:zenmusic/desktop/services/lyrics_translator.dart';
 
 const Color _kBg = Color(0xFF121216);
 const Color _kSurface = Color(0xFF1B1B21);
 
 /// Fixed row height for the synced list — makes scroll math exact.
 const double _kLineExtent = 44.0;
+
+/// Taller rows while a translation is shown under each line.
+const double _kLineExtentTr = 64.0;
+
+const Map<String, String> _kTrLangs = <String, String>{
+  'en': 'English', 'hi': 'Hindi', 'es': 'Spanish', 'fr': 'French',
+  'de': 'German', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
+  'ko': 'Korean', 'ar': 'Arabic', 'id': 'Indonesian', 'tr': 'Turkish',
+};
 
 class LyricsOverlayApp extends StatelessWidget {
   const LyricsOverlayApp({super.key});
@@ -46,6 +56,35 @@ class _LyricsOverlayPageState extends State<LyricsOverlayPage> {
   int _activeIndex = -2; // -2 = nothing computed yet
   String? _trackKey; // resets follow state when the track changes
 
+  // ---- translation ----
+  bool _showTr = false;
+  bool _trLoading = false;
+  List<String>? _tr;
+  String _trLang = LyricsTranslator.targetLang;
+  int _trToken = 0; // drops results from stale requests
+
+  double get _extent => (_showTr && _tr != null) ? _kLineExtentTr : _kLineExtent;
+
+  Future<void> _loadTr(List<OverlayLyricLine> lines, String key) async {
+    final int token = ++_trToken;
+    final List<String>? res = await LyricsTranslator.translate(
+      lines.map((OverlayLyricLine l) => l.text).toList(),
+      cacheKey: key,
+      lang: _trLang,
+    );
+    if (!mounted || token != _trToken) return;
+    setState(() {
+      _tr = res;
+      _trLoading = false;
+      if (res == null) {
+        _showTr = false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Translation failed. Check your connection.')),
+        );
+      }
+    });
+  }
+
   @override
   void dispose() {
     _scroll.dispose();
@@ -69,7 +108,7 @@ class _LyricsOverlayPageState extends State<LyricsOverlayPage> {
     _activeIndex = active;
     if (!_scroll.hasClients) return;
     // Keep the active line roughly 40% from the top, clamped to the list.
-    final double target = ((active - 3) * _kLineExtent)
+    final double target = ((active - 3) * _extent)
         .clamp(0.0, _scroll.position.maxScrollExtent)
         .toDouble();
     _scroll.animateTo(
@@ -109,6 +148,9 @@ class _LyricsOverlayPageState extends State<LyricsOverlayPage> {
           if (key != _trackKey) {
             _trackKey = key;
             _activeIndex = -2;
+            _tr = null;
+            _trLoading = false;
+            _trToken++;
             if (_scroll.hasClients && _scroll.position.hasContentDimensions) {
               _scroll.jumpTo(0);
             }
@@ -122,6 +164,15 @@ class _LyricsOverlayPageState extends State<LyricsOverlayPage> {
             final int active = _activeLineFor(
                 _bridge.overlayPosition.value.inMilliseconds, lines);
             if (active >= 0) _follow(active);
+          }
+
+          // Kick off translation once synced lines are available.
+          if (_showTr && _tr == null && !_trLoading &&
+              status == 'synced' && lines != null && lines.isNotEmpty) {
+            _trLoading = true;
+            final List<OverlayLyricLine> ls = lines;
+            WidgetsBinding.instance
+                .addPostFrameCallback((_) => _loadTr(ls, key));
           }
 
           return Column(
@@ -166,6 +217,48 @@ class _LyricsOverlayPageState extends State<LyricsOverlayPage> {
               ],
             ),
           ),
+          PopupMenuButton<String>(
+            tooltip: 'Translation language',
+            color: _kSurface,
+            icon: const Icon(Icons.language, size: 18, color: Colors.white38),
+            onSelected: (String c) {
+              LyricsTranslator.setTargetLang(c);
+              setState(() {
+                _trLang = c;
+                _tr = null;
+                _trLoading = false;
+                _trToken++;
+                _showTr = true;
+              });
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              for (final MapEntry<String, String> e in _kTrLangs.entries)
+                PopupMenuItem<String>(
+                  value: e.key,
+                  child: Text(e.value,
+                      style: TextStyle(
+                        color: e.key == _trLang ? Colors.white : Colors.white60,
+                        fontWeight: e.key == _trLang ? FontWeight.w700 : FontWeight.w400,
+                      )),
+                ),
+            ],
+          ),
+          IconButton(
+            tooltip: _showTr ? 'Hide translation' : 'Translate lyrics',
+            icon: _trLoading
+                ? const SizedBox(
+                    width: 16, height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : Icon(Icons.translate,
+                    size: 18, color: _showTr ? Colors.white70 : Colors.white24),
+            onPressed: () => setState(() {
+              _showTr = !_showTr;
+              if (!_showTr) {
+                _trToken++;
+                _trLoading = false;
+              }
+            }),
+          ),
           ListenableBuilder(
             listenable: _bridge.overlayPinned,
             builder: (BuildContext context, _) {
@@ -204,7 +297,7 @@ class _LyricsOverlayPageState extends State<LyricsOverlayPage> {
         if (list.isEmpty) return _centered('No lyrics found for this track');
         return ListView.builder(
           controller: _scroll,
-          itemExtent: _kLineExtent,
+          itemExtent: _extent,
           padding: EdgeInsets.symmetric(
             vertical: MediaQuery.of(context).size.height * 0.28,
             horizontal: 24,
@@ -212,21 +305,43 @@ class _LyricsOverlayPageState extends State<LyricsOverlayPage> {
           itemCount: list.length,
           itemBuilder: (BuildContext context, int i) {
             final bool active = i == _activeIndex;
+            final Color color = active
+                ? Colors.white
+                : (i < _activeIndex ? Colors.white24 : Colors.white38);
+            final String? tr = (_showTr && _tr != null && i < _tr!.length)
+                ? _tr![i].trim()
+                : null;
+            final Text main = Text(
+              list[i].text.isEmpty ? '♪' : list[i].text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: active ? 19 : 15,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              ),
+            );
+            if (tr == null) {
+              return Align(alignment: Alignment.centerLeft, child: main);
+            }
             return Align(
               alignment: Alignment.centerLeft,
-              child: Text(
-                list[i].text.isEmpty ? '♪' : list[i].text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: active
-                      ? Colors.white
-                      : (i < _activeIndex
-                          ? Colors.white24
-                          : Colors.white38),
-                  fontSize: active ? 19 : 15,
-                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  main,
+                  if (tr.isNotEmpty && tr != list[i].text.trim())
+                    Text(
+                      tr,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: active ? Colors.white70 : Colors.white24,
+                        fontSize: active ? 14 : 12,
+                      ),
+                    ),
+                ],
               ),
             );
           },

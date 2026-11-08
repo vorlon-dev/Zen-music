@@ -2,6 +2,7 @@
 
 import 'package:get_it/get_it.dart';
 
+import 'package:zenmusic/desktop/services/apple_music_playlist.dart';
 import 'package:zenmusic/desktop/services/library.dart';
 import 'package:zenmusic/desktop/services/spotify.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
@@ -30,6 +31,8 @@ class ImportService {
   Stream<ImportState> import(String url) async* {
     if (url.contains('spotify.com')) {
       yield* _importSpotify(url);
+    } else if (url.contains('music.apple.com')) {
+      yield* _importApple(url);
     } else if (url.contains('youtu.be') || url.contains('youtube.com')) {
       yield* _importYouTube(url);
     } else {
@@ -159,6 +162,27 @@ class ImportService {
         isDone: true,
       );
 
+    } catch (e) {
+      yield ImportState(total: 0, current: 0, message: "Error: $e", isError: true);
+    }
+  }
+
+  Stream<ImportState> _importApple(String url) async* {
+    try {
+      yield ImportState(total: 0, current: 0, message: "Reading Apple Music playlist...");
+      final pl = await AppleMusicPlaylist.fetch(url);
+      final tracks = pl.tracks;
+      yield ImportState(total: tracks.length, current: 0, message: "Created Playlist: ${pl.name}");
+      final key = await _library.createPlaylistKey(pl.name);
+      var i = 0;
+      for (final t in tracks) {
+        i++;
+        final q = '${t['title']} ${t['artist']}';
+        yield ImportState(total: tracks.length, current: i, message: "Searching: $q");
+        final match = await _findSongOnYouTube(q);
+        if (match != null) await _library.addToPlaylist(item: match, key: key);
+      }
+      yield ImportState(total: tracks.length, current: i, message: "Import Complete", isDone: true);
     } catch (e) {
       yield ImportState(total: 0, current: 0, message: "Error: $e", isError: true);
     }

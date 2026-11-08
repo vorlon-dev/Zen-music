@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/screens/player/widgets/lyrics_actions.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:zenmusic/desktop/screens/player/synced_lyrics_view.dart';
+import 'package:zenmusic/desktop/screens/player/widgets/apple_mesh.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/lyrics_service.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
@@ -87,6 +89,8 @@ class _LyricsBoxState extends State<LyricsBox> {
 
   void _fetchLyrics() {
     if (!mounted) return;
+    final songId = widget.currentSong.id;
+    scheduleMicrotask(() => NowLyricsFeed.instance.set(songId, null));
     setState(() {
       _lyricsLoaded = false;
       _fetchLyricsFuture = _loadLyricsInternal().timeout(
@@ -96,6 +100,7 @@ class _LyricsBoxState extends State<LyricsBox> {
     });
     _fetchLyricsFuture!.then((data) {
       if (!mounted) return;
+      if (widget.currentSong.id == songId) NowLyricsFeed.instance.set(songId, data);
       _lyricsLoaded = _hasContent(data);
       widget.onLyricsFound?.call(_lyricsLoaded);
       _updateWakelock();
@@ -193,7 +198,8 @@ class _LyricsBoxState extends State<LyricsBox> {
   }
 
   Widget _classic(LyricsData? data, bool m3) {
-    return ShaderMask(
+    return Stack(children: [
+      ShaderMask(
                     shaderCallback: (Rect bounds) {
                       return const LinearGradient(
                         begin: Alignment.topCenter,
@@ -222,6 +228,8 @@ class _LyricsBoxState extends State<LyricsBox> {
                       // font; the view's base is 20 px → scale accordingly.
                       textScale: AppearancePrefs.lyricsTextSize.value / 20,
                     ),
-                  );
+      ),
+      const Positioned(top: 0, right: 0, child: LyricsActions()),
+    ]);
   }
 }

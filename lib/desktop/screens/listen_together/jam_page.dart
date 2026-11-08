@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -125,7 +126,7 @@ class _JamPageState extends State<JamPage> {
             Colors.grey;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Jam'),
+        title: Text('Jam'.tr),
         actions: [
           if (_jam.state.phase == JamPhase.active)
             const Padding(
@@ -209,8 +210,8 @@ class _JamPageState extends State<JamPage> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: _name,
-                      decoration: const InputDecoration(
-                        hintText: 'Listener',
+                      decoration: InputDecoration(
+                        hintText: 'Listener'.tr,
                         isDense: true,
                         border: OutlineInputBorder(),
                       ),
@@ -224,11 +225,11 @@ class _JamPageState extends State<JamPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Always-on rooms',
+                    Text('Always-on rooms'.tr,
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 4),
                     Text(
-                      'Open all day. The first person in is the admin.',
+                      'Open all day. The first person in is the admin.'.tr,
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -267,7 +268,7 @@ class _JamPageState extends State<JamPage> {
                                       _remember();
                                       _jam.joinRoom(station.code, _name.text);
                                     },
-                              child: const Text('Join'),
+                              child: Text('Join'.tr),
                             ),
                           ],
                         ),
@@ -280,11 +281,11 @@ class _JamPageState extends State<JamPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Start a room',
+                    Text('Start a room'.tr,
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 4),
                     Text(
-                      'You get a code to share with friends.',
+                      'You get a code to share with friends.'.tr,
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -327,11 +328,11 @@ class _JamPageState extends State<JamPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Join a room',
+                    Text('Join a room'.tr,
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 4),
                     Text(
-                      'Enter the code a friend sent you (links work too).',
+                      'Enter the code a friend sent you (links work too).'.tr,
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -343,8 +344,8 @@ class _JamPageState extends State<JamPage> {
                         Expanded(
                           child: TextField(
                             controller: _code,
-                            decoration: const InputDecoration(
-                              hintText: 'ABC123',
+                            decoration: InputDecoration(
+                              hintText: 'ABC123'.tr,
                               isDense: true,
                               border: OutlineInputBorder(),
                             ),
@@ -370,7 +371,7 @@ class _JamPageState extends State<JamPage> {
                                   _remember();
                                   _jam.joinRoom(_code.text, _name.text);
                                 },
-                          child: const Text('Join'),
+                          child: Text('Join'.tr),
                         ),
                       ],
                     ),
@@ -487,7 +488,7 @@ class _JamPageState extends State<JamPage> {
                             ? 'Co-host'
                             : 'Guest',
                   ),
-                  if (jam.permanent) const _Pill(label: 'Always on'),
+                  if (jam.permanent) _Pill(label: 'Always on'.tr),
                   _Pill(
                     label: jam.roomMode == jamModeHostOnly
                         ? 'Host controls playback'
@@ -511,7 +512,7 @@ class _JamPageState extends State<JamPage> {
                       _jam.leave();
                       if (context.canPop()) context.pop();
                     },
-                    child: const Text('Leave'),
+                    child: Text('Leave'.tr),
                   ),
                 ],
               ),
@@ -527,7 +528,7 @@ class _JamPageState extends State<JamPage> {
               const SizedBox(height: 10),
               if (track == null)
                 Text(
-                  'Nothing yet. Play a song and it plays for everyone.',
+                  'Nothing yet. Play a song and it plays for everyone.'.tr,
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: secondary.withValues(alpha: 0.8)),
                 )
@@ -599,7 +600,7 @@ class _JamPageState extends State<JamPage> {
               const SizedBox(height: 10),
               if (jam.queue.isEmpty)
                 Text(
-                  'Nothing queued.',
+                  'Nothing queued.'.tr,
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: secondary.withValues(alpha: 0.8)),
                 )
@@ -668,12 +669,12 @@ class _JamPageState extends State<JamPage> {
                         if (person.isCoHost)
                           OutlinedButton(
                             onPressed: () => _jam.revokeHost(person.userId),
-                            child: const Text('Remove host'),
+                            child: Text('Remove host'.tr),
                           )
                         else if (jam.coHostId.isEmpty)
                           OutlinedButton(
                             onPressed: () => _jam.grantHost(person.userId),
-                            child: const Text('Make host'),
+                            child: Text('Make host'.tr),
                           ),
                       ],
                     ],
@@ -703,7 +704,7 @@ class _JamPageState extends State<JamPage> {
             child: jam.chat.isEmpty
                 ? Center(
                     child: Text(
-                      'No messages yet. Say hi.',
+                      'No messages yet. Say hi.'.tr,
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: Colors.grey),
                     ),
@@ -755,7 +756,7 @@ class _JamPageState extends State<JamPage> {
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Cancel reply',
+                    tooltip: 'Cancel reply'.tr,
                     icon: const Icon(Icons.close, size: 16),
                     onPressed: () => setState(() => _replyTo = null),
                   ),
@@ -770,8 +771,8 @@ class _JamPageState extends State<JamPage> {
                   child: TextField(
                     controller: _chat,
                     focusNode: _chatFocus,
-                    decoration: const InputDecoration(
-                      hintText: 'Message',
+                    decoration: InputDecoration(
+                      hintText: 'Message'.tr,
                       isDense: true,
                       border: OutlineInputBorder(),
                     ),
@@ -782,7 +783,7 @@ class _JamPageState extends State<JamPage> {
                 ),
                 const SizedBox(width: 8),
                 IconButton.filled(
-                  tooltip: 'Send',
+                  tooltip: 'Send'.tr,
                   onPressed: _send,
                   icon: const Icon(Icons.send_rounded, size: 18),
                 ),
@@ -935,7 +936,7 @@ class _LivePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final green = Colors.greenAccent.shade400;
-    return _Pill(label: 'Live', color: green, dot: true);
+    return _Pill(label: 'Live'.tr, color: green, dot: true);
   }
 }
 
@@ -1013,7 +1014,7 @@ class _Bubble extends StatelessWidget {
   }
 
   Widget _replyButton() => IconButton(
-        tooltip: 'Reply',
+        tooltip: 'Reply'.tr,
         icon: const Icon(Icons.reply_rounded, size: 14),
         onPressed: onReply,
         visualDensity: VisualDensity.compact,

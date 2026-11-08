@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 
 import 'package:zenmusic/desktop/services/lastfm_service.dart';
@@ -62,7 +63,7 @@ class _LastfmPageState extends State<LastfmPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Last.fm scrobbling')),
+      appBar: AppBar(title: Text('Last.fm scrobbling'.tr)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -121,11 +122,11 @@ class _LastfmPageState extends State<LastfmPage> {
                         : connected
                             ? OutlinedButton(
                                 onPressed: _disconnect,
-                                child: const Text('Disconnect'),
+                                child: Text('Disconnect'.tr),
                               )
                             : FilledButton(
                                 onPressed: _connect,
-                                child: const Text('Connect Last.fm'),
+                                child: Text('Connect Last.fm'.tr),
                               ),
                   ],
                 ),
@@ -159,7 +160,7 @@ class _LastfmPageState extends State<LastfmPage> {
                     alignment: Alignment.centerRight,
                     child: TextButton(
                       onPressed: _completeWithToken,
-                      child: const Text('Complete login'),
+                      child: Text('Complete login'.tr),
                     ),
                   ),
                 ],
@@ -168,7 +169,7 @@ class _LastfmPageState extends State<LastfmPage> {
           ),
 
           const SizedBox(height: 24),
-          Text('How scrobbling works',
+          Text('How scrobbling works'.tr,
               style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           const Text(

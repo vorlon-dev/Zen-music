@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -16,7 +17,7 @@ class DownloadingPage extends StatelessWidget {
       create: (_) => DownloadingCubit()..load(),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Downloading'),
+          title: Text('Downloading'.tr),
           centerTitle: true,
         ),
         body: BlocBuilder<DownloadingCubit, DownloadingState>(
@@ -34,7 +35,7 @@ class DownloadingPage extends StatelessWidget {
                       if (downloading.isNotEmpty) ...[
                         SliverToBoxAdapter(
                           child: DownloadingSectionTile(
-                            title: 'In Progress',
+                            title: 'In Progress'.tr,
                           ),
                         ),
                         SliverList(

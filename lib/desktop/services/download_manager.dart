@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/download_tagger.dart';
 import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
@@ -203,6 +204,7 @@ class DownloadManager {
         extension: audioSource.container.name,
       );
       if (file != null) {
+        await DownloadTagger.tag(file.path, song);
         await _updateSongMetadata(song['videoId'], {
           'status': 'DOWNLOADED',
           'path': file.path,

@@ -1,7 +1,9 @@
 // ZenMusic · vorlon-dev
 
-import 'dart:io' show Platform;
+import 'package:zenmusic/desktop/services/l10n.dart';
+import 'dart:io' show File, Platform;
 import 'dart:math' as math;
+import 'package:zenmusic/desktop/screens/player/widgets/apple_mesh.dart';
 import 'dart:ui' show FontFeature, ImageFilter;
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
@@ -24,6 +26,9 @@ enum PlayerSkin {
   appleMusic('Apple Music style',
       'Artwork shrinks on pause, thick bar, volume slider',
       Icons.queue_music),
+  appleMusicMesh('Apple Music · Mesh',
+      'Artwork-colour mesh, live lyric line, full-screen lyrics tab',
+      Icons.gradient),
   lastWave('LastWave style',
       'Liquid glass panels, wavy progress, expressive play button',
       Icons.water_drop_outlined),
@@ -110,6 +115,7 @@ class PlayerSkinView extends StatelessWidget {
   @override
   Widget build(BuildContext context) => switch (skin) {
     PlayerSkin.appleMusic => _Apple(ctx),
+    PlayerSkin.appleMusicMesh => _AppleMesh(ctx),
     PlayerSkin.lastWave => _LastWave(ctx),
     PlayerSkin.bitChord => _BitChord(ctx),
     PlayerSkin.echo => _Echo(ctx),
@@ -1001,6 +1007,196 @@ class _Apple extends StatelessWidget {
 }
 
 
+
+/// Apple Music · Mesh. Based on SimpMusic's Apple Music player: a colour mesh
+/// from the artwork, the sung line above the bar, and a lyrics tab that
+/// replaces the artwork (the lyrics box stays mounted so lyrics keep loading).
+class _AppleMesh extends StatelessWidget {
+  const _AppleMesh(this.x);
+  final PlayerCtx x;
+
+  static const _w = Colors.white;
+  static final Color _dim = Colors.white.withValues(alpha: .6);
+
+  ImageProvider? _provider() {
+    final u = x.song.artUri;
+    if (u == null) return null;
+    if (u.scheme == 'file') return FileImage(File(u.toFilePath()));
+    return NetworkImage(u.toString());
+  }
+
+  Widget _rb(Widget child, VoidCallback? t, String tip) => _Tap(
+        onTap: t,
+        tip: tip,
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+              shape: BoxShape.circle, color: Colors.white.withValues(alpha: .18)),
+          child: child,
+        ),
+      );
+
+  Widget _grab() => _Tap(
+        onTap: x.close,
+        tip: 'Close',
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 30),
+          child: Container(
+            width: 42,
+            height: 5,
+            decoration: BoxDecoration(
+                color: Colors.white38, borderRadius: BorderRadius.circular(3)),
+          ),
+        ),
+      );
+
+  Widget _heart() => _fav(
+        x.song,
+        (l, t) => _rb(Icon(l ? _Ic.heartFill : _Ic.heart, size: 17, color: _w), t,
+            'Favourite'),
+      );
+
+  Widget _moreB() => Builder(
+        builder: (c) =>
+            _rb(Icon(_Ic.more, size: 17, color: _w), () => _more(c, x.song), 'More'),
+      );
+
+  Widget _dock() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: .12),
+          borderRadius: BorderRadius.circular(30),
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          _shufBtn(_w),
+          _lyrBtn(x, _w),
+          _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _w),
+          _repBtn(_w),
+        ]),
+      );
+
+  Widget _transport(double play, double skip) =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+        _ibtn(_Ic.prev, x.prev, 'Previous', size: skip, c: _w),
+        _bare(_w, play),
+        _ibtn(_Ic.next, x.next, 'Next', size: skip, c: _w),
+      ]);
+
+  Widget _mainLayer() => Padding(
+        padding: const EdgeInsets.fromLTRB(28, 0, 28, 14),
+        child: Column(children: [
+          _grab(),
+          Expanded(
+            child: _playing((s) => AnimatedScale(
+                  scale: s == ButtonState.playing ? 1 : 0.86,
+                  duration: const Duration(milliseconds: 380),
+                  curve: Curves.easeOutCubic,
+                  child: _art(x, r: 16, swap: false),
+                )),
+          ),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(child: _titles(x, _w, _dim, size: 22, w: FontWeight.w700)),
+            _heart(),
+            const SizedBox(width: 10),
+            _moreB(),
+          ]),
+          const SizedBox(height: 6),
+          AppleLyricStrip(onTap: x.hasLyrics ? x.toggleLyrics : null),
+          const SizedBox(height: 6),
+          _bar(_w, Colors.white24, h: 18, t: 7, th: _Thumb.none),
+          _times(
+            _dim,
+            rem: true,
+            mid: _Tap(
+              onTap: x.openQuality,
+              tip: 'Audio quality',
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                    border: Border.all(color: Colors.white38),
+                    borderRadius: BorderRadius.circular(4)),
+                child: Text(x.quality, style: _s(10, _dim, w: FontWeight.w700, ls: .5)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          _transport(70, 46),
+          const SizedBox(height: 4),
+          _vol(_w, Colors.white24),
+          const SizedBox(height: 10),
+          _dock(),
+        ]),
+      );
+
+  Widget _lyricsLayer(bool shown) => Padding(
+        padding: const EdgeInsets.fromLTRB(22, 0, 22, 14),
+        child: Column(children: [
+          _grab(),
+          Row(children: [
+            _mini(x, 52, 10),
+            const SizedBox(width: 12),
+            Expanded(child: _titles(x, _w, _dim, size: 17, w: FontWeight.w700)),
+            _heart(),
+            const SizedBox(width: 10),
+            _moreB(),
+          ]),
+          const SizedBox(height: 6),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (_, c) =>
+                  x.lyrics(shown ? Size(c.maxWidth, c.maxHeight) : Size.zero),
+            ),
+          ),
+          const SizedBox(height: 6),
+          _bar(_w, Colors.white24, h: 18, t: 5, th: _Thumb.none),
+          _times(_dim, rem: true),
+          const SizedBox(height: 2),
+          _transport(56, 38),
+          const SizedBox(height: 8),
+          _dock(),
+        ]),
+      );
+
+  Widget _body() {
+    final on = x.hasLyrics && x.showLyrics;
+    return Stack(children: [
+      Positioned.fill(
+        child: IgnorePointer(
+          ignoring: on,
+          child: AnimatedOpacity(
+            opacity: on ? 0 : 1,
+            duration: const Duration(milliseconds: 300),
+            child: _mainLayer(),
+          ),
+        ),
+      ),
+      Positioned.fill(
+        child: HeldCrossfade(on: on, builder: (_, shown) => _lyricsLayer(shown)),
+      ),
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _shell(
+      AppleMeshBackdrop(
+        artKey: x.song.id,
+        provider: _provider(),
+        fallback: _t(x),
+      ),
+      LayoutBuilder(
+        builder: (_, c) => _isWide(c)
+            ? Center(
+                child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 480), child: _body()))
+            : _body(),
+      ),
+    );
+  }
+}
+
 class _LastWave extends StatelessWidget {
   const _LastWave(this.x);
   final PlayerCtx x;
@@ -1714,7 +1910,7 @@ class PlayerSkinPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Player screen')),
+      appBar: AppBar(title: Text('Player screen'.tr)),
       body: ValueListenableBuilder<String>(
         valueListenable: PlayerSkinPrefs.skin,
         builder: (context, name, _) {

@@ -13,6 +13,7 @@
 // Open it with:
 //   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SeekBarPage()));
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async';
 import 'dart:ui' show FontFeature;
 
@@ -157,7 +158,7 @@ class _SeekBarPageState extends State<SeekBarPage> {
         autofocus: true,
         child: Scaffold(
           appBar: AdaptiveAppBar(
-            title: Text('Seek bar', style: appBarTitleStyle()),
+            title: Text('Seek bar'.tr, style: appBarTitleStyle()),
           ),
           body: ValueListenableBuilder<String>(
             valueListenable: AppearancePrefs.sliderStyle,
@@ -242,7 +243,7 @@ class _SeekBarPageState extends State<SeekBarPage> {
                             ? OutlinedButton.icon(
                           onPressed: null,
                           icon: const Icon(_I.check, size: 18),
-                          label: const Text('Current style'),
+                          label: Text('Current style'.tr),
                         )
                             : FilledButton.icon(
                           onPressed: _apply,
@@ -251,9 +252,9 @@ class _SeekBarPageState extends State<SeekBarPage> {
                         ),
                       ),
                       const SizedBox(height: 28),
-                      const Padding(
+                      Padding(
                         padding: EdgeInsets.fromLTRB(4, 0, 4, 10),
-                        child: Text('ALL STYLES',
+                        child: Text('ALL STYLES'.tr,
                             style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
@@ -357,17 +358,17 @@ class _PreviewCard extends StatelessWidget {
                   child: const Icon(_I.music, color: Colors.white, size: 26),
                 ),
                 const SizedBox(width: 14),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Preview song',
+                      Text('Preview song'.tr,
                           style: TextStyle(
                               color: Colors.white,
                               fontSize: 17,
                               fontWeight: FontWeight.w800)),
                       SizedBox(height: 2),
-                      Text('Zen Artist',
+                      Text('Zen Artist'.tr,
                           style:
                           TextStyle(color: Colors.white60, fontSize: 14)),
                     ],
@@ -474,7 +475,7 @@ class _Pager extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         IconButton(
-          tooltip: 'Previous style (←)',
+          tooltip: 'Previous style (←)'.tr,
           onPressed: onPrev,
           icon: const Icon(_I.chevronLeft),
         ),
@@ -511,7 +512,7 @@ class _Pager extends StatelessWidget {
             ),
         const SizedBox(width: 6),
         IconButton(
-          tooltip: 'Next style (→)',
+          tooltip: 'Next style (→)'.tr,
           onPressed: onNext,
           icon: const Icon(_I.chevronRight),
         ),

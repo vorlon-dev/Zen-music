@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:ui' as ui;
@@ -567,7 +568,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
         backgroundColor: _kSurfaceHi,
         width: 220,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: const Text('Link copied', textAlign: TextAlign.center),
+        content: Text('Link copied'.tr, textAlign: TextAlign.center),
         duration: const Duration(seconds: 2),
       ));
   }
@@ -774,7 +775,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
           }),
       ListTile(
         leading: const Icon(Icons.high_quality_outlined),
-        title: const Text('Quality'),
+        title: Text('Quality'.tr),
         trailing: Text(_height == 0 ? 'Auto' : '${_height}p',
             style: const TextStyle(color: _kMuted)),
         onTap: () {
@@ -784,7 +785,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       ),
       ListTile(
         leading: const Icon(Icons.speed_rounded),
-        title: const Text('Playback speed'),
+        title: Text('Playback speed'.tr),
         trailing: Text(_speed == 1 ? 'Normal' : '${_speed}x',
             style: const TextStyle(color: _kMuted)),
         onTap: () {
@@ -794,7 +795,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       ),
       ListTile(
         leading: const Icon(Icons.bedtime_outlined),
-        title: const Text('Sleep timer'),
+        title: Text('Sleep timer'.tr),
         trailing: Text(_sleepMin == 0 ? 'Off' : '$_sleepMin min',
             style: const TextStyle(color: _kMuted)),
         onTap: () {
@@ -1053,7 +1054,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
                     const SizedBox(height: 12),
                     FilledButton.tonal(
                         onPressed: () => _load(_id, keepMeta: true),
-                        child: const Text('Retry')),
+                        child: Text('Retry'.tr)),
                   ],
                 ),
               ),
@@ -1648,7 +1649,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
             ),
           ),
           IconButton.filledTonal(
-            tooltip: 'Copy YouTube link',
+            tooltip: 'Copy YouTube link'.tr,
             style: IconButton.styleFrom(backgroundColor: _kSurfaceHi),
             onPressed: _copyLink,
             icon: const Icon(Icons.open_in_new_rounded, size: 18),
@@ -1695,14 +1696,14 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
         padding: const EdgeInsets.fromLTRB(16, 14, 10, 4),
         child: Row(
           children: [
-            const Text('Up next',
+            Text('Up next'.tr,
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
             const SizedBox(width: 8),
             if (!_relatedLoading && _related.isNotEmpty)
               Text('${_related.length}',
                   style: const TextStyle(color: _kMuted, fontSize: 13)),
             const Spacer(),
-            const Text('Autoplay',
+            Text('Autoplay'.tr,
                 style: TextStyle(fontSize: 12, color: _kMuted)),
             Switch(
               value: _autoplay,
@@ -1716,10 +1717,10 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
       if (_relatedLoading)
         for (var i = 0; i < 5; i++) _skeleton()
       else if (_related.isEmpty)
-        const Padding(
+        Padding(
           padding: EdgeInsets.all(28),
           child: Center(
-            child: Text('No related videos',
+            child: Text('No related videos'.tr,
                 style: TextStyle(color: Colors.white54)),
           ),
         )
@@ -1836,7 +1837,7 @@ class _VideoWatchPageState extends State<VideoWatchPage> {
                   ],
                   if (current) ...[
                     const SizedBox(height: 6),
-                    const Text('NOW PLAYING',
+                    Text('NOW PLAYING'.tr,
                         style: TextStyle(
                             fontSize: 10,
                             letterSpacing: 1.2,

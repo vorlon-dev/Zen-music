@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -80,9 +81,9 @@ class _Body extends StatelessWidget {
                 child: _LikedSongsCard(songs: likedSongs),
               ),
             if (playlists.isNotEmpty) ...[
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('Your Playlists',
+                child: Text('Your Playlists'.tr,
                     style: TextStyle(
                         fontSize: 20, fontWeight: FontWeight.bold)),
               ),
@@ -102,9 +103,9 @@ class _Body extends StatelessWidget {
               ),
             ],
             if (likedSongs.isEmpty && playlists.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 40),
-                child: Center(child: Text('No Spotify content yet')),
+                child: Center(child: Text('No Spotify content yet'.tr)),
               ),
           ],
         ),
@@ -142,7 +143,7 @@ class _LikedSongsCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Liked Songs',
+                  Text('Liked Songs'.tr,
                       style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w800,

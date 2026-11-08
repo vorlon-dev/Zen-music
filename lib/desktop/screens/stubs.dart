@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -53,7 +54,7 @@ class _UnderDevelopmentNotice extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'This screen is under development',
+              'This screen is under development'.tr,
               textAlign: TextAlign.center,
               style: theme.textTheme.titleLarge,
             ),
@@ -78,7 +79,7 @@ class _UnderDevelopmentNotice extends StatelessWidget {
                 }
               },
               icon: const Icon(Icons.star_border),
-              label: const Text('Visit the repo'),
+              label: Text('Visit the repo'.tr),
             ),
           ],
         ),

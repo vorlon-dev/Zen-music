@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yexp;
@@ -191,12 +192,12 @@ class _YtChannelPageState extends State<YtChannelPage> {
                           ),
                         ),
                       ),
-                      const SliverToBoxAdapter(
+                      SliverToBoxAdapter(
                         child: Padding(
                           padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
                           child: Align(
                             alignment: Alignment.centerLeft,
-                            child: Text('Videos',
+                            child: Text('Videos'.tr,
                                 style: TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w700)),

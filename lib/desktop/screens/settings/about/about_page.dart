@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:io' show Platform;
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
@@ -87,7 +88,7 @@ class _AboutPageState extends State<AboutPage> {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('About')),
+      appBar: AppBar(title: Text('About'.tr)),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
@@ -117,10 +118,10 @@ class _AboutPageState extends State<AboutPage> {
                 ]),
               ),
 
-              ZenSection(title: 'Project', children: [
+              ZenSection(title: 'Project'.tr, children: [
                 ZenRow(
                   icon: _I.code,
-                  title: 'Source code',
+                  title: 'Source code'.tr,
                   subtitle: 'github.com/vorlon-dev/Zen-music',
                   trailing: Icon(ZenIcons.openExternal,
                       size: 18, color: cs.onSurfaceVariant),
@@ -128,26 +129,26 @@ class _AboutPageState extends State<AboutPage> {
                 ),
                 ZenRow(
                   icon: ZenIcons.update,
-                  title: 'Releases',
-                  subtitle: 'Download the latest version',
+                  title: 'Releases'.tr,
+                  subtitle: 'Download the latest version'.tr,
                   trailing: Icon(ZenIcons.openExternal,
                       size: 18, color: cs.onSurfaceVariant),
                   onTap: () => _open('$_repo/releases'),
                 ),
                 ZenRow(
                   icon: _I.bug,
-                  title: 'Report a problem',
-                  subtitle: 'Open an issue on GitHub',
+                  title: 'Report a problem'.tr,
+                  subtitle: 'Open an issue on GitHub'.tr,
                   trailing: Icon(ZenIcons.openExternal,
                       size: 18, color: cs.onSurfaceVariant),
                   onTap: () => _open('$_repo/issues'),
                 ),
               ]),
 
-              ZenSection(title: 'App info', children: [
+              ZenSection(title: 'App info'.tr, children: [
                 ZenRow(
                   icon: _I.tag,
-                  title: 'Version',
+                  title: 'Version'.tr,
                   subtitle: '$_version ($_build)',
                   trailing: Icon(_I.copy, size: 18, color: cs.onSurfaceVariant),
                   onTap: () => _copy('Version', '$_version+$_build'),
@@ -155,7 +156,7 @@ class _AboutPageState extends State<AboutPage> {
                 if (_info != null)
                   ZenRow(
                     icon: _I.package,
-                    title: 'Package',
+                    title: 'Package'.tr,
                     subtitle: _info!.packageName,
                     trailing:
                     Icon(_I.copy, size: 18, color: cs.onSurfaceVariant),
@@ -163,38 +164,38 @@ class _AboutPageState extends State<AboutPage> {
                   ),
                 ZenRow(
                   icon: _I.device,
-                  title: 'Platform',
+                  title: 'Platform'.tr,
                   subtitle: _platform,
                   trailing: Icon(_I.copy, size: 18, color: cs.onSurfaceVariant),
                   onTap: () => _copy('Platform', _platform),
                 ),
                 ZenRow(
                   icon: _I.copy,
-                  title: 'Copy details for a bug report',
-                  subtitle: 'Version, build and platform',
+                  title: 'Copy details for a bug report'.tr,
+                  subtitle: 'Version, build and platform'.tr,
                   onTap: () => _copy('App details', _report),
                 ),
               ]),
 
-              ZenSection(title: 'Credits and licenses', children: [
+              ZenSection(title: 'Credits and licenses'.tr, children: [
                 ZenRow(
                   icon: _I.people,
-                  title: 'Educational and research use',
+                  title: 'Educational and research use'.tr,
                   subtitle: 'ZenMusic is made for educational and research '
                       'purposes only.',
                 ),
                 ZenRow(
                   icon: _I.license,
-                  title: 'GPL-3.0 license',
-                  subtitle: 'ZenMusic is free software. Read the license.',
+                  title: 'GPL-3.0 license'.tr,
+                  subtitle: 'ZenMusic is free software. Read the license.'.tr,
                   trailing: Icon(ZenIcons.openExternal,
                       size: 18, color: cs.onSurfaceVariant),
                   onTap: () => _open('$_repo/blob/main/LICENSE'),
                 ),
                 ZenRow(
                   icon: _I.library,
-                  title: 'Open-source libraries',
-                  subtitle: 'Licenses of the packages ZenMusic uses',
+                  title: 'Open-source libraries'.tr,
+                  subtitle: 'Licenses of the packages ZenMusic uses'.tr,
                   chevron: true,
                   onTap: () => showLicensePage(
                     context: context,
@@ -207,7 +208,7 @@ class _AboutPageState extends State<AboutPage> {
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Built with Flutter.',
+                  'Built with Flutter.'.tr,
                   textAlign: TextAlign.center,
                   style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                 ),

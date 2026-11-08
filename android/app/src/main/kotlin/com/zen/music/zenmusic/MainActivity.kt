@@ -572,6 +572,12 @@ class MainActivity : AudioServiceActivity() {
                             2500.0, 4000.0, 6300.0, 10000.0, 16000.0,
                         )
                     )
+                    "setVocalRemoval" -> {
+                        val amount = (call.argument<Number>("amount") ?: 0).toFloat()
+                        com.zen.music.zenmusic.lossless.VocalRemovalState.amount =
+                            amount.coerceIn(0f, 1f)
+                        result.success(null)
+                    }
                     "setEqualizer" -> {
                         val enabled = call.argument<Boolean>("enabled") ?: false
                         val gainsRaw: List<*> =

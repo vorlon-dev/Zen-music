@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 
@@ -125,7 +126,7 @@ class _ChartDetailsPageState extends State<ChartDetailsPage> {
                                 : () => GetIt.I<MediaPlayer>()
                                 .playAll(playable),
                             icon: const Icon(Icons.play_arrow),
-                            label: const Text('Play All'),
+                            label: Text('Play All'.tr),
                           ),
                         ],
                       ),

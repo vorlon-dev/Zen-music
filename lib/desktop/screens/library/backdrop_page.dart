@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 
 import 'package:zenmusic/desktop/backdrop/windows_backdrop_service.dart';
@@ -46,7 +47,7 @@ class _BackdropPageState extends State<BackdropPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Video backdrop')),
+      appBar: AppBar(title: Text('Video backdrop'.tr)),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
@@ -69,8 +70,8 @@ class _BackdropPageState extends State<BackdropPage> {
                     children: <Widget>[
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: const Text(
-                          'Video backdrop',
+                        title: Text(
+                          'Video backdrop'.tr,
                           style: TextStyle(
                               fontWeight: FontWeight.bold, fontSize: 15),
                         ),
@@ -130,8 +131,8 @@ class _BackdropPageState extends State<BackdropPage> {
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const <Widget>[
-                      Text('How it works',
+                    children: <Widget>[
+                      Text('How it works'.tr,
                           style: TextStyle(fontWeight: FontWeight.bold)),
                       SizedBox(height: 8),
                       Text(
@@ -147,7 +148,7 @@ class _BackdropPageState extends State<BackdropPage> {
                         style: TextStyle(height: 1.5),
                       ),
                       SizedBox(height: 12),
-                      Text('Good to know',
+                      Text('Good to know'.tr,
                           style: TextStyle(fontWeight: FontWeight.bold)),
                       SizedBox(height: 8),
                       Text(

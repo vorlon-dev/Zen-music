@@ -1,5 +1,7 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/screens/library/friends_feed_page.dart';
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -39,7 +41,7 @@ class SettingsPage extends StatelessWidget {
       create: (_) => SettingsSystemCubit()..load(),
       child: AdaptiveScaffold(
         appBar: AdaptiveAppBar(
-          title: Text('Settings', style: appBarTitleStyle()),
+          title: Text('Settings'.tr, style: appBarTitleStyle()),
           automaticallyImplyLeading: false,
         ),
         body: const _SettingsBody(),
@@ -114,22 +116,38 @@ class _SettingsBodyState extends State<_SettingsBody> {
       _Group('General', [
         _Entry(
           icon: ZenIcons.appearance,
-          title: 'Appearance',
-          subtitle: 'Theme, colors and lyrics',
+          title: 'Appearance'.tr,
+          subtitle: 'Theme, colors and lyrics'.tr,
           keywords: const ['theme', 'dark', 'color', 'material', 'lyrics'],
           onTap: () => context.go('/settings/appearance'),
         ),
         _Entry(
+          icon: Icons.group,
+          title: 'Friends feed'.tr,
+          subtitle: 'What your Last.fm friends are playing'.tr,
+          keywords: const ['friends', 'lastfm', 'social', 'scrobble'],
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const FriendsFeedPage()),
+          ),
+        ),
+        _Entry(
+          icon: Icons.language,
+          title: 'Language'.tr,
+          subtitle: kAppLanguages[L10n.lang.value] ?? 'English',
+          keywords: const ['language', 'translate', 'hindi', 'spanish', 'arabic'],
+          onTap: () => showLanguageDialog(context),
+        ),
+        _Entry(
           icon: ZenIcons.player,
-          title: 'Player',
-          subtitle: 'Playback, equalizer and queue',
+          title: 'Player'.tr,
+          subtitle: 'Playback, equalizer and queue'.tr,
           keywords: const ['equalizer', 'eq', 'audio', 'playback'],
           onTap: () => context.go('/settings/player'),
         ),
         _Entry(
           icon: Icons.compare_arrows,
-          title: 'Crossfade',
-          subtitle: 'Fade between tracks',
+          title: 'Crossfade'.tr,
+          subtitle: 'Fade between tracks'.tr,
           keywords: const ['crossfade', 'fade', 'transition', 'gapless'],
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const CrossfadePage()),
@@ -146,8 +164,8 @@ class _SettingsBodyState extends State<_SettingsBody> {
         ),
         _Entry(
           icon: Icons.high_quality,
-          title: 'Song quality',
-          subtitle: 'Lossless tier for YTM and JioSaavn',
+          title: 'Song quality'.tr,
+          subtitle: 'Lossless tier for YTM and JioSaavn'.tr,
           keywords: const [
             'quality',
             'lossless',
@@ -167,7 +185,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
                   : (i >= tiers.length ? tiers.length - 1 : i)];
               return ZenRow(
                 icon: Icons.high_quality,
-                title: 'Song quality',
+                title: 'Song quality'.tr,
                 subtitle: tier.label,
                 chevron: true,
                 onTap: () => Navigator.of(ctx).push(
@@ -183,19 +201,19 @@ class _SettingsBodyState extends State<_SettingsBody> {
         if (Platform.isAndroid)
           _Entry(
             icon: Icons.image_outlined,
-            title: 'Logo',
-            subtitle: 'Pick the launcher icon',
+            title: 'Logo'.tr,
+            subtitle: 'Pick the launcher icon'.tr,
             keywords: const ['logo', 'icon', 'launcher', 'app icon', 'theme'],
             builder: (ctx) => ZenRow(
               icon: Icons.image_outlined,
-              title: 'Logo',
-              subtitle: 'Pick the launcher icon',
+              title: 'Logo'.tr,
+              subtitle: 'Pick the launcher icon'.tr,
               chevron: true,
               onTap: () => ctx.push('/logo'),
             ),
           ),
         _Entry(
-          title: 'Seek bar',
+          title: 'Seek bar'.tr,
           keywords: const ['slider', 'progress', 'wave', 'style'],
           builder: (ctx) => ValueListenableBuilder<String>(
             valueListenable: AppearancePrefs.sliderStyle,
@@ -203,7 +221,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
               final s = ZenSliderStyle.fromName(name);
               return ZenRow(
                 icon: ZenIcons.seekBar,
-                title: 'Seek bar',
+                title: 'Seek bar'.tr,
                 subtitle: s.label,
                 chevron: true,
                 trailing: SizedBox(
@@ -227,13 +245,13 @@ class _SettingsBodyState extends State<_SettingsBody> {
           ),
         ),
         _Entry(
-          title: 'Player screen',
+          title: 'Player screen'.tr,
           keywords: const ['skin', 'layout', 'ui', 'player'],
           builder: (ctx) => ValueListenableBuilder<String>(
             valueListenable: PlayerSkinPrefs.skin,
             builder: (ctx, name, _) => ZenRow(
               icon: ZenIcons.playerScreen,
-              title: 'Player screen',
+              title: 'Player screen'.tr,
               subtitle: PlayerSkin.fromName(name).label,
               chevron: true,
               onTap: () => Navigator.of(ctx).push(
@@ -247,24 +265,24 @@ class _SettingsBodyState extends State<_SettingsBody> {
         _Group('Desktop', [
           _Entry(
             icon: Icons.picture_in_picture_alt,
-            title: 'Mini player',
-            subtitle: 'Float the controls',
+            title: 'Mini player'.tr,
+            subtitle: 'Float the controls'.tr,
             keywords: const ['mini', 'player', 'floating', 'window'],
             chevron: false,
             onTap: () => MiniPlayerBridge.instance.openMiniPlayer(),
           ),
           _Entry(
             icon: Icons.lyrics,
-            title: 'Lyrics overlay',
-            subtitle: 'Floating sing-along',
+            title: 'Lyrics overlay'.tr,
+            subtitle: 'Floating sing-along'.tr,
             keywords: const ['lyrics', 'overlay', 'floating', 'sing'],
             chevron: false,
             onTap: () => LyricsOverlayBridge.instance.openOverlay(),
           ),
           _Entry(
             icon: Icons.smart_display,
-            title: 'Video backdrop',
-            subtitle: 'Song video behind the player',
+            title: 'Video backdrop'.tr,
+            subtitle: 'Song video behind the player'.tr,
             keywords: const ['backdrop', 'video', 'blur', 'background'],
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const BackdropPage()),
@@ -272,9 +290,9 @@ class _SettingsBodyState extends State<_SettingsBody> {
           ),
         ]),
       _Group('Services', [
-        const _Entry(
-          title: 'YouTube Music',
-          subtitle: 'Account, region and content',
+        _Entry(
+          title: 'YouTube Music'.tr,
+          subtitle: 'Account, region and content'.tr,
           keywords: [
             'youtube',
             'ytmusic',
@@ -289,8 +307,8 @@ class _SettingsBodyState extends State<_SettingsBody> {
         ),
         _Entry(
           icon: ZenIcons.youtube,
-          title: 'Content and region',
-          subtitle: 'Country, language and content type',
+          title: 'Content and region'.tr,
+          subtitle: 'Country, language and content type'.tr,
           keywords: const ['region', 'country', 'language', 'content'],
           onTap: () => context.go('/settings/services/ytmusic'),
         ),
@@ -302,7 +320,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
         _Entry(
           icon: Icons.graphic_eq,
           title: 'Last.fm',
-          subtitle: 'Scrobble your plays',
+          subtitle: 'Scrobble your plays'.tr,
           keywords: const ['lastfm', 'last.fm', 'scrobble', 'music'],
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const LastfmPage()),
@@ -312,22 +330,22 @@ class _SettingsBodyState extends State<_SettingsBody> {
       _Group('Storage and privacy', [
         _Entry(
           icon: ZenIcons.backup,
-          title: 'Backup and storage',
-          subtitle: 'Back up, restore and manage space',
+          title: 'Backup and storage'.tr,
+          subtitle: 'Back up, restore and manage space'.tr,
           keywords: const ['export', 'import', 'cache', 'downloads'],
           onTap: () => context.go('/settings/backup_storage'),
         ),
         _Entry(
           icon: ZenIcons.privacy,
-          title: 'Privacy',
-          subtitle: 'History and data controls',
+          title: 'Privacy'.tr,
+          subtitle: 'History and data controls'.tr,
           keywords: const ['history', 'data'],
           onTap: () => context.go('/settings/privacy'),
         ),
         _Entry(
           icon: Icons.offline_pin_outlined,
-          title: 'Offline cache',
-          subtitle: 'Auto-cached songs',
+          title: 'Offline cache'.tr,
+          subtitle: 'Auto-cached songs'.tr,
           keywords: const ['offline', 'cache', 'download', 'space'],
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const OfflineCachePage()),
@@ -337,15 +355,15 @@ class _SettingsBodyState extends State<_SettingsBody> {
       _Group('About', [
         _Entry(
           icon: ZenIcons.about,
-          title: 'About',
-          subtitle: 'Version, licenses and credits',
+          title: 'About'.tr,
+          subtitle: 'Version, licenses and credits'.tr,
           keywords: const ['version', 'license', 'credits'],
           onTap: () => context.go('/settings/about'),
         ),
         _Entry(
           icon: ZenIcons.update,
-          title: 'Check for updates',
-          subtitle: 'Opens the releases page',
+          title: 'Check for updates'.tr,
+          subtitle: 'Opens the releases page'.tr,
           keywords: const ['github', 'release', 'download'],
           trailing: Icon(ZenIcons.openExternal,
               size: 18,
@@ -430,9 +448,9 @@ class _SettingsBodyState extends State<_SettingsBody> {
                             ZenRow(
                               icon: ZenIcons.battery,
                               iconColor: Theme.of(context).colorScheme.error,
-                              title: 'Battery optimisation is on',
+                              title: 'Battery optimisation is on'.tr,
                               subtitle:
-                              'Turn it off so music keeps playing in the background.',
+                              'Turn it off so music keeps playing in the background.'.tr,
                               chevron: true,
                               onTap: () => context
                                   .read<SettingsSystemCubit>()
@@ -555,11 +573,11 @@ class _SpotifyTileState extends State<_SpotifyTile> {
               trailing: loggedIn
                   ? OutlinedButton(
                 onPressed: () => SpotifyAuth.instance.logout(),
-                child: const Text('Log out'),
+                child: Text('Log out'.tr),
               )
                   : FilledButton.tonal(
                 onPressed: _openEmbeddedLogin,
-                child: const Text('Log in'),
+                child: Text('Log in'.tr),
               ),
             ),
             if (!loggedIn)
@@ -588,7 +606,7 @@ class _SpotifyTileState extends State<_SpotifyTile> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                tooltip: 'Paste',
+                                tooltip: 'Paste'.tr,
                                 icon: Icon(ZenIcons.paste, size: 18),
                                 onPressed: _pasteFromClipboard,
                               ),
@@ -626,7 +644,7 @@ class _SpotifyTileState extends State<_SpotifyTile> {
                           TextButton(
                             onPressed: () =>
                                 setState(() => _showPaste = false),
-                            child: const Text('Cancel'),
+                            child: Text('Cancel'.tr),
                           ),
                           const Spacer(),
                           FilledButton(
@@ -638,7 +656,7 @@ class _SpotifyTileState extends State<_SpotifyTile> {
                               child: CircularProgressIndicator(
                                   strokeWidth: 2),
                             )
-                                : const Text('Log in with cookie'),
+                                : Text('Log in with cookie'.tr),
                           ),
                         ],
                       ),
@@ -651,7 +669,7 @@ class _SpotifyTileState extends State<_SpotifyTile> {
                     alignment: Alignment.centerLeft,
                     child: TextButton(
                       onPressed: () => setState(() => _showPaste = true),
-                      child: const Text('Use a cookie instead'),
+                      child: Text('Use a cookie instead'.tr),
                     ),
                   ),
                 ),
@@ -733,7 +751,7 @@ class _YtmTileState extends State<_YtmTile> {
                 opacity: loggedIn ? 1.0 : 0.4,
                 child: const YouTubeMusicLogo(size: 22),
               ),
-              title: 'YouTube Music',
+              title: 'YouTube Music'.tr,
               subtitle: loggedIn
                   ? 'Connected — your home feed follows your taste'
                   : 'Not connected',
@@ -745,11 +763,11 @@ class _YtmTileState extends State<_YtmTile> {
               trailing: loggedIn
                   ? OutlinedButton(
                       onPressed: () => YtmAuth.instance.logout(),
-                      child: const Text('Log out'),
+                      child: Text('Log out'.tr),
                     )
                   : FilledButton.tonal(
                       onPressed: _openEmbeddedLogin,
-                      child: const Text('Log in'),
+                      child: Text('Log in'.tr),
                     ),
             ),
             if (!loggedIn)
@@ -779,7 +797,7 @@ class _YtmTileState extends State<_YtmTile> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     IconButton(
-                                      tooltip: 'Paste',
+                                      tooltip: 'Paste'.tr,
                                       icon: Icon(ZenIcons.paste, size: 18),
                                       onPressed: _pasteFromClipboard,
                                     ),
@@ -819,7 +837,7 @@ class _YtmTileState extends State<_YtmTile> {
                                 TextButton(
                                   onPressed: () =>
                                       setState(() => _showPaste = false),
-                                  child: const Text('Cancel'),
+                                  child: Text('Cancel'.tr),
                                 ),
                                 const Spacer(),
                                 FilledButton(
@@ -831,7 +849,7 @@ class _YtmTileState extends State<_YtmTile> {
                                           child: CircularProgressIndicator(
                                               strokeWidth: 2),
                                         )
-                                      : const Text('Log in with cookies'),
+                                      : Text('Log in with cookies'.tr),
                                 ),
                               ],
                             ),
@@ -845,7 +863,7 @@ class _YtmTileState extends State<_YtmTile> {
                           child: TextButton(
                             onPressed: () =>
                                 setState(() => _showPaste = true),
-                            child: const Text('Use cookies instead'),
+                            child: Text('Use cookies instead'.tr),
                           ),
                         ),
                       ),

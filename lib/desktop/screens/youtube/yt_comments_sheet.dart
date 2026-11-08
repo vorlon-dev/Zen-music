@@ -6,6 +6,7 @@
 // the upstream web-client removal, not a dead endpoint here.
 // ignore_for_file: deprecated_member_use
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yexp;
 
@@ -141,14 +142,14 @@ class _CommentsSheetBodyState extends State<_CommentsSheetBody> {
           Row(
             children: [
               const SizedBox(width: 16),
-              Text('Comments',
+              Text('Comments'.tr,
                   style: Theme.of(context)
                       .textTheme
                       .titleMedium
                       ?.copyWith(fontWeight: FontWeight.w700)),
               const Spacer(),
               IconButton(
-                tooltip: 'Close',
+                tooltip: 'Close'.tr,
                 icon: const Icon(Icons.close_rounded),
                 onPressed: () => Navigator.of(context).pop(),
               ),
@@ -176,10 +177,10 @@ class _CommentsSheetBodyState extends State<_CommentsSheetBody> {
       );
     }
     if (_comments.isEmpty) {
-      return const Center(
+      return Center(
           child: Padding(
               padding: EdgeInsets.all(24),
-              child: Text('Comments are turned off for this video.',
+              child: Text('Comments are turned off for this video.'.tr,
                   textAlign: TextAlign.center)));
     }
     return NotificationListener<ScrollNotification>(
@@ -332,7 +333,7 @@ class YtCommentsError extends StatelessWidget {
             FilledButton.tonalIcon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Retry'),
+              label: Text('Retry'.tr),
             ),
           ],
         ],

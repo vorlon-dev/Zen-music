@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async';
 
 import 'dart:math' as math;
@@ -377,7 +378,7 @@ class _ArtistPageState extends State<ArtistPage> {
                 _browseId = widget.browseId;
                 _load();
               },
-              child: const Text('Retry'),
+              child: Text('Retry'.tr),
             ),
           ],
         ),
@@ -477,7 +478,7 @@ class _ArtistPageState extends State<ArtistPage> {
                   Padding(
                     padding: const EdgeInsets.only(left: 16, top: 10),
                     child: _HeroCircleButton(
-                      tooltip: 'Back',
+                      tooltip: 'Back'.tr,
                       onTap: () => context.pop(),
                       child: const Icon(FluentIcons.chevron_left_24_regular,
                           size: 22, color: Colors.white),
@@ -493,7 +494,7 @@ class _ArtistPageState extends State<ArtistPage> {
                             Padding(
                               padding: const EdgeInsets.only(right: 8),
                               child: _HeroCircleButton(
-                                tooltip: 'Expand fullscreen',
+                                tooltip: 'Expand fullscreen'.tr,
                                 onTap: () {
                                   _haptic();
                                   setState(() => _fullscreenMotion = true);
@@ -617,13 +618,13 @@ class _ArtistPageState extends State<ArtistPage> {
       child: Row(
         children: [
           _TonalCircle(
-            tooltip: 'Shuffle',
+            tooltip: 'Shuffle'.tr,
             icon: FluentIcons.arrow_shuffle_24_regular,
             onTap: _topSongs.isEmpty ? null : _shuffle,
           ),
           const SizedBox(width: 12),
           _TonalCircle(
-            tooltip: 'Radio',
+            tooltip: 'Radio'.tr,
             icon: FluentIcons.sound_wave_circle_24_regular,
             onTap: _topSongs.isEmpty ? null : () => _radio(),
           ),
@@ -671,7 +672,7 @@ class _ArtistPageState extends State<ArtistPage> {
       SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-          child: Text('Songs',
+          child: Text('Songs'.tr,
               style: TextStyle(
                   fontSize: 21,
                   fontWeight: FontWeight.w700,
@@ -967,7 +968,7 @@ class _ArtistPageState extends State<ArtistPage> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
-            child: Text('Fans might also like',
+            child: Text('Fans might also like'.tr,
                 style: TextStyle(
                     fontSize: 21,
                     fontWeight: FontWeight.w700,
@@ -1070,7 +1071,7 @@ class _ArtistPageState extends State<ArtistPage> {
                     padding: const EdgeInsets.only(left: 16, top: 8),
                     child: _HeroCircleButton(
                       size: 44,
-                      tooltip: 'Back',
+                      tooltip: 'Back'.tr,
                       background: Colors.black.withValues(alpha: 0.5),
                       onTap: () => setState(() => _fullscreenMotion = false),
                       child: const Icon(FluentIcons.chevron_left_24_regular,
@@ -1086,8 +1087,8 @@ class _ArtistPageState extends State<ArtistPage> {
                         color: Colors.black.withValues(alpha: 0.45),
                         borderRadius: BorderRadius.circular(50),
                       ),
-                      child: const Text(
-                        'Artist Motion',
+                      child: Text(
+                        'Artist Motion'.tr,
                         style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,

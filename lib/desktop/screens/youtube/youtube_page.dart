@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -145,11 +146,11 @@ class _YouTubePageState extends State<YouTubePage> {
               textInputAction: TextInputAction.search,
               onSubmitted: _runSearch,
               decoration: InputDecoration(
-                hintText: 'Search YouTube',
+                hintText: 'Search YouTube'.tr,
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: (_results != null || _searchCtrl.text.isNotEmpty)
                     ? IconButton(
-                        tooltip: 'Clear',
+                        tooltip: 'Clear'.tr,
                         icon: const Icon(Icons.close_rounded),
                         onPressed: () {
                           _searchCtrl.clear();

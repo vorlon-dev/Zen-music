@@ -1,5 +1,7 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
+import 'package:zenmusic/desktop/screens/home/smart_mix_card.dart';
 import 'dart:io';
 
 import 'package:expressive_refresh/expressive_refresh.dart';
@@ -116,7 +118,7 @@ class _HomePageState extends State<_HomePage> {
           actions: [
             ZenTopBarAction(
               icon: Icons.groups_rounded,
-              tooltip: 'Listen Together',
+              tooltip: 'Listen Together'.tr,
               onTap: () => context.push('/listen'),
             ),
           ],
@@ -149,6 +151,7 @@ class _HomePageState extends State<_HomePage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _horizontalChipsRow(state.chips),
+                              const SmartMixCard(),
                               SpotifyHomeSection(key: _spotifySectionKey),
                               YtmAccountSection(key: _ytmSectionKey),
                               Column(

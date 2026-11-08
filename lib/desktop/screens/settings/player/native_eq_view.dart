@@ -4,6 +4,7 @@
 // Layout idea and presets follow LastWave
 // (https://github.com/Clash-Projects/LastWave-Native, GPL-3.0).
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:zenmusic/desktop/services/native_equalizer.dart';
 
@@ -64,14 +65,14 @@ class _NativeEqViewState extends State<NativeEqView> {
       children: [
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Equalizer'),
+          title: Text('Equalizer'.tr),
           subtitle: Text(_enabled ? 'On · $_preset' : 'Off'),
           secondary: const Icon(Icons.equalizer_rounded),
           value: _enabled,
           onChanged: _setEnabled,
         ),
         const SizedBox(height: 8),
-        Text('Presets', style: theme.textTheme.titleSmall),
+        Text('Presets'.tr, style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -88,12 +89,12 @@ class _NativeEqViewState extends State<NativeEqView> {
         const SizedBox(height: 24),
         Row(
           children: [
-            Text('Bands', style: theme.textTheme.titleSmall),
+            Text('Bands'.tr, style: theme.textTheme.titleSmall),
             const Spacer(),
             TextButton.icon(
               onPressed: _reset,
               icon: const Icon(Icons.restart_alt_rounded, size: 18),
-              label: const Text('Reset'),
+              label: Text('Reset'.tr),
             ),
           ],
         ),

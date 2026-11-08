@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:io';
 
 import 'package:easy_folder_picker/FolderPicker.dart';
@@ -61,7 +62,7 @@ class _BackupStoragePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Backup and Restore'),
+        title: Text('Backup and Restore'.tr),
       ),
       body: Center(
         child: Container(
@@ -75,15 +76,15 @@ class _BackupStoragePage extends StatelessWidget {
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 children: [
                   if (Platform.isAndroid) ...[
-                    const GroupTitle(title: "Storage"),
+                    GroupTitle(title: "Storage".tr),
                     SettingTile(
-                      title: "App Folder",
+                      title: "App Folder".tr,
                       leading: const Icon(CupertinoIcons.folder),
                       isFirst: true,
                       isLast: true,
                       subtitle: state.appFolder,
                       trailing: AdaptiveOutlinedButton(
-                        child: const Text('Change'),
+                        child: Text('Change'.tr),
                         onPressed: () async {
                           final dir = await FolderPicker.pick(
                             context: context,
@@ -98,11 +99,11 @@ class _BackupStoragePage extends StatelessWidget {
                     ),
                   ],
 
-                  const GroupTitle(title: "Backup and Restore"),
+                  GroupTitle(title: "Backup and Restore".tr),
 
                   /// BACKUP
                   SettingTile(
-                    title: 'Backup',
+                    title: 'Backup'.tr,
                     leading: const Icon(Icons.backup_outlined),
                     isFirst: true,
                     onTap: () async {
@@ -118,7 +119,7 @@ class _BackupStoragePage extends StatelessWidget {
 
                   /// RESTORE
                   SettingTile(
-                    title: 'Restore',
+                    title: 'Restore'.tr,
                     leading: const Icon(Icons.restore_outlined),
                     isLast: true,
                     onTap: cubit.restore,
@@ -153,7 +154,7 @@ Future<(String, List)?> showBackupSelector(BuildContext context) async {
             mainAxisSize: MainAxisSize.min,
             children: [
               AppBar(
-                title: const Text('Select Backup'),
+                title: Text('Select Backup'.tr),
                 centerTitle: true,
                 automaticallyImplyLeading: false,
               ),
@@ -189,14 +190,14 @@ Future<(String, List)?> showBackupSelector(BuildContext context) async {
                   children: [
                     _backupActionButton(
                       context,
-                      label: 'Share',
+                      label: 'Share'.tr,
                       action: 'Share',
                       items: items,
                     ),
                     const SizedBox(width: 20),
                     _backupActionButton(
                       context,
-                      label: 'Save',
+                      label: 'Save'.tr,
                       action: 'Save',
                       items: items,
                     ),

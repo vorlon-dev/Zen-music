@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:io';
 import 'dart:ui';
 
@@ -153,7 +154,7 @@ class _Shell extends StatelessWidget {
                                 player.setShuffleModeEnabled(!shuffle);
                               },
                               icon: const Icon(Icons.shuffle_outlined),
-                              label: const Text('Shuffle'),
+                              label: Text('Shuffle'.tr),
                             ),
                           ],
                         ),

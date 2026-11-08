@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -17,7 +18,7 @@ class PlayerSettingsPage extends StatelessWidget {
       create: (_) => PlayerSettingsCubit(),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text("Player"),
+          title: Text("Player".tr),
         ),
         body: Center(
           child: Container(
@@ -35,7 +36,7 @@ class PlayerSettingsPage extends StatelessWidget {
                     /// Skip silence
                     if (!Platform.isWindows)
                       SettingSwitchTile(
-                        title: 'Skip Silence',
+                        title: 'Skip Silence'.tr,
                         leading: const Icon(
                           Icons.fast_forward,
                         ),

@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -48,7 +49,7 @@ class _PrivacyView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Privacy"),
+        title: Text("Privacy".tr),
       ),
       body: Center(
         child: Container(
@@ -60,11 +61,11 @@ class _PrivacyView extends StatelessWidget {
               return ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 children: [
-                  const GroupTitle(title: "Playback"),
+                  GroupTitle(title: "Playback".tr),
 
                   /// PLAYBACK HISTORY ENABLE
                   SettingSwitchTile(
-                    title: 'Enable Playback History',
+                    title: 'Enable Playback History'.tr,
                     leading: const Icon(Icons.manage_history_rounded),
                     isFirst: true,
                     value: state.playbackHistory,
@@ -73,7 +74,7 @@ class _PrivacyView extends StatelessWidget {
 
                   /// DELETE PLAYBACK HISTORY
                   SettingTile(
-                    title: 'Delete Playback History',
+                    title: 'Delete Playback History'.tr,
                     leading: const Icon(Icons.playlist_remove_rounded),
                     isLast: true,
                     onTap: () async {
@@ -90,11 +91,11 @@ class _PrivacyView extends StatelessWidget {
                     },
                   ),
 
-                  const GroupTitle(title: "Search"),
+                  GroupTitle(title: "Search".tr),
 
                   /// SEARCH HISTORY ENABLE
                   SettingSwitchTile(
-                    title: 'Enable Search History',
+                    title: 'Enable Search History'.tr,
                     leading: const Icon(Icons.saved_search_rounded),
                     isFirst: true,
                     value: state.searchHistory,
@@ -103,7 +104,7 @@ class _PrivacyView extends StatelessWidget {
 
                   /// DELETE SEARCH HISTORY
                   SettingTile(
-                    title: 'Delete Search History',
+                    title: 'Delete Search History'.tr,
                     leading: const Icon(Icons.highlight_remove_sharp),
                     isLast: true,
                     onTap: () async {

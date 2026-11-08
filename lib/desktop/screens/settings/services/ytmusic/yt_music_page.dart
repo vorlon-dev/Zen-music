@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -17,7 +18,7 @@ class YTMusicPage extends StatelessWidget {
       create: (_) => YTMusicCubit(),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('YT Music'),
+          title: Text('YT Music'.tr),
         ),
         body: Center(
           child: Container(
@@ -30,11 +31,11 @@ class YTMusicPage extends StatelessWidget {
                   padding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   children: [
-                    const GroupTitle(title: "General"),
+                    GroupTitle(title: "General".tr),
 
                     /// Country
                     SettingTile(
-                      title: 'Country',
+                      title: 'Country'.tr,
                       leading: const Icon(Icons.location_pin),
                       isFirst: true,
                       trailing: DropdownButton<Map<String, String>>(
@@ -59,7 +60,7 @@ class YTMusicPage extends StatelessWidget {
 
                     /// Language
                     SettingTile(
-                      title: 'Language',
+                      title: 'Language'.tr,
                       leading: const Icon(Icons.language),
                       trailing: DropdownButton(
                         value: state.language,
@@ -81,7 +82,7 @@ class YTMusicPage extends StatelessWidget {
 
                     /// Translate lyrics
                     SettingSwitchTile(
-                      title: 'Translate Lyrics',
+                      title: 'Translate Lyrics'.tr,
                       leading: const Icon(Icons.translate_outlined),
                       value: state.translateLyrics,
                       onChanged: cubit.setTranslateLyrics,
@@ -89,18 +90,18 @@ class YTMusicPage extends StatelessWidget {
 
                     /// Autofetch
                     SettingSwitchTile(
-                      title: 'Autofetch Songs',
+                      title: 'Autofetch Songs'.tr,
                       leading: const Icon(Icons.autorenew_outlined),
                       isLast: true,
                       value: state.autofetchSongs,
                       onChanged: cubit.setAutofetchSongs,
                     ),
 
-                    const GroupTitle(title: "Playback & download"),
+                    GroupTitle(title: "Playback & download".tr),
 
                     /// Streaming quality
                     SettingTile(
-                      title: 'Streaming Quality',
+                      title: 'Streaming Quality'.tr,
                       leading: const Icon(Icons.speaker_group_rounded),
                       isFirst: true,
                       trailing: DropdownButton(
@@ -122,7 +123,7 @@ class YTMusicPage extends StatelessWidget {
 
                     /// Download quality
                     SettingTile(
-                      title: 'Download Quality',
+                      title: 'Download Quality'.tr,
                       leading: const Icon(Icons.cloud_download_rounded),
                       isLast: true,
                       trailing: DropdownButton(
@@ -142,11 +143,11 @@ class YTMusicPage extends StatelessWidget {
                       ),
                     ),
 
-                    const GroupTitle(title: "Privacy"),
+                    GroupTitle(title: "Privacy".tr),
 
                     /// Personalised content
                     SettingSwitchTile(
-                      title: 'Personalised Content',
+                      title: 'Personalised Content'.tr,
                       leading: const Icon(Icons.recommend_outlined),
                       isFirst: true,
                       value: state.personalisedContent,

@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_swipe_action_cell/core/cell.dart';
@@ -32,8 +33,8 @@ class DownloadPlaylistPage extends StatelessWidget {
           if (state is DownloadPlaylistError) {
             return Scaffold(
               appBar: AppBar(),
-              body: const Center(
-                child: Text('Playlist not available'),
+              body: Center(
+                child: Text('Playlist not available'.tr),
               ),
             );
           }
@@ -65,7 +66,7 @@ class _PlaylistView extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: playlist['type'] == 'SONGS'
-            ? const Text('Songs')
+            ? Text('Songs'.tr)
             : Text(playlist['title']),
         centerTitle: true,
       ),
@@ -96,7 +97,7 @@ class _PlaylistView extends StatelessWidget {
                       backgroundColor: Colors.transparent,
                       trailingActions: [
                         SwipeAction(
-                          title: 'Remove',
+                          title: 'Remove'.tr,
                           color: Colors.red,
                           onTap: (handler) async {
                             final confirm = await Modals.showConfirmBottomModal(

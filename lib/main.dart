@@ -1,5 +1,11 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/lyrics_romanizer.dart';
+import 'package:zenmusic/desktop/services/lyric_motion.dart';
+import 'package:zenmusic/desktop/services/lyric_translation.dart';
+import 'package:zenmusic/desktop/services/l10n.dart';
+import 'package:zenmusic/desktop/services/lyric_styles.dart';
+import 'package:zenmusic/desktop/services/sing_mode.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -53,6 +59,13 @@ Future<void> main() async {
     AppearancePrefs.load(),
     _initFileStorage(),
   ]);
+  // Feature pack prefs (need Hive/SETTINGS, so they run after the block above)
+  await L10n.load();
+  LyricStylePrefs.load();
+  LyricMotionPrefs.load();
+  LyricsTranslation.instance.load();
+  LyricsRomanizer.instance.load();
+  unawaited(SingMode.instance.restore());
 
   unawaited(InnertubexBridge.warm());
 

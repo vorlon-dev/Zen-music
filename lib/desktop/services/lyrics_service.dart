@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:hive/hive.dart';
 
 import 'better_lyrics.dart';
+import 'extra_lyrics_providers.dart';
 import 'kugou_lyrics.dart';
 import 'lyrics_providers/lyric_doc.dart';
 import 'lyrics_providers/lyrics_repository.dart';
@@ -1226,6 +1227,25 @@ class LyricsService {
         }
       } catch (e) {
         print('[yt_lyrics] kugou fallback failed: $e');
+      }
+
+      try {
+        final extra = await ExtraLyricsProviders.lookup(
+          title: clean.cleanTitle,
+          artist: clean.primaryArtist,
+          durationMs: durationMs,
+          album: album,
+        );
+        if (extra != null && extra.hasAny &&
+            (extra.hasSynced || betterLineSynced == null)) {
+          final box = await _cache();
+          await box.put(key, extra.toMap());
+          print('[yt_lyrics] extra provider resolved "${extra.trackName}" '
+              '(synced: ${extra.hasSynced}, wordSync: ${extra.wordSync})');
+          return extra;
+        }
+      } catch (e) {
+        print('[yt_lyrics] extra providers failed: $e');
       }
 
       final repoFallback = repo?.lineSynced ?? repo?.plain;

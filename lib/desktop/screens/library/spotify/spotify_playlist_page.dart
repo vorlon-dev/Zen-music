@@ -2,6 +2,7 @@
 
 // ZenMusic — Spotify playlist details page.
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -119,8 +120,8 @@ class _SpotifyPlaylistPageState extends State<SpotifyPlaylistPage> {
       await mp.addToQueue(song);
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Added to queue'), duration: Duration(seconds: 2)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Added to queue'.tr), duration: Duration(seconds: 2)));
   }
 
   void _shuffle(List<Map<String, dynamic>> songs) {
@@ -241,7 +242,7 @@ class _SpotifyPlaylistPageState extends State<SpotifyPlaylistPage> {
                           Icon(Icons.play_arrow,
                               size: 24, color: scheme.onPrimary),
                           const SizedBox(width: 8),
-                          Text('Play',
+                          Text('Play'.tr,
                               style: TextStyle(
                                   fontSize: 18, color: scheme.onPrimary)),
                         ],
@@ -283,9 +284,9 @@ class _SpotifyPlaylistPageState extends State<SpotifyPlaylistPage> {
                   if (v == 'queue') _addAllToQueue(songs);
                   if (v == 'shuffle') _shuffle(songs);
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'queue', child: Text('Add to queue')),
-                  PopupMenuItem(value: 'shuffle', child: Text('Shuffle play')),
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'queue', child: Text('Add to queue'.tr)),
+                  PopupMenuItem(value: 'shuffle', child: Text('Shuffle play'.tr)),
                 ],
                 child: _glassButton(icon: Icons.more_vert),
               ),
@@ -295,7 +296,7 @@ class _SpotifyPlaylistPageState extends State<SpotifyPlaylistPage> {
       body: !_loaded
           ? const Center(child: AdaptiveProgressRing())
           : songs.isEmpty
-              ? const Center(child: Text('Playlist is empty'))
+              ? Center(child: Text('Playlist is empty'.tr))
               : ListView(
                   padding: EdgeInsets.zero,
                   children: [

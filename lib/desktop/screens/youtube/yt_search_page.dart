@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -123,7 +124,7 @@ class _YtSearchPageState extends State<YtSearchPage> {
             onSubmitted: _runSearch,
             decoration: InputDecoration(
               isDense: true,
-              hintText: 'Search YouTube',
+              hintText: 'Search YouTube'.tr,
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
               suffixIcon: _controller.text.isEmpty
                   ? null
@@ -145,7 +146,7 @@ class _YtSearchPageState extends State<YtSearchPage> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Search',
+            tooltip: 'Search'.tr,
             icon: const Icon(Icons.arrow_forward_rounded),
             onPressed: () => _runSearch(_controller.text),
           ),

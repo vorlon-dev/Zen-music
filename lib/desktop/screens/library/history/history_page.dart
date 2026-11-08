@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_swipe_action_cell/core/cell.dart';
@@ -18,7 +19,7 @@ class HistoryPage extends StatelessWidget {
       create: (_) => HistoryCubit()..load(),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('History'),
+          title: Text('History'.tr),
           centerTitle: true,
         ),
         body: BlocBuilder<HistoryCubit, HistoryState>(
@@ -45,8 +46,8 @@ class _HistoryBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (songs.isEmpty && spotify.isEmpty) {
-      return const Center(
-        child: Text("No History Found"),
+      return Center(
+        child: Text("No History Found".tr),
       );
     }
 
@@ -73,7 +74,7 @@ class _HistoryBody extends StatelessWidget {
           key: ObjectKey(song['videoId']),
           trailingActions: [
             SwipeAction(
-              title: 'Remove',
+              title: 'Remove'.tr,
               color: Colors.red,
               onTap: (handler) async {
                 final confirm = await Modals.showConfirmBottomModal(

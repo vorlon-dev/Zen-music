@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -105,7 +106,7 @@ class _LogoPageState extends State<LogoPage> {
     final slots = _slots;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Logo'),
+        title: Text('Logo'.tr),
         centerTitle: true,
       ),
       body: slots == null

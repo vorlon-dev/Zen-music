@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -41,7 +42,7 @@ class _OfflineCachePageState extends State<OfflineCachePage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'.tr),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -147,15 +148,15 @@ class _OfflineCachePageState extends State<OfflineCachePage> {
     final recs = _recs;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Offline cache'),
+        title: Text('Offline cache'.tr),
         actions: [
           IconButton(
-            tooltip: 'Refresh',
+            tooltip: 'Refresh'.tr,
             onPressed: _busy ? null : _reload,
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
-            tooltip: 'Clear all',
+            tooltip: 'Clear all'.tr,
             onPressed: (_busy || recs == null || recs.isEmpty)
                 ? null
                 : _wipeAll,
@@ -188,7 +189,7 @@ class _OfflineCachePageState extends State<OfflineCachePage> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Nothing cached yet',
+              'Nothing cached yet'.tr,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 4),
@@ -252,7 +253,7 @@ class _OfflineCachePageState extends State<OfflineCachePage> {
                 overflow: TextOverflow.ellipsis,
               ),
               trailing: IconButton(
-                tooltip: 'Remove',
+                tooltip: 'Remove'.tr,
                 icon: const Icon(Icons.delete_outline),
                 onPressed: _busy ? null : () => _deleteOne(r),
               ),

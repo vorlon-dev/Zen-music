@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -132,16 +133,16 @@ class _SearchPageState extends State<_SearchPage> {
                     case SearchError():
                       return _Notice(
                         icon: FluentIcons.error_circle_24_regular,
-                        title: 'Search failed',
+                        title: 'Search failed'.tr,
                         body: (state.message?.isNotEmpty ?? false)
                             ? state.message!
                             : 'Check your connection and try again.',
                       );
                     case SearchSuccess():
                       if (state.sections.isEmpty) {
-                        return const _Notice(
+                        return _Notice(
                           icon: FluentIcons.search_24_regular,
-                          title: 'Search for music',
+                          title: 'Search for music'.tr,
                           body: 'Songs, albums, artists, playlists and videos.',
                         );
                       }
@@ -467,7 +468,7 @@ class _VideoCard extends StatelessWidget {
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Play as audio',
+                    tooltip: 'Play as audio'.tr,
                     visualDensity: VisualDensity.compact,
                     icon: Icon(FluentIcons.headphones_24_regular,
                         size: 22, color: cs.onSurfaceVariant),
@@ -822,7 +823,7 @@ class _SearchSuggestFieldState extends State<SearchSuggestField> {
         contentPadding:
         const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         borderRadius: BorderRadius.circular(28),
-        hintText: 'Search songs, artists, videos',
+        hintText: 'Search songs, artists, videos'.tr,
         prefix: Padding(
           padding: const EdgeInsets.only(right: 8),
           child: Icon(FluentIcons.search_24_regular,

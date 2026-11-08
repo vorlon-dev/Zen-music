@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
 
@@ -268,12 +269,12 @@ class _YtShortsFeedState extends State<YtShortsFeed>
               children: [
                 const Icon(Icons.error_outline, color: Colors.white70, size: 34),
                 const SizedBox(height: 10),
-                const Text('This short could not be played.',
+                Text('This short could not be played.'.tr,
                     style: TextStyle(color: Colors.white70)),
                 const SizedBox(height: 12),
                 OutlinedButton(
                   onPressed: () => _resolveAndPlay(_ids.indexOf(id)),
-                  child: const Text('Retry',
+                  child: Text('Retry'.tr,
                       style: TextStyle(color: Colors.white)),
                 ),
               ],
@@ -366,7 +367,7 @@ class _YtShortsFeedState extends State<YtShortsFeed>
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 12)),
                     icon: const Icon(Icons.open_in_full_rounded, size: 15),
-                    label: const Text('Watch'),
+                    label: Text('Watch'.tr),
                   ),
                   const SizedBox(width: 8),
                   FilledButton.tonalIcon(
@@ -376,7 +377,7 @@ class _YtShortsFeedState extends State<YtShortsFeed>
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 12)),
                     icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15),
-                    label: const Text('Comments'),
+                    label: Text('Comments'.tr),
                   ),
                 ],
               ),
@@ -393,12 +394,12 @@ class _YtShortsFeedState extends State<YtShortsFeed>
               color: kYtRed.withValues(alpha: 0.9),
               borderRadius: BorderRadius.circular(6),
             ),
-            child: const Row(
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.bolt_rounded, size: 13, color: Colors.white),
                 SizedBox(width: 2),
-                Text('Shorts',
+                Text('Shorts'.tr,
                     style: TextStyle(
                         color: Colors.white,
                         fontSize: 11,

@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' show FontFeature, ImageFilter;
@@ -718,7 +719,7 @@ class _PlayerPageState extends State<PlayerPage>
                 height: 46,
                 radius: 17,
                 color: _surface,
-                tooltip: 'Close',
+                tooltip: 'Close'.tr,
                 onTap: _close,
                 child: const Icon(_Ic.chevronDown,
                     size: 26, color: Colors.white),
@@ -736,7 +737,7 @@ class _PlayerPageState extends State<PlayerPage>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'NOW PLAYING',
+                      'NOW PLAYING'.tr,
                       maxLines: 1,
                       softWrap: false,
                       overflow: TextOverflow.ellipsis,
@@ -778,7 +779,7 @@ class _PlayerPageState extends State<PlayerPage>
                       height: 46,
                       radius: 17,
                       color: _surface,
-                      tooltip: 'Queue (Q)',
+                      tooltip: 'Queue (Q)'.tr,
                       onTap: () => _key.currentState?.openEndDrawer(),
                       child: const Icon(_Ic.queue,
                           size: 24, color: Colors.white),
@@ -791,7 +792,7 @@ class _PlayerPageState extends State<PlayerPage>
                       height: 46,
                       radius: 17,
                       color: _surface,
-                      tooltip: 'More',
+                      tooltip: 'More'.tr,
                       onTap: () => _openMore(buttonContext),
                       child: const Icon(_Ic.more,
                           size: 24, color: Colors.white),
@@ -1206,7 +1207,7 @@ class _PlayerPageState extends State<PlayerPage>
               height: 48,
               radius: 18,
               color: (_showLyrics && _hasLyrics) ? _accent : _surface,
-              tooltip: 'Lyrics (L)',
+              tooltip: 'Lyrics (L)'.tr,
               onTap: _hasLyrics ? _toggleLyrics : null,
               child: Icon(
                 _Ic.lyricsBtn,
@@ -1293,7 +1294,7 @@ class _PlayerPageState extends State<PlayerPage>
             height: 56,
             radius: 19,
             color: _tonal,
-            tooltip: 'Previous (Ctrl+←)',
+            tooltip: 'Previous (Ctrl+←)'.tr,
             pressScale: 0.85,
             onTap: _skipPrevious,
             child: Icon(_Ic.previous,
@@ -1343,7 +1344,7 @@ class _PlayerPageState extends State<PlayerPage>
             height: 56,
             radius: 19,
             color: _tonal,
-            tooltip: 'Next (Ctrl+→)',
+            tooltip: 'Next (Ctrl+→)'.tr,
             pressScale: 0.85,
             onTap: _skipNext,
             child: Icon(_Ic.next,
@@ -1433,7 +1434,7 @@ class _PlayerPageState extends State<PlayerPage>
         children: [
           _IconBtn(
             icon: _Ic.chevronDown,
-            tooltip: 'Close',
+            tooltip: 'Close'.tr,
             filled: true,
             onPressed: _close,
           ),
@@ -1442,7 +1443,7 @@ class _PlayerPageState extends State<PlayerPage>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'NOW PLAYING',
+                  'NOW PLAYING'.tr,
                   style: TextStyle(
                     fontSize: 11,
                     letterSpacing: 2.2,
@@ -1469,7 +1470,7 @@ class _PlayerPageState extends State<PlayerPage>
           ),
           _IconBtn(
             icon: _Ic.queue,
-            tooltip: 'Queue (Q)',
+            tooltip: 'Queue (Q)'.tr,
             filled: true,
             onPressed: () => _key.currentState?.openEndDrawer(),
           ),
@@ -1657,7 +1658,7 @@ class _PlayerPageState extends State<PlayerPage>
           Builder(
             builder: (buttonContext) => _IconBtn(
               icon: _Ic.moreH,
-              tooltip: 'More',
+              tooltip: 'More'.tr,
               onPressed: () {
                 final RenderBox renderBox =
                 buttonContext.findRenderObject() as RenderBox;
@@ -1694,7 +1695,7 @@ class _PlayerPageState extends State<PlayerPage>
           if (swap)
             _Pill(
               icon: _Ic.lyrics,
-              label: 'Lyrics',
+              label: 'Lyrics'.tr,
               active: _showLyrics && _hasLyrics,
               enabled: _hasLyrics,
               onTap: _toggleLyrics,
@@ -1770,7 +1771,7 @@ class _PlayerPageState extends State<PlayerPage>
           ),
           _IconBtn(
             icon: _Ic.previous,
-            tooltip: 'Previous (Ctrl+←)',
+            tooltip: 'Previous (Ctrl+←)'.tr,
             size: 32,
             box: 52,
             onPressed: _skipPrevious,
@@ -1788,7 +1789,7 @@ class _PlayerPageState extends State<PlayerPage>
           ),
           _IconBtn(
             icon: _Ic.next,
-            tooltip: 'Next (Ctrl+→)',
+            tooltip: 'Next (Ctrl+→)'.tr,
             size: 32,
             box: 52,
             onPressed: _skipNext,
@@ -2103,7 +2104,7 @@ class _QualityPill extends StatelessWidget {
       height: 46,
       radius: 20,
       color: color,
-      tooltip: 'Audio quality',
+      tooltip: 'Audio quality'.tr,
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -2200,7 +2201,7 @@ class _QualitySheet extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Audio quality',
+                    Text('Audio quality'.tr,
                         style: TextStyle(
                             fontSize: 12,
                             letterSpacing: 0.8,
@@ -2217,7 +2218,7 @@ class _QualitySheet extends StatelessWidget {
               ),
               _IconBtn(
                 icon: _Ic.dismiss,
-                tooltip: 'Close',
+                tooltip: 'Close'.tr,
                 onPressed: () => Navigator.of(context).pop(),
               ),
             ],

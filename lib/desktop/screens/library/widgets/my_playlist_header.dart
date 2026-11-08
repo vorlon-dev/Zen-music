@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:io';
 import 'dart:math';
 
@@ -112,7 +113,7 @@ class MyPlayistHeader extends StatelessWidget {
                         size: 24,
                       ),
                       const SizedBox(width: 8),
-                      const Text("Play All", style: TextStyle(fontSize: 18))
+                      Text("Play All".tr, style: TextStyle(fontSize: 18))
                     ],
                   ),
                 ),

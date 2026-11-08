@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_swipe_action_cell/core/cell.dart';
@@ -28,8 +29,8 @@ class PlaylistDetailsPage extends StatelessWidget {
             PlaylistDetailsLoading() => const Scaffold(
               body: Center(child: CircularProgressIndicator()),
             ),
-            PlaylistDetailsError() => const Scaffold(
-              body: Center(child: Text('Not available')),
+            PlaylistDetailsError() => Scaffold(
+              body: Center(child: Text('Not available'.tr)),
             ),
             PlaylistDetailsLoaded(:final playlist) => _PlaylistView(
               playlist: playlist,
@@ -72,7 +73,7 @@ class _PlaylistView extends StatelessWidget {
                   key: ObjectKey(song['videoId']),
                   trailingActions: [
                     SwipeAction(
-                      title: 'Remove',
+                      title: 'Remove'.tr,
                       color: Colors.red,
                       onTap: (handler) async {
                         final confirm = await Modals.showConfirmBottomModal(

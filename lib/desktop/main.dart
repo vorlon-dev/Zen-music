@@ -1,5 +1,11 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/services/lyrics_romanizer.dart';
+import 'package:zenmusic/desktop/services/l10n.dart';
+import 'package:zenmusic/desktop/services/lyric_motion.dart';
+import 'package:zenmusic/desktop/services/lyric_styles.dart';
+import 'package:zenmusic/desktop/services/lyric_translation.dart';
+import 'package:zenmusic/desktop/services/sing_mode.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -64,6 +70,12 @@ Future<void> main(List<String> args) async {
 
   await FileStorage.initialise();
   await AppearancePrefs.load();
+  await L10n.load();
+  LyricStylePrefs.load();
+  LyricMotionPrefs.load();
+  LyricsTranslation.instance.load();
+  LyricsRomanizer.instance.load();
+  unawaited(SingMode.instance.restore());
 
   if (Platform.isWindows) {
     await LiquidGlassWidgets.initialize();
@@ -173,7 +185,9 @@ class ZenDesktopApp extends StatelessWidget {
           _ => AppTheme.dark(primary: Colors.white),
         },
         builder: (context, child) {
-          return Stack(
+          return Directionality(
+            textDirection: L10n.isRtl ? TextDirection.rtl : TextDirection.ltr,
+            child: Stack(
             fit: StackFit.expand,
             children: [
               if (liquid)
@@ -193,7 +207,7 @@ class ZenDesktopApp extends StatelessWidget {
                 ),
               if (child != null) child!,
             ],
-          );
+          ));
         },
       ),
     );
