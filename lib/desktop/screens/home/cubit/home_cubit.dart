@@ -1,6 +1,9 @@
 // ZenMusic · vorlon-dev
 
+import 'dart:convert';
+
 import 'package:bloc/bloc.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:meta/meta.dart';
 
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
@@ -14,7 +17,20 @@ class HomeCubit extends Cubit<HomeState> {
   final YTMusic _ytMusic;
   HomeCubit(this._ytMusic) : super(HomeLoading());
 
+  static const String _cacheKey = 'HOME_FEED_CACHE';
+
+  /// Shows the last home feed from disk at once (like the big music apps),
+  /// then refreshes it in the background. If the refresh fails the cached
+  /// feed simply stays on screen.
   Future<void> fetch() async {
+    final cached = _readCache();
+    if (cached != null) {
+      emit(cached);
+      try {
+        emit(await _assemble());
+      } catch (_) {/* keep showing the cached feed */}
+      return;
+    }
     emit(const HomeLoading());
     try {
       emit(await _assemble());
@@ -24,11 +40,52 @@ class HomeCubit extends Cubit<HomeState> {
   }
 
   Future<void> refresh() async {
+    _ytMusic.clearRequestCache();
     try {
       emit(await _assemble());
     } catch (e, st) {
       emit(HomeError(e.toString(), st.toString()));
     }
+  }
+
+  HomeSuccess? _readCache() {
+    try {
+      final raw = Hive.box('SETTINGS').get(_cacheKey);
+      if (raw is! String) return null;
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      // A feed cached while signed out must not show after signing in (and
+      // the other way round): it is a different, personalised feed.
+      if (m['authed'] != YtmAuth.instance.hasSession) return null;
+      final sections = (m['sections'] as List?) ?? const [];
+      if (sections.isEmpty) return null;
+      return HomeSuccess(
+        chips: (m['chips'] as List?) ?? const [],
+        sections: List<dynamic>.from(sections),
+        continuation: m['continuation'],
+        loadingMore: false,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _writeCache(HomeSuccess s) {
+    try {
+      // The charts row holds a model object, not JSON; it is rebuilt live.
+      final sections = [
+        for (final sec in s.sections)
+          if (!(sec is Map && sec['title'] == 'Browse Charts')) sec,
+      ];
+      Hive.box('SETTINGS').put(
+        _cacheKey,
+        jsonEncode({
+          'authed': YtmAuth.instance.hasSession,
+          'chips': s.chips,
+          'sections': sections,
+          'continuation': s.continuation,
+        }),
+      );
+    } catch (_) {}
   }
 
   Future<HomeSuccess> _assemble() async {
@@ -62,12 +119,14 @@ class HomeCubit extends Cubit<HomeState> {
       sections.insert(0, chartsSection);
     }
 
-    return HomeSuccess(
+    final result = HomeSuccess(
       chips: feed['chips'] ?? [],
       sections: sections,
       continuation: feed['continuation'],
       loadingMore: false,
     );
+    _writeCache(result);
+    return result;
   }
 
   /// Merges the history shelves (Today / Yesterday / …) into one

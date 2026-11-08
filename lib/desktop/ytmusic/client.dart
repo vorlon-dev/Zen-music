@@ -132,7 +132,52 @@ class YTClient {
     }
   }
 
+  // Short-lived in-memory cache for read-only requests (home, albums,
+  // artists, playlists, search, up-next). Reopening a page or going back to
+  // one answers instantly instead of hitting the network again; the user's
+  // own library/history/likes are never cached so they stay current.
+  static const Duration _cacheTtl = Duration(minutes: 3);
+  static const int _cacheMax = 60;
+  final Map<String, (DateTime, Map)> _requestCache = {};
+
+  void clearRequestCache() => _requestCache.clear();
+
+  bool _cacheable(String endpoint, Map<String, dynamic> body) {
+    if (endpoint == 'search' || endpoint == 'next') return true;
+    if (endpoint != 'browse') return false;
+    final id = body['browseId']?.toString() ?? '';
+    if (id.isEmpty) return body.containsKey('continuation') == false;
+    return !(id.startsWith('FEmusic_library') ||
+        id.startsWith('FEmusic_liked') ||
+        id.startsWith('FEmusic_history') ||
+        id.startsWith('FEmusic_offline'));
+  }
+
   Future<Map> sendRequest(String endpoint, Map<String, dynamic> body,
+      {Map<String, String>? headers, String additionalParams = ''}) async {
+    if (!_cacheable(endpoint, body)) {
+      return _sendRequestUncached(endpoint, body,
+          headers: headers, additionalParams: additionalParams);
+    }
+    final key =
+        '$endpoint|$additionalParams|${YtmAuth.instance.hasSession}|${jsonEncode(body)}';
+    final hit = _requestCache[key];
+    if (hit != null && DateTime.now().difference(hit.$1) < _cacheTtl) {
+      return hit.$2;
+    }
+    final result = await _sendRequestUncached(endpoint, body,
+        headers: headers, additionalParams: additionalParams);
+    if (result.isNotEmpty) {
+      if (_requestCache.length >= _cacheMax) {
+        _requestCache.remove(_requestCache.keys.first);
+      }
+      _requestCache[key] = (DateTime.now(), result);
+    }
+    return result;
+  }
+
+  Future<Map> _sendRequestUncached(
+      String endpoint, Map<String, dynamic> body,
       {Map<String, String>? headers, String additionalParams = ''}) async {
     //
     try {

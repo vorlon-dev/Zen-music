@@ -149,6 +149,45 @@ class MediaPlayer extends ChangeNotifier {
     box.put('CACHE_POSITION', pos.inMilliseconds);
   }
 
+  /// True between restoreLastSession() and the first play: the song is shown
+  /// in the UI at its saved spot but nothing is loaded in the player yet.
+  bool _restoredPending = false;
+  int _restoredPositionMs = 0;
+  DateTime _lastPositionSave = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Cheap save (one int) for the periodic tick; the queue is written by
+  /// _saveCurrentState on real changes only.
+  void _savePositionOnly() {
+    if (_restoredPending || queueSnapshot.value.isEmpty) return;
+    try {
+      Hive.box('SETTINGS').put(
+          'CACHE_POSITION', _progressBarState.value.current.inMilliseconds);
+    } catch (_) {}
+  }
+
+  /// Loads the restored song at its saved position and starts it.
+  Future<void> _resumeRestored() async {
+    final queue = queueSnapshot.value;
+    final index = (_currentIndex.value ?? 0).clamp(0, queue.length - 1).toInt();
+    final startAt = Duration(milliseconds: _restoredPositionMs);
+    _restoredPending = false;
+    _buttonState.value = ButtonState.loading;
+    notifyListeners();
+    try {
+      _queueEpoch++;
+      final source = await _getAudioSource(Map<String, dynamic>.from(queue[index]));
+      await _player.setAudioSource(source, initialPosition: startAt);
+      unawaited(_player.play());
+      if (queue.length > 1) _queueAddRemaining(queue, index);
+      _saveCurrentState();
+    } catch (e) {
+      print('resume restored session failed: $e');
+      _restoredPending = true; // let the next tap retry
+      _buttonState.value = ButtonState.paused;
+      notifyListeners();
+    }
+  }
+
   Future<void> restoreLastSession() async {
     final box = Hive.box('SETTINGS');
     final rawQueue = box.get('CACHE_QUEUE') as List?;
@@ -162,6 +201,9 @@ class MediaPlayer extends ChangeNotifier {
     _currentIndex.value = index;
 
     final song = queue[index];
+    // Spotify-engine tracks are resumed by their own engine, not here.
+    _restoredPending = song['videoId'] != null;
+    _restoredPositionMs = posMs;
     final tag = MediaItem(
       id: song['videoId'],
       title: song['title'] ?? 'Title',
@@ -856,7 +898,7 @@ class MediaPlayer extends ChangeNotifier {
 
   void _listenToCurrentPosition() {
     _player.positionStream.listen((position) {
-      if (_engineOwnsPlayback) return;
+      if (_engineOwnsPlayback || _restoredPending) return;
       final oldState = _progressBarState.value;
       if (oldState.current != position) {
         _progressBarState.value = ProgressBarState(
@@ -864,6 +906,14 @@ class MediaPlayer extends ChangeNotifier {
           buffered: oldState.buffered,
           total: oldState.total,
         );
+      }
+      // Remember where we are every few seconds, so closing or killing the
+      // app resumes at the right spot instead of the last song change.
+      final now = DateTime.now();
+      if (_player.playing &&
+          now.difference(_lastPositionSave) > const Duration(seconds: 3)) {
+        _lastPositionSave = now;
+        _savePositionOnly();
       }
     });
   }
@@ -1067,6 +1117,7 @@ class MediaPlayer extends ChangeNotifier {
   int _lastPlayRequestId = 0;
 
   Future<void> playSong(Map<String, dynamic> song) async {
+    _restoredPending = false;
     if (song['videoId'] == null) return;
     queueSnapshot.value = [Map<String, dynamic>.from(song)];
     _queueEpoch++;
@@ -1124,6 +1175,7 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> playFromSection(
       List<Map<String, dynamic>> section, int index) async {
+    _restoredPending = false;
     if (section.isEmpty) return;
     if (index < 0 || index >= section.length) return;
 
@@ -1186,6 +1238,7 @@ class MediaPlayer extends ChangeNotifier {
 
   Future<void> playAll(List songs, {int index = 0}) async {
     if (songs.isEmpty) return;
+    _restoredPending = false;
     queueSnapshot.value =
         songs.map((s) => Map<String, dynamic>.from(s as Map)).toList();
     _queueEpoch++;
@@ -1341,6 +1394,10 @@ class MediaPlayer extends ChangeNotifier {
 
 
   Future<void> togglePlayPause() async {
+    if (_restoredPending && !_engineOwnsPlayback) {
+      await _resumeRestored();
+      return;
+    }
     if (_engineOwnsPlayback) {
       final engine = SpotifyDesktopEngine.instance;
       if (engine.playing.value) {
@@ -1360,6 +1417,15 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   Future<void> seekTo(Duration d) async {
+    if (_restoredPending && !_engineOwnsPlayback) {
+      // Nothing is loaded yet: remember the spot, the first play starts there.
+      _restoredPositionMs = d.inMilliseconds;
+      final old = _progressBarState.value;
+      _progressBarState.value = ProgressBarState(
+          current: d, buffered: old.buffered, total: old.total);
+      Hive.box('SETTINGS').put('CACHE_POSITION', d.inMilliseconds);
+      return;
+    }
     WindowsBackdropService.instance
         .seekTo(d);
     if (_engineOwnsPlayback) {
@@ -1372,6 +1438,7 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   Future<void> skipNext() async {
+    _restoredPending = false;
     if (_engineOwnsPlayback) {
       final snapshot = queueSnapshot.value;
       final currentId = _currentSongNotifier.value?.id;
@@ -1407,6 +1474,7 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   Future<void> skipPrevious() async {
+    _restoredPending = false;
     if (_engineOwnsPlayback) {
       final snapshot = queueSnapshot.value;
       final currentId = _currentSongNotifier.value?.id;
