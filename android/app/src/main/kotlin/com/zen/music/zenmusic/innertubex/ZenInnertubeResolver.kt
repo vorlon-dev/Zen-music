@@ -65,6 +65,7 @@ object ZenInnertubeResolver {
     @Volatile
     var debugLogs: Boolean = false
 
+    @Volatile
     private var prefs: android.content.SharedPreferences? = null
     private var warmup: Job? = null
 
@@ -182,6 +183,8 @@ object ZenInnertubeResolver {
     ): Extracted? {
         ensureVisitorData()
         YouTube.locale = YouTubeLocale(gl = "US", hl = "en")
+        // Warm the po-token session in the background (first call only).
+        ZenPoTokenBridge.ensureStarted()
         // Mint OFF the critical path: only when the session is warm.
         val poToken = if (ZenPoTokenBridge.isSessionReady()) {
             ZenPoTokenBridge.playerTokenBlocking(videoId, YouTube.visitorData)
@@ -253,6 +256,7 @@ object ZenInnertubeResolver {
         runBlocking {
             ensureVisitorData()
             YouTube.locale = YouTubeLocale(gl = "US", hl = "en")
+            ZenPoTokenBridge.ensureStarted()
             val poToken = if (ZenPoTokenBridge.isSessionReady()) {
                 ZenPoTokenBridge.playerTokenBlocking(videoId, YouTube.visitorData)
             } else null

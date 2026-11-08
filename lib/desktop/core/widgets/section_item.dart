@@ -531,7 +531,7 @@ class _ItemListState extends State<ItemList> {
                           children: [
                             AdaptiveListTile(
                               contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 0, vertical: 4),
+                                  horizontal: 0, vertical: 2),
                               title: Text(
                                 widget.items[index]['title']
                                     .toString()

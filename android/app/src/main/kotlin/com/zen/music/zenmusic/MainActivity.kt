@@ -132,8 +132,7 @@ class MainActivity : AudioServiceActivity() {
         val isDebuggable =
             (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (isDebuggable) Timber.plant(Timber.DebugTree())
-        ZenInnertubeResolver.debugLogs = isDebuggable
-        ZenInnertubeResolver.init(applicationContext)
+        // ZenInnertubeResolver is initialised by ZenApp on a worker thread.
         // Video token bridge: attach its WebView to this window so
         // the page actually evaluates on this device (an unattached
         // application-context WebView never ran its scripts).

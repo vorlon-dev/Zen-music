@@ -1,23 +1,48 @@
 // ZenMusic · vorlon-dev
+//
+// Mobile shell with a "floating button" bottom bar.
+// A glowing circle rises out of a pill bar and springs to the active tab.
+//
+// Built to stay smooth on low-end phones:
+//  * no BackdropFilter / blur / saveLayer / BoxShadow blur
+//  * ONE AnimationController (spring) drives the whole dock
+//  * the circle only moves through a Transform (compositor, no repaint)
+//  * only the small bar outline is repainted per frame
+//  * scroll-hide uses a ValueNotifier, so the page below never rebuilds
 
 import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio_background/just_audio_background.dart' show MediaItem;
 
-import 'package:zenmusic/desktop/liquid/glass_panel.dart';
-import 'package:zenmusic/mobile/diwali/diwali_welcome_dialog.dart';
 import 'package:zenmusic/desktop/screens/shell/widgets/bottom_player.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
-import 'package:zenmusic/desktop/services/settings_manager.dart';
 import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
-import 'package:zenmusic/desktop/utils/expressive_motion.dart';
 
 const List<int> kZenMobileBranchOrder = [0, 1, 2, 3, 4];
+
+// ── Dock geometry ───────────────────────────────────────────────────────────
+const double _kBarHeight = 64; // pill bar
+const double _kOverhang = 24; // how far the circle area sticks above the bar
+const double _kDockHeight = _kBarHeight + _kOverhang;
+const double _kDockBottomGap = 10;
+const double _kDockSideGap = 14;
+
+/// Space the page content must leave at the bottom for the dock.
+const double _kDockExtent = _kDockHeight + _kDockBottomGap;
+
+const double _kBubble = 50; // glowing circle diameter
+const double _kGlow = 76; // soft glow around it (gradient, not blur)
+const double _kBubbleCenterY = _kOverhang + 6; // circle centre, from dock top
+
+const double _kNotchHalf = 40;
+const double _kNotchDepth = 13;
 
 class ZenMobileShell extends StatefulWidget {
   const ZenMobileShell({super.key, required this.navigationShell});
@@ -31,52 +56,39 @@ class ZenMobileShell extends StatefulWidget {
 }
 
 class _ZenMobileShellState extends State<ZenMobileShell> {
-  bool _chromeHidden = false;
+  // Only the chrome listens to this; the page below is never rebuilt by it.
+  final ValueNotifier<bool> _chromeHidden = ValueNotifier<bool>(false);
 
   @override
-  void initState() {
-    super.initState();
-    // Diwali welcome dialog: shows only once (first launch around Diwali).
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) showDiwaliWelcomeIfFirstTime(context);
-    });
+  void dispose() {
+    _chromeHidden.dispose();
+    super.dispose();
   }
 
   void _goBranch(int branch) {
-    if (_chromeHidden) _show();
+    _chromeHidden.value = false;
     widget.navigationShell.goBranch(
       branch,
       initialLocation: branch == widget.navigationShell.currentIndex,
     );
   }
 
-  void _hide() {
-    if (!_chromeHidden) setState(() => _chromeHidden = true);
-  }
-
-  void _show() {
-    if (_chromeHidden) setState(() => _chromeHidden = false);
-  }
-
   bool _onUserScroll(UserScrollNotification n) {
     if (n.metrics.axis != Axis.vertical) return false;
     if (n.metrics.pixels <= 40) {
-      _show();
+      _chromeHidden.value = false;
       return false;
     }
     if (n.direction == ScrollDirection.reverse) {
-      _hide();
+      _chromeHidden.value = true;
     } else if (n.direction == ScrollDirection.forward) {
-      _show();
+      _chromeHidden.value = false;
     }
     return false;
   }
 
   @override
   Widget build(BuildContext context) {
-    final settings = GetIt.I<SettingsManager>();
-    final liquid = settings.liquidGlass;
-    final m3 = settings.isMaterial3;
     final mq = MediaQuery.of(context);
 
     return Scaffold(
@@ -90,7 +102,7 @@ class _ZenMobileShellState extends State<ZenMobileShell> {
               valueListenable: GetIt.I<MediaPlayer>().currentSongNotifier,
               builder: (context, currentSong, _) {
                 final miniInset =
-                    (currentSong == null || pageAbove) ? 0.0 : 82.0;
+                (currentSong == null || pageAbove) ? 0.0 : 82.0;
                 return Stack(
                   children: [
                     Positioned.fill(
@@ -98,7 +110,7 @@ class _ZenMobileShellState extends State<ZenMobileShell> {
                         data: mq.copyWith(
                           padding: mq.padding.copyWith(
                             bottom: math.max(mq.padding.bottom,
-                                mq.padding.bottom + 86.0 + miniInset),
+                                mq.padding.bottom + _kDockExtent + miniInset),
                           ),
                         ),
                         child: widget.navigationShell,
@@ -106,12 +118,13 @@ class _ZenMobileShellState extends State<ZenMobileShell> {
                     ),
                     Align(
                       alignment: Alignment.bottomCenter,
-                      child: _Chrome(
-                        hidden: _chromeHidden || pageAbove,
-                        liquid: liquid,
-                        m3: m3,
-                        currentIndex: widget.navigationShell.currentIndex,
-                        onSelect: _goBranch,
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _chromeHidden,
+                        builder: (context, hidden, _) => _Chrome(
+                          hidden: hidden || pageAbove,
+                          currentIndex: widget.navigationShell.currentIndex,
+                          onSelect: _goBranch,
+                        ),
                       ),
                     ),
                   ],
@@ -128,57 +141,43 @@ class _ZenMobileShellState extends State<ZenMobileShell> {
 class _Chrome extends StatelessWidget {
   const _Chrome({
     required this.hidden,
-    required this.liquid,
-    required this.m3,
     required this.currentIndex,
     required this.onSelect,
   });
 
   final bool hidden;
-  final bool liquid;
-  final bool m3;
   final int currentIndex;
   final ValueChanged<int> onSelect;
 
   @override
   Widget build(BuildContext context) {
+    // Slide only (no AnimatedOpacity): opacity animation forces an offscreen
+    // layer, which is slow on weak GPUs. The chrome slides fully off-screen.
     return AnimatedSlide(
-      offset: hidden ? const Offset(0, 1.08) : Offset.zero,
-      duration: const Duration(milliseconds: 320),
+      offset: hidden ? const Offset(0, 1.25) : Offset.zero,
+      duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
-      child: AnimatedOpacity(
-        opacity: hidden ? 0.0 : 1.0,
-        duration: const Duration(milliseconds: 260),
-        child: IgnorePointer(
-          ignoring: hidden,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const BottomPlayer(),
-              _ZenDock(
-                liquid: liquid,
-                m3: m3,
-                currentIndex: currentIndex,
-                onSelect: onSelect,
-              ),
-            ],
-          ),
+      child: IgnorePointer(
+        ignoring: hidden,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const BottomPlayer(),
+            _ZenDock(currentIndex: currentIndex, onSelect: onSelect),
+          ],
         ),
       ),
     );
   }
 }
 
-class _ZenDock extends StatefulWidget {
-  const _ZenDock({
-    required this.liquid,
-    required this.m3,
-    required this.currentIndex,
-    required this.onSelect,
-  });
+// ═══════════════════════════════════════════════════════════════════════════
+//  Floating-button dock
+// ═══════════════════════════════════════════════════════════════════════════
 
-  final bool liquid;
-  final bool m3;
+class _ZenDock extends StatefulWidget {
+  const _ZenDock({required this.currentIndex, required this.onSelect});
+
   final int currentIndex;
   final ValueChanged<int> onSelect;
 
@@ -202,182 +201,388 @@ class _ZenDock extends StatefulWidget {
   State<_ZenDock> createState() => _ZenDockState();
 }
 
-class _ZenDockState extends State<_ZenDock> {
-  final GlobalKey _dockKey = GlobalKey();
-  final List<GlobalKey> _itemKeys =
-      List.generate(kZenMobileBranchOrder.length, (_) => GlobalKey());
+class _ZenDockState extends State<_ZenDock>
+    with SingleTickerProviderStateMixin {
+  static const _spring = SpringDescription(
+    mass: 1,
+    stiffness: 420,
+    damping: 30,
+  );
 
-  void _selectAt(Offset local) {
-    final ctx = _dockKey.currentContext;
-    final box = ctx?.findRenderObject();
-    if (box is! RenderBox || !box.hasSize) return;
-    const bridge = 8.0;
-    for (var i = 0; i < _itemKeys.length; i++) {
-      final ictx = _itemKeys[i].currentContext;
-      if (ictx == null) continue;
-      final item = ictx.findRenderObject();
-      if (item is! RenderBox || !item.attached) continue;
-      final topLeft = item.localToGlobal(Offset.zero, ancestor: box);
-      final bounds = topLeft & item.size;
-      if (bounds.inflate(bridge).contains(local)) {
-        final branch = kZenMobileBranchOrder[i];
-        if (branch != widget.currentIndex) widget.onSelect(branch);
-        return;
-      }
+  late final AnimationController _pos; // value = tab position (0..n-1)
+  int? _downBranch;
+  bool _changedWhileDown = false;
+
+  int _slotOf(int branch) {
+    final i = kZenMobileBranchOrder.indexOf(branch);
+    return i < 0 ? 0 : i;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _pos = AnimationController.unbounded(
+      vsync: this,
+      value: _slotOf(widget.currentIndex).toDouble(),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _ZenDock old) {
+    super.didUpdateWidget(old);
+    if (old.currentIndex == widget.currentIndex) return;
+    final target = _slotOf(widget.currentIndex).toDouble();
+    if (MediaQuery.of(context).disableAnimations) {
+      _pos.value = target;
+    } else {
+      _pos.animateWith(SpringSimulation(_spring, _pos.value, target, _pos.velocity));
     }
+  }
+
+  @override
+  void dispose() {
+    _pos.dispose();
+    super.dispose();
+  }
+
+  // ── Touch handling: plain pointer math, no render-object lookups ─────────
+  int _branchAt(double dx, double width) {
+    final n = kZenMobileBranchOrder.length;
+    final slot = (dx / (width / n)).floor().clamp(0, n - 1).toInt();
+    return kZenMobileBranchOrder[slot];
+  }
+
+  void _pick(double dx, double width) {
+    final branch = _branchAt(dx, width);
+    if (branch == widget.currentIndex) return;
+    _changedWhileDown = true;
+    HapticFeedback.selectionClick();
+    widget.onSelect(branch);
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final glass = widget.liquid && !widget.m3;
+    final n = kZenMobileBranchOrder.length;
+    final slot = _slotOf(widget.currentIndex);
 
-    final Color container;
-    if (widget.m3) {
-      container = cs.surfaceContainerHigh;
-    } else if (glass) {
-      container = Colors.transparent;
-    } else {
-      container = dark ? const Color(0xFF202020) : cs.surfaceContainerLowest;
-    }
+    final barFill = cs.surfaceContainerHigh;
+    final barStroke = cs.primary.withValues(alpha: 0.32);
 
-    final row = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < kZenMobileBranchOrder.length; i++)
-          _DockItem(
-            key: _itemKeys[i],
-            label: _ZenDock._labels[i],
-            icon: _ZenDock._icons[i],
-            activeIcon: _ZenDock._activeIcons[i],
-            selected: widget.currentIndex == kZenMobileBranchOrder[i],
-            glass: glass,
-            onTap: () => widget.onSelect(kZenMobileBranchOrder[i]),
-          ),
-      ],
+    // Built once per selection change, then only translated while animating.
+    final bubble = _Bubble(
+      icon: _ZenDock._activeIcons[slot],
+      slot: slot,
+      color: cs.primary,
+      iconColor: cs.onPrimary,
     );
 
-    Widget dock = SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
-        child: Listener(
-          key: _dockKey,
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: (e) => _selectAt(e.localPosition),
-          onPointerMove: (e) => _selectAt(e.localPosition),
-          child: Material(
-            color: container,
-            elevation: glass || widget.m3 ? 0 : 6,
-            shadowColor: Colors.black45,
-            borderRadius: BorderRadius.circular(32),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: row,
-            ),
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.15,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              _kDockSideGap, 0, _kDockSideGap, _kDockBottomGap),
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final width = box.maxWidth;
+              final itemW = width / n;
+
+              return SizedBox(
+                height: _kDockHeight,
+                child: Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: (e) {
+                    _changedWhileDown = false;
+                    _downBranch = _branchAt(e.localPosition.dx, width);
+                    _pick(e.localPosition.dx, width);
+                  },
+                  onPointerMove: (e) => _pick(e.localPosition.dx, width),
+                  onPointerUp: (e) {
+                    // Re-tap on the active tab → pop to its root.
+                    if (!_changedWhileDown &&
+                        _downBranch == widget.currentIndex) {
+                      widget.onSelect(widget.currentIndex);
+                    }
+                    _downBranch = null;
+                  },
+                  onPointerCancel: (_) => _downBranch = null,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      // 1) Bar outline with the moving notch.
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: _kOverhang,
+                        height: _kBarHeight,
+                        child: RepaintBoundary(
+                          child: AnimatedBuilder(
+                            animation: _pos,
+                            builder: (context, _) => CustomPaint(
+                              painter: _BarPainter(
+                                pos: _pos.value,
+                                itemWidth: itemW,
+                                fill: barFill,
+                                stroke: barStroke,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 2) Icons + labels (static; no per-frame work).
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: _kOverhang,
+                        height: _kBarHeight,
+                        child: Row(
+                          children: [
+                            for (var i = 0; i < n; i++)
+                              Expanded(
+                                child: _DockItem(
+                                  label: _ZenDock._labels[i],
+                                  icon: _ZenDock._icons[i],
+                                  selected: i == slot,
+                                  activeColor: cs.onSurface,
+                                  idleColor: cs.onSurfaceVariant,
+                                  onTap: () => widget
+                                      .onSelect(kZenMobileBranchOrder[i]),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+
+                      // 3) Glowing circle: Transform only → no repaint.
+                      Positioned(
+                        left: 0,
+                        top: _kBubbleCenterY - _kGlow / 2,
+                        child: IgnorePointer(
+                          child: RepaintBoundary(
+                            child: AnimatedBuilder(
+                              animation: _pos,
+                              child: bubble,
+                              builder: (context, child) =>
+                                  Transform.translate(
+                                    offset: Offset(
+                                      (_pos.value + 0.5) * itemW - _kGlow / 2,
+                                      0,
+                                    ),
+                                    child: child,
+                                  ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ),
     );
-
-    if (glass) {
-      dock = Padding(
-        padding: const EdgeInsets.fromLTRB(8, 0, 8, 2),
-        child: ZenGlassPanel(radius: 32, child: dock),
-      );
-    }
-    return dock;
   }
 }
 
-class _DockItem extends StatefulWidget {
+// ── Glowing circle ──────────────────────────────────────────────────────────
+class _Bubble extends StatelessWidget {
+  const _Bubble({
+    required this.icon,
+    required this.slot,
+    required this.color,
+    required this.iconColor,
+  });
+
+  final IconData icon;
+  final int slot;
+  final Color color;
+  final Color iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final light = Color.lerp(color, Colors.white, 0.28)!;
+    return SizedBox(
+      width: _kGlow,
+      height: _kGlow,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Soft glow = plain radial gradient (much cheaper than a blur).
+          DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  color.withValues(alpha: 0.34),
+                  color.withValues(alpha: 0.0),
+                ],
+                stops: const [0.6, 1.0],
+              ),
+            ),
+            child: const SizedBox.expand(),
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [light, color],
+              ),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.22),
+                width: 1,
+              ),
+            ),
+            child: SizedBox(
+              width: _kBubble,
+              height: _kBubble,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                transitionBuilder: (child, anim) => FadeTransition(
+                  opacity: anim,
+                  child: ScaleTransition(
+                    scale: Tween<double>(begin: 0.7, end: 1.0).animate(anim),
+                    child: child,
+                  ),
+                ),
+                child: Icon(
+                  icon,
+                  key: ValueKey<int>(slot),
+                  size: 24,
+                  color: iconColor,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── One tab: icon + label ───────────────────────────────────────────────────
+class _DockItem extends StatelessWidget {
   const _DockItem({
-    super.key,
     required this.label,
     required this.icon,
-    required this.activeIcon,
     required this.selected,
-    required this.glass,
+    required this.activeColor,
+    required this.idleColor,
     required this.onTap,
   });
 
   final String label;
   final IconData icon;
-  final IconData activeIcon;
   final bool selected;
-  final bool glass;
+  final Color activeColor;
+  final Color idleColor;
   final VoidCallback onTap;
 
   @override
-  State<_DockItem> createState() => _DockItemState();
-}
-
-class _DockItemState extends State<_DockItem> {
-  @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    final Color indicator = widget.selected
-        ? (widget.glass
-            ? cs.primaryContainer.withValues(alpha: 0.28)
-            : cs.primaryContainer)
-        : Colors.transparent;
-    final Color content = widget.selected
-        ? cs.onPrimaryContainer
-        : cs.onSurfaceVariant;
-
-    final icon = Icon(
-      widget.selected ? widget.activeIcon : widget.icon,
-      size: 24,
-      color: content,
-    );
-
-    final label = AnimatedOpacity(
-      opacity: widget.selected ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
-      child: AnimatedSize(
-        duration: const Duration(milliseconds: 280),
-        curve: const ExpressiveSpring(),
-        alignment: Alignment.centerLeft,
-        child: widget.selected
-            ? Padding(
-                padding: const EdgeInsets.only(left: 8),
-                child: Text(
-                  widget.label,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.fade,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: content,
-                  ),
-                ),
-              )
-            : const SizedBox(width: 0, height: 0),
-      ),
-    );
-
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 12, end: widget.selected ? 18 : 12),
-      duration: const Duration(milliseconds: 280),
-      curve: const ExpressiveSpring(),
-      builder: (context, pad, child) => Container(
-        height: 48,
-        padding: EdgeInsets.symmetric(horizontal: pad),
-        decoration: BoxDecoration(
-          color: indicator,
-          shape: BoxShape.rectangle,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: child,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [icon, label],
+    final color = selected ? activeColor : idleColor;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // The active icon lives inside the circle, so hide it here.
+          AnimatedOpacity(
+            opacity: selected ? 0.0 : 1.0,
+            duration: const Duration(milliseconds: 140),
+            child: Icon(icon, size: 24, color: idleColor),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.clip,
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.1,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }
+}
+
+// ── Pill bar with a notch that follows the circle ───────────────────────────
+class _BarPainter extends CustomPainter {
+  _BarPainter({
+    required this.pos,
+    required this.itemWidth,
+    required this.fill,
+    required this.stroke,
+  });
+
+  final double pos;
+  final double itemWidth;
+  final Color fill;
+  final Color stroke;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final rc = h / 2; // full pill
+    final cx = (pos + 0.5) * itemWidth;
+
+    // Notch limits, kept inside the straight part of the top edge.
+    final a = math.max(rc, cx - _kNotchHalf);
+    final b = math.min(w - rc, cx + _kNotchHalf);
+    final nw = b - a;
+
+    final path = Path()..moveTo(rc, 0);
+
+    if (nw > 6) {
+      final depth =
+          _kNotchDepth * (nw / (2 * _kNotchHalf)).clamp(0.35, 1.0).toDouble();
+      path
+        ..lineTo(a, 0)
+        ..cubicTo(a + nw * 0.28, 0, a + nw * 0.18, depth, a + nw * 0.5, depth)
+        ..cubicTo(b - nw * 0.18, depth, b - nw * 0.28, 0, b, 0);
+    }
+
+    path
+      ..lineTo(w - rc, 0)
+      ..arcToPoint(Offset(w, rc), radius: Radius.circular(rc))
+      ..lineTo(w, h - rc)
+      ..arcToPoint(Offset(w - rc, h), radius: Radius.circular(rc))
+      ..lineTo(rc, h)
+      ..arcToPoint(Offset(0, h - rc), radius: Radius.circular(rc))
+      ..lineTo(0, rc)
+      ..arcToPoint(Offset(rc, 0), radius: Radius.circular(rc))
+      ..close();
+
+    canvas.drawPath(path, Paint()..color = fill);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _BarPainter o) =>
+      o.pos != pos ||
+          o.itemWidth != itemWidth ||
+          o.fill != fill ||
+          o.stroke != stroke;
 }

@@ -48,13 +48,14 @@ object ZenPoTokenBridge {
     private val started = AtomicBoolean(false)
     private var webView: WebView? = null
 
-    /// WebView creation loads the whole Chromium stack (~450 ms on the main
-    /// thread + a renderer process, ~100 MB RAM). Doing that during launch
-    /// competes with Flutter's first frames and froze low-end phones for
-    /// seconds. The po-token is only needed for video playback and already
-    /// degrades to "tokenless" when not ready, so we start it a few seconds
-    /// AFTER launch (or immediately if a token is requested earlier).
-    private const val START_DELAY_MS = 6_000L
+    /// WebView creation loads the whole Chromium stack (~560 ms on the main
+    /// thread + a renderer process + a multi-second botguard JS burst, ~100 MB
+    /// RAM). Starting it on a timer after launch still landed right when the
+    /// user first touched the screen (input delayed 1–4 s). The po-token is
+    /// only needed by the last-resort WEB_REMIX client and already degrades to
+    /// "tokenless", so it now starts on demand: the first time a stream is
+    /// extracted (see [ensureStarted]). The user is waiting for audio then, so
+    /// the cost is hidden, and the home screen stays smooth.
     private val webViewRequested = AtomicBoolean(false)
 
     /// True once the page load was issued — prevents the duplicate
@@ -71,6 +72,7 @@ object ZenPoTokenBridge {
     @Volatile
     private var bootstrapStarted = false
 
+    @Volatile
     private var appContext: Context? = null
     private var activity: Activity? = null
 
@@ -100,12 +102,12 @@ object ZenPoTokenBridge {
         if (!started.compareAndSet(false, true)) return
         val app = context.applicationContext
         appContext = app
-        main.postDelayed({ requestWebViewStart() }, START_DELAY_MS)
+        // NOTE: no WebView here any more — see [ensureStarted].
     }
 
-    /// Starts the WebView now (idempotent). Used by the delayed start and by
-    /// [playerTokenBlocking] when a token is wanted before the delay elapsed.
-    private fun requestWebViewStart() {
+    /// Starts the WebView (idempotent, any thread). Called by the stream
+    /// resolver on the first extraction.
+    fun ensureStarted() {
         val app = appContext ?: return
         if (!webViewRequested.compareAndSet(false, true)) return
         main.post { startWebView(app) }
@@ -310,7 +312,7 @@ object ZenPoTokenBridge {
     /// is unused (their contract: identifier = videoId alone).
     fun playerTokenBlocking(videoId: String, visitorData: String?): String? {
         if (!started.get()) return null
-        requestWebViewStart() // no-op if already started
+        ensureStarted() // no-op if already started
 
         val cached = tokenCache[videoId]
         if (cached != null && System.currentTimeMillis() - cached.second < tokenTtlMs) {
