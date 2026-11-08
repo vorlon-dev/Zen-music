@@ -54,6 +54,21 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
 })();
 ''';
 
+  // The signed-out web player shows a "Log in" button; a signed-in one shows
+  // the user widget. This is the "login is really done" signal.
+  static const String _kSignedInJs =
+      "!!document.querySelector('[data-testid=\"user-widget-link\"]') && "
+      "!document.querySelector('[data-testid=\"login-button\"]')";
+
+  Future<bool> _pageSignedIn(InAppWebViewController? c) async {
+    try {
+      final r = await c?.evaluateJavascript(source: _kSignedInJs);
+      return r == true || '$r' == 'true';
+    } catch (_) {
+      return false;
+    }
+  }
+
   Webview? _webview; // Windows: the real sign-in window.
   InAppWebViewController? _controller; // Other platforms: embedded webview.
   Timer? _poll;
@@ -170,6 +185,8 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
       } catch (_) {}
 
       try {
+        final signedIn = await wv.evaluateJavaScript(_kSignedInJs);
+        if ('$signedIn'.contains('true') == false) return;
         var tokensJson = await wv.evaluateJavaScript(
             'JSON.stringify(window.__zenTokens || {})') as String?;
         if (tokensJson != null && tokensJson.startsWith('"')) {
@@ -252,7 +269,12 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
         return;
       }
 
-      // 2. Fallback: Bearer token stashed by the fetch hook.
+      // 2. Fallback: Bearer token stashed by the fetch hook. The signed-out
+      // web player also fetches with an ANONYMOUS "BQ…" token, so a token
+      // alone proves nothing: only accept it once the page itself shows a
+      // signed-in user (otherwise this closed the window the moment the
+      // player loaded, before anyone had logged in).
+      if (!await _pageSignedIn(_controller)) return;
       final tokensJson = await _controller?.evaluateJavascript(
           source: 'JSON.stringify(window.__zenTokens || {})') as String?;
       if (tokensJson != null && tokensJson != 'null') {
