@@ -76,6 +76,39 @@ class MainActivity : AudioServiceActivity() {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 }
         }
+        }
+        requestHighRefreshRate()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Some ROMs (MIUI/HyperOS...) reset the mode when the app returns.
+        requestHighRefreshRate()
+    }
+
+    /// Android runs apps at 60 Hz unless the app asks for a faster display
+    /// mode — Flutter does not do this by itself. Ask for the highest refresh
+    /// rate the panel offers at the CURRENT resolution (so no mode-switch
+    /// flicker). The panel's own maximum is the ceiling (90/120/144 Hz).
+    @Suppress("DEPRECATION")
+    private fun requestHighRefreshRate() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        try {
+            val display = windowManager.defaultDisplay ?: return
+            val cur = display.mode
+            val best = display.supportedModes
+                .filter {
+                    it.physicalWidth == cur.physicalWidth &&
+                        it.physicalHeight == cur.physicalHeight
+                }
+                .maxByOrNull { it.refreshRate } ?: return
+            val lp = window.attributes
+            lp.preferredDisplayModeId = best.modeId
+            window.attributes = lp
+            Timber.d("Display mode requested: ${best.refreshRate} Hz")
+        } catch (t: Throwable) {
+            Timber.w(t, "High refresh rate request failed")
+        }
     }
 
     override fun onDestroy() {
