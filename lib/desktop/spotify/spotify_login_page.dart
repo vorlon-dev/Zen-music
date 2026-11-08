@@ -54,6 +54,21 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
 })();
 ''';
 
+  // The signed-out web player shows a "Log in" button; a signed-in one shows
+  // the user widget. This is the "login is really done" signal.
+  static const String _kSignedInJs =
+      "!!document.querySelector('[data-testid=\"user-widget-link\"]') && "
+      "!document.querySelector('[data-testid=\"login-button\"]')";
+
+  Future<bool> _pageSignedIn(InAppWebViewController? c) async {
+    try {
+      final r = await c?.evaluateJavascript(source: _kSignedInJs);
+      return r == true || '$r' == 'true';
+    } catch (_) {
+      return false;
+    }
+  }
+
   Webview? _webview; // Windows: the real sign-in window.
   InAppWebViewController? _controller; // Other platforms: embedded webview.
   Timer? _poll;
@@ -94,7 +109,7 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
     try {
       if (!await WebviewWindow.isWebviewAvailable()) {
         setState(() => _error =
-            'WebView2 runtime unavailable on this PC — use "Use cookies '
+        'WebView2 runtime unavailable on this PC — use "Use cookies '
             'instead" under Settings -> Spotify.');
         return;
       }
@@ -154,7 +169,7 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
       // Tier 2: document.cookie (in case a runtime ever fails the manager).
       try {
         final raw =
-            await wv.evaluateJavaScript('document.cookie') as String?;
+        await wv.evaluateJavaScript('document.cookie') as String?;
         var cookie = raw?.toString() ?? '';
         if (cookie.startsWith('"')) {
           // The bridge returns the JS value JSON-encoded.
@@ -170,6 +185,8 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
       } catch (_) {}
 
       try {
+        final signedIn = await wv.evaluateJavaScript(_kSignedInJs);
+        if ('$signedIn'.contains('true') == false) return;
         var tokensJson = await wv.evaluateJavaScript(
             'JSON.stringify(window.__zenTokens || {})') as String?;
         if (tokensJson != null && tokensJson.startsWith('"')) {
@@ -252,7 +269,12 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
         return;
       }
 
-      // 2. Fallback: Bearer token stashed by the fetch hook.
+      // 2. Fallback: Bearer token stashed by the fetch hook. The signed-out
+      // web player also fetches with an ANONYMOUS "BQ…" token, so a token
+      // alone proves nothing: only accept it once the page itself shows a
+      // signed-in user (otherwise this closed the window the moment the
+      // player loaded, before anyone had logged in).
+      if (!await _pageSignedIn(_controller)) return;
       final tokensJson = await _controller?.evaluateJavascript(
           source: 'JSON.stringify(window.__zenTokens || {})') as String?;
       if (tokensJson != null && tokensJson != 'null') {
@@ -275,6 +297,28 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
     }
   }
 
+
+  /// The page claims to be desktop Chrome, but a hard-coded version number
+  /// stops matching the phone's real WebView whenever it auto-updates (the
+  /// UA says 155, the browser's own client hints say 156). Spotify's sign-in
+  /// bot check (reCAPTCHA Enterprise) can reject that mismatch, so use the
+  /// installed WebView's real major version.
+  Future<void> _alignUserAgent(InAppWebViewController c) async {
+    try {
+      final raw = await c.evaluateJavascript(source: 'navigator.userAgent');
+      final m = RegExp(r'Chrome/(\d+)\.').firstMatch('$raw');
+      if (m == null) return;
+      final major = m.group(1)!;
+      if (major == '155') return; // already matches the built-in string
+      final ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+          'AppleWebKit/537.36 (KHTML, like Gecko) '
+          'Chrome/$major.0.0.0 Safari/537.36';
+      await c.setSettings(settings: InAppWebViewSettings(userAgent: ua));
+      await c.reload();
+    } catch (e) {
+      debugPrint('[zen-login] user-agent align failed: $e');
+    }
+  }
 
   Future<void> _finishLogin(String spDcCookie) async {
     final err = await SpotifyAuth.instance.login(spDcCookie);
@@ -335,10 +379,10 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
               _error ??
                   (Platform.isWindows
                       ? 'A sign-in window is opening. Sign in with your '
-                          'Spotify account on open.spotify.com — this page '
-                          'closes by itself once your session lands.'
+                      'Spotify account on open.spotify.com — this page '
+                      'closes by itself once your session lands.'
                       : 'Log in with your spotify account. This window closes '
-                          'automatically once the session is captured.'),
+                      'automatically once the session is captured.'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
@@ -366,9 +410,9 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
                         const SizedBox(height: 8),
                         Text(
                           'Sign in exactly like on the website. When '
-                          'open.spotify.com shows you as signed in, ZenMusic '
-                          'captures the session automatically (the sp_dc '
-                          'cookie, HttpOnly included) and closes the window.',
+                              'open.spotify.com shows you as signed in, ZenMusic '
+                              'captures the session automatically (the sp_dc '
+                              'cookie, HttpOnly included) and closes the window.',
                           style: Theme.of(context).textTheme.bodyMedium,
                           textAlign: TextAlign.center,
                         ),
@@ -385,9 +429,9 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
                         const SizedBox(height: 8),
                         Text(
                           'No window? Press "I logged in" to re-check, or '
-                          'reopen it. A manual cookie paste is still '
-                          'available under Settings -> Spotify -> "Use '
-                          'cookies instead".',
+                              'reopen it. A manual cookie paste is still '
+                              'available under Settings -> Spotify -> "Use '
+                              'cookies instead".',
                           style: Theme.of(context).textTheme.bodySmall,
                           textAlign: TextAlign.center,
                         ),
@@ -407,7 +451,10 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
                   javaScriptEnabled: true,
                   domStorageEnabled: true,
                 ),
-                onWebViewCreated: (c) => _controller = c,
+                onWebViewCreated: (c) {
+                  _controller = c;
+                  _alignUserAgent(c);
+                },
                 onUpdateVisitedHistory: (controller, url, isReload) {
                   _controller = controller;
                   _harvest();

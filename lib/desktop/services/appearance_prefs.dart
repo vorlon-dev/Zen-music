@@ -19,10 +19,10 @@ class AppearancePrefs {
   static final thumbRadius = ValueNotifier<double>(14);
   static final hideThumbnail = ValueNotifier<bool>(false);
   static final showQualityBadge = ValueNotifier<bool>(true);
-  // classic | water_drop — lyrics animation & visual style
-  static final lyricsStyle = ValueNotifier<String>('water_drop');
   // left | center | right — current lyric line alignment
   static final lyricsPosition = ValueNotifier<String>('left');
+  // lyrics style — only 'classic' remains
+  static final lyricsStyle = ValueNotifier<String>('classic');
   // 16..36 sp — lyrics text size
   static final lyricsTextSize = ValueNotifier<double>(19.0);
   // 1.0..4.0 — lyrics line spacing multiplier
@@ -62,8 +62,8 @@ class AppearancePrefs {
     thumbRadius.value = p.getDouble('ap_thumb_radius') ?? 14;
     hideThumbnail.value = p.getBool('ap_hide_thumb') ?? false;
     showQualityBadge.value = p.getBool('ap_show_badge') ?? true;
-    lyricsStyle.value = p.getString('ap_lyrics_style') ?? 'water_drop';
     lyricsPosition.value = p.getString('ap_lyrics_pos') ?? 'left';
+    lyricsStyle.value = 'classic';
     lyricsTextSize.value = p.getDouble('ap_lyrics_size') ?? 19;
     lyricsLineSpacing.value = p.getDouble('ap_lyrics_gap') ?? 1.3;
     hideStatusBarOnLyrics.value = p.getBool('ap_hide_status') ?? false;

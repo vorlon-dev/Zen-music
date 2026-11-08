@@ -221,28 +221,6 @@ class AppearancePage extends StatelessWidget {
                       ]),
 
                     ZenSection(title: 'Lyrics', children: [
-                      ValueListenableBuilder<String>(
-                        valueListenable: AppearancePrefs.lyricsStyle,
-                        builder: (context, style, _) => ZenRow(
-                          icon: Icons.water_drop_outlined,
-                          title: 'Lyrics style',
-                          trailing: AdaptiveDropdownButton<String>(
-                            value: style,
-                            items: const [
-                              AdaptiveDropdownMenuItem(
-                                  value: 'classic', child: Text('Classic')),
-                              AdaptiveDropdownMenuItem(
-                                  value: 'water_drop',
-                                  child: Text('Water Drops')),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) {
-                                AppearancePrefs.setLyricsStyle(v);
-                              }
-                            },
-                          ),
-                        ),
-                      ),
                       ValueListenableBuilder<double>(
                         valueListenable: AppearancePrefs.lyricsTextSize,
                         builder: (context, size, _) => ZenSliderRow(

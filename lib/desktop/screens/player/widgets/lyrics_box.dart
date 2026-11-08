@@ -20,10 +20,14 @@ class LyricsBox extends StatefulWidget {
     required this.currentSong,
     required this.size,
     this.onLyricsFound,
+    this.accentColor,
     super.key,
   });
   final MediaItem currentSong;
   final Size size;
+
+  /// Album-art tint.
+  final Color? accentColor;
   final Function(bool)? onLyricsFound;
 
   @override
@@ -180,7 +184,16 @@ class _LyricsBoxState extends State<LyricsBox> {
                     // The player page renders its own "No lyrics" state.
                     return const SizedBox.shrink();
                   }
-                  return ShaderMask(
+                  return _classic(data, m3);
+                },
+              )
+            : const ExpressiveLoadingIndicator(),
+      ),
+    );
+  }
+
+  Widget _classic(LyricsData? data, bool m3) {
+    return ShaderMask(
                     shaderCallback: (Rect bounds) {
                       return const LinearGradient(
                         begin: Alignment.topCenter,
@@ -210,10 +223,5 @@ class _LyricsBoxState extends State<LyricsBox> {
                       textScale: AppearancePrefs.lyricsTextSize.value / 20,
                     ),
                   );
-                },
-              )
-            : const ExpressiveLoadingIndicator(),
-      ),
-    );
   }
 }

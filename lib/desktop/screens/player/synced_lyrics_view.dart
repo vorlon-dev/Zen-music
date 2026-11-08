@@ -10,7 +10,6 @@ import 'package:flutter/scheduler.dart' show Ticker;
 
 import '../../services/appearance_prefs.dart';
 import '../../services/lyrics_service.dart';
-import 'widgets/water_drops_overlay.dart';
 
 class SyncedLyricsView extends StatefulWidget {
   const SyncedLyricsView({
@@ -316,18 +315,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
         valueListenable: AppearancePrefs.lyricsStyle,
         builder: (context, style, _) {
           final isWaterDrop = style == 'water_drop';
-          final listWidget = _syncedList(context, lyrics.synced!, isWaterDrop: isWaterDrop);
-          if (!isWaterDrop) return listWidget;
-
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              listWidget,
-              const Positioned.fill(
-                child: WaterDropsOverlay(),
-              ),
-            ],
-          );
+          return _syncedList(context, lyrics.synced!, isWaterDrop: isWaterDrop);
         },
       );
     }
@@ -534,20 +522,20 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
         color: accent,
         shadows: isWaterDrop
             ? [
-                Shadow(
-                  color: accent.withValues(alpha: 0.85),
-                  blurRadius: 18,
-                ),
-                Shadow(
-                  color: Colors.white.withValues(alpha: 0.9),
-                  blurRadius: 8,
-                ),
-                const Shadow(
-                  color: Colors.black38,
-                  blurRadius: 4,
-                  offset: Offset(1.5, 2.0),
-                ),
-              ]
+          Shadow(
+            color: accent.withValues(alpha: 0.85),
+            blurRadius: 18,
+          ),
+          Shadow(
+            color: Colors.white.withValues(alpha: 0.9),
+            blurRadius: 8,
+          ),
+          const Shadow(
+            color: Colors.black38,
+            blurRadius: 4,
+            offset: Offset(1.5, 2.0),
+          ),
+        ]
             : null,
       );
 
@@ -681,7 +669,7 @@ class _Glow extends StatelessWidget {
     return RepaintBoundary(
       child: ImageFiltered(
         imageFilter:
-            ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma, tileMode: TileMode.decal),
+        ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma, tileMode: TileMode.decal),
         child: Text(
           text,
           textAlign: TextAlign.left,
