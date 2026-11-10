@@ -173,6 +173,28 @@ class LosslessService {
   }
 
 
+  // Circuit breaker: when the endpoint answers nothing but failures (e.g. its
+  // domain expired), stop asking for a while so every song doesn't pay for a
+  // dead lookup. It retries by itself, so it recovers when the server returns.
+  static const _breakerThreshold = 6;
+  static const _breakerPause = Duration(minutes: 10);
+  int _consecutiveFailures = 0;
+  DateTime? _pausedUntil;
+
+  void _noteFailure() {
+    if (++_consecutiveFailures >= _breakerThreshold) {
+      _pausedUntil = DateTime.now().add(_breakerPause);
+      _consecutiveFailures = 0;
+      print('[lossless] endpoint failing — paused for '
+          '${_breakerPause.inMinutes} min');
+    }
+  }
+
+  void _noteSuccess() {
+    _consecutiveFailures = 0;
+    _pausedUntil = null;
+  }
+
   /// GET /?id=<videoId> -> {tierKey -> stream url}, with caching.
   /// Returns null on ANY failure (HTTP error, error status, timeout,
   /// no streams) — negative results are remembered for [_negativeTtl].
@@ -184,6 +206,9 @@ class LosslessService {
 
     final failedAt = _failCache[videoId];
     if (failedAt != null && now.isBefore(failedAt)) return null;
+
+    final paused = _pausedUntil;
+    if (paused != null && now.isBefore(paused)) return null;
 
     HttpClient? client;
     bool held = false;
@@ -200,6 +225,7 @@ class LosslessService {
 
       if (response.statusCode != 200) {
         print('[lossless] endpoint HTTP ${response.statusCode} for $videoId');
+        _noteFailure();
         _failCache[videoId] = now.add(response.statusCode == 404
             ? _noMatchTtl
             : _negativeTtl);
@@ -231,12 +257,14 @@ class LosslessService {
         return null;
       }
 
+      _noteSuccess();
       _streamCache[videoId] =
       (streams: streams, expiry: now.add(_positiveTtl));
       _evict(_streamCache);
       return streams;
     } catch (e) {
       print('[lossless] endpoint error for $videoId: $e');
+      _noteFailure();
       _failCache[videoId] = now.add(_negativeTtl);
       _evict(_failCache);
       return null;
