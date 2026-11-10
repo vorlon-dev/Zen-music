@@ -90,20 +90,39 @@ class _DiscoverPageState extends State<DiscoverPage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Branch pages stay alive; TickerMode is off while another tab is shown.
-    final active = TickerMode.of(context);
-    if (active != _active) {
-      _active = active;
-      if (!active) _mp.flowActive = false; // normal auto-fetch resumes
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_active == active) ShellOverlaysBus.fullPageAbove.value = active;
-      });
-      if (active && _feed.ready) _select(_page, immediate: true);
+    // Branch pages stay alive; TickerMode is switched off while another tab
+    // is shown. TickerMode.of() does NOT notify on that change, so listen to
+    // its notifier (this is what makes the dock come back after leaving).
+    final notifier = TickerMode.getNotifier(context);
+    if (!identical(notifier, _tickerNotifier)) {
+      _tickerNotifier?.removeListener(_onTickerChanged);
+      _tickerNotifier = notifier..addListener(_onTickerChanged);
     }
+    _applyActive(notifier.value);
+  }
+
+  ValueListenable<bool>? _tickerNotifier;
+
+  void _onTickerChanged() {
+    final n = _tickerNotifier;
+    if (n != null && mounted) _applyActive(n.value);
+  }
+
+  void _applyActive(bool active) {
+    if (active == _active) return;
+    _active = active;
+    if (!active) _mp.flowActive = false; // normal auto-fetch resumes
+    // Hide the shell only while Discover is the visible tab.
+    // (post-frame: this can run during build, the shell listens to it)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_active == active) ShellOverlaysBus.fullPageAbove.value = active;
+    });
+    if (active && _feed.ready) _select(_page, immediate: true);
   }
 
   @override
   void dispose() {
+    _tickerNotifier?.removeListener(_onTickerChanged);
     _debounce?.cancel();
     _procSub?.cancel();
     _feed.removeListener(_onFeed);
