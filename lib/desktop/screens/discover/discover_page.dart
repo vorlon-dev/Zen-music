@@ -1,33 +1,39 @@
 // ZenMusic · vorlon-dev
 //
-// Discover — full-screen, reels-style vertical feed of music videos.
-//  • Plays INSIDE this page (own player, real audio) — never the mini player.
-//  • Songs autoplay as you swipe (like reels). Tap = pause / play.
-//  • Double-tap = like. Thin seek bar at the bottom (tap / drag to seek).
-//  • Shell (dock + mini player) is hidden while Discover is open.
-//  • Back arrow (top-left) or horizontal swipe leaves to another tab.
-//  • Video: YouTube / YT Music. Spotify canvas is used only when logged in.
+// Discover — "Music Flow" style (idea from Echo Music, GPL-3.0).
+// A full-screen vertical feed of songs. Swiping plays the song through the
+// app's MAIN player (queue), so background playback, notification and the
+// mini player keep working after you leave. Mobile only.
+//
+//  • tap = play/pause · double-tap = like · long-press = more
+//  • lyric line capsule on top, thin seek bar at the bottom
+//  • 6 actions: like · playlist · lyrics · share · download · more
+//  • top menu: refresh feed · less like this · restore previous queue
+//  • back arrow (top-left) or horizontal swipe leaves to another tab
+//  • shell (dock + mini player) is hidden while Discover is open
 
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'package:just_audio/just_audio.dart' show ProcessingState;
+import 'package:share_plus/share_plus.dart';
 import 'package:zenmusic/desktop/core/widgets/video_backdrop.dart';
+import 'package:zenmusic/desktop/services/discover_feed.dart';
 import 'package:zenmusic/desktop/services/download_manager.dart';
+import 'package:zenmusic/desktop/services/lyrics_service.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
-import 'package:zenmusic/desktop/services/yt_video_engine.dart';
 import 'package:zenmusic/desktop/spotify/spotify_canvas.dart';
+import 'package:zenmusic/desktop/utils/bottom_modals.dart';
 import 'package:zenmusic/desktop/utils/enhanced_image.dart';
-import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
-/// Branch indexes of the shell (Home, Search, Discover, Saved, Settings).
+/// Shell branch indexes (Home, Search, Discover, Saved, Settings).
 const int _kHomeBranch = 0;
 const int _kSearchBranch = 1;
 const int _kSavedBranch = 3;
@@ -41,37 +47,27 @@ class DiscoverPage extends StatefulWidget {
 
 class _DiscoverPageState extends State<DiscoverPage>
     with AutomaticKeepAliveClientMixin {
-  static const _seedQueries = [
-    'trending music videos',
-    'new songs official video',
-    'top hits music video',
-    'viral songs',
-    'chill songs music video',
-  ];
-
+  final DiscoverFeed _feed = DiscoverFeed.instance;
+  final MediaPlayer _mp = GetIt.I<MediaPlayer>();
   final PageController _pages = PageController();
-  final List<Map<String, dynamic>> _songs = [];
-  final Set<String> _seen = {};
+
   final Map<String, String?> _canvas = {};
   final Set<String> _canvasLoading = {};
-  final Map<String, YtVideoStreams?> _streams = {};
+  final Map<String, Future<LyricsData?>> _lyrics = {};
 
-  late final Player _player;
-  late final VideoController _video;
-  StreamSubscription? _playingSub;
-  StreamSubscription? _errSub;
+  int _page = 0;
+  int _request = 0;
+  Timer? _debounce;
+  bool? _active;
+  bool _owns = false; // Discover's queue is what the main player runs
+  bool _syncing = false; // page moved because playback moved (not the user)
 
-  bool _loading = true;
-  bool _loadingMore = false;
-  bool _failed = false;
-  int _index = 0;
+  // Snapshot of whatever was playing before Discover took over.
+  List<Map<String, dynamic>> _prevQueue = const [];
+  String? _prevId;
+  Duration _prevPos = Duration.zero;
 
-  bool _playing = false;
-  bool _mediaLoading = false;
-  bool _mediaError = false;
-  int _openToken = 0;
-  bool? _active; // is the Discover tab the visible one?
-  bool _userPaused = false;
+  StreamSubscription? _procSub;
 
   @override
   bool get wantKeepAlive => true;
@@ -79,50 +75,59 @@ class _DiscoverPageState extends State<DiscoverPage>
   @override
   void initState() {
     super.initState();
-    MediaKit.ensureInitialized();
-    _player = Player(
-        configuration: PlayerConfiguration(bufferSize: 12 * 1024 * 1024));
-    _video = VideoController(_player);
-    _player.setPlaylistMode(PlaylistMode.single); // loop the song
-    _playingSub = _player.stream.playing.listen((p) {
-      if (mounted && p != _playing) setState(() => _playing = p);
+    _feed.addListener(_onFeed);
+    _mp.currentSongNotifier.addListener(_onPlaybackSong);
+    _procSub = _mp.player.processingStateStream.listen((s) {
+      // Queue ended while Discover owns playback → move on to the next page.
+      if (s == ProcessingState.completed && _owns && _active == true) {
+        _goNext();
+      }
     });
-    _errSub = _player.stream.error.listen((_) {
-      if (mounted && !_mediaLoading) setState(() => _mediaError = true);
+    _feed.warm().then((_) {
+      if (mounted && _active == true) _select(_page, immediate: true);
     });
-    _loadInitial();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Branch pages are kept alive but get TickerMode disabled when hidden.
-    final active = TickerMode.of(context);
-    if (active != _active) {
-      _active = active;
-      if (!active) {
-        _player.pause();
-      } else if (!_userPaused &&
-          _songs.isNotEmpty &&
-          !_mediaLoading &&
-          !_mediaError) {
-        _pauseMainPlayer();
-        _player.play();
-      }
-      // Hide / show the shell (dock + mini player) after this frame.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_active == active) {
-          ShellOverlaysBus.fullPageAbove.value = active;
-        }
-      });
+    // Branch pages stay alive; TickerMode is switched off while another tab
+    // is shown. TickerMode.of() does NOT notify on that change, so listen to
+    // its notifier (this is what makes the dock come back after leaving).
+    final notifier = TickerMode.getValuesNotifier(context);
+    if (!identical(notifier, _tickerNotifier)) {
+      _tickerNotifier?.removeListener(_onTickerChanged);
+      _tickerNotifier = notifier..addListener(_onTickerChanged);
     }
+    _applyActive(notifier.value.enabled);
+  }
+
+  ValueListenable<TickerModeData>? _tickerNotifier;
+
+  void _onTickerChanged() {
+    final n = _tickerNotifier;
+    if (n != null && mounted) _applyActive(n.value.enabled);
+  }
+
+  void _applyActive(bool active) {
+    if (active == _active) return;
+    _active = active;
+    if (!active) _mp.flowActive = false; // normal auto-fetch resumes
+    // Hide the shell only while Discover is the visible tab.
+    // (post-frame: this can run during build, the shell listens to it)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_active == active) ShellOverlaysBus.fullPageAbove.value = active;
+    });
+    if (active && _feed.ready) _select(_page, immediate: true);
   }
 
   @override
   void dispose() {
-    _playingSub?.cancel();
-    _errSub?.cancel();
-    _player.dispose();
+    _tickerNotifier?.removeListener(_onTickerChanged);
+    _debounce?.cancel();
+    _procSub?.cancel();
+    _feed.removeListener(_onFeed);
+    _mp.currentSongNotifier.removeListener(_onPlaybackSong);
     _pages.dispose();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ShellOverlaysBus.fullPageAbove.value = false;
@@ -130,296 +135,319 @@ class _DiscoverPageState extends State<DiscoverPage>
     super.dispose();
   }
 
-  // ───────────────────────── data ─────────────────────────
+  // ───────────────────────── feed / playback sync ─────────────────────────
 
-  bool _add(Map raw) {
-    final id = raw['videoId']?.toString();
-    if (id == null || id.isEmpty || !_seen.add(id)) return false;
-    _songs.add(Map<String, dynamic>.from(raw));
-    return true;
+  void _onFeed() {
+    if (mounted) setState(() {});
   }
 
-  Future<List<Map>> _search(String q, String filter) async {
-    for (var attempt = 0; attempt < 2; attempt++) {
-      try {
-        final res = await GetIt.I<YTMusic>().search(q, filter: filter);
-        final sections = res['sections'] as List?;
-        if (sections == null || sections.isEmpty) continue;
-        final list = ((sections[0]['contents'] as List?) ?? const [])
-            .whereType<Map>()
-            .toList();
-        if (list.isNotEmpty) return list;
-      } catch (_) {
-        // retry once (the YT Music API sometimes drops the connection)
-      }
-    }
-    return <Map>[];
+  String? get _currentId {
+    final m = _mp.currentSongNotifier.value;
+    if (m == null) return null;
+    return (m.extras?['videoId'] ?? m.id).toString();
   }
 
-  Future<void> _loadInitial() async {
-    setState(() {
-      _loading = true;
-      _failed = false;
-    });
-    final queries = [..._seedQueries]..shuffle();
-    // Music videos first (real video), songs mixed in for variety.
-    final results = await Future.wait([
-      _search(queries[0], 'videos'),
-      _search(queries[1], 'videos'),
-      _search(queries[2], 'songs'),
-    ]);
-    final longest = results.fold<int>(0, (m, l) => math.max(m, l.length));
-    for (var i = 0; i < longest; i++) {
-      for (final l in results) {
-        if (i < l.length) _add(l[i]);
-      }
-    }
-    if (!mounted) return;
-    if (_songs.isEmpty) {
-      setState(() {
-        _failed = true;
-        _loading = false;
-      });
-      return;
-    }
-    setState(() => _loading = false);
-    _onShown(0);
+  /// Playback moved by itself (auto-next) → follow it with the pager.
+  void _onPlaybackSong() {
+    if (!mounted || !_owns || _active != true) return;
+    final idx = _feed.indexOf(_currentId);
+    if (idx < 0 || idx == _page || !_pages.hasClients) return;
+    _syncing = true;
+    _page = idx;
+    _pages
+        .animateToPage(idx,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic)
+        .whenComplete(() => _syncing = false);
+    _prefetch(idx);
+    _mp.flowTopUp(_feed.items.map((e) => e.song).toList(), idx);
+    setState(() {});
   }
 
-  Future<void> _loadMore() async {
-    if (_loadingMore || _songs.isEmpty) return;
-    _loadingMore = true;
-    try {
-      final seed = _songs[_songs.length - 1]['videoId'];
-      final more = await GetIt.I<YTMusic>()
-          .getNextSongList(videoId: seed, radio: true, limit: 25);
-      var added = false;
-      for (final s in more) {
-        if (s is Map && _add(s)) added = true;
-      }
-      if (added && mounted) setState(() {});
-    } catch (_) {
-      // feed simply ends
-    } finally {
-      _loadingMore = false;
+  void _goNext() {
+    final next = _page + 1;
+    if (next < _feed.items.length && _pages.hasClients) {
+      _pages.animateToPage(next,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic);
     }
   }
 
-  // ───────────────────────── playback ─────────────────────────
-
-  Future<YtVideoStreams?> _resolveStreams(String id) async {
-    if (_streams.containsKey(id)) return _streams[id];
-    YtVideoStreams? s;
-    try {
-      s = await YtVideoEngine.extractVideo(id, maxHeight: 480);
-    } catch (_) {
-      s = null;
-    }
-    _streams[id] = s;
-    return s;
+  void _onPageChanged(int i) {
+    final wasSyncing = _syncing;
+    setState(() => _page = i);
+    _prefetch(i);
+    if (!wasSyncing) _select(i);
   }
 
-  void _pauseMainPlayer() {
-    try {
-      GetIt.I<MediaPlayer>().player.pause();
-    } catch (_) {}
-  }
-
-  /// Loads the song and starts it right away (reels style).
-  Future<void> _openMedia(int i) async {
-    if (i < 0 || i >= _songs.length) return;
-    final id = _songs[i]['videoId'] as String;
-    final token = ++_openToken;
-    setState(() {
-      _mediaLoading = true;
-      _mediaError = false;
-      _playing = false;
-      _userPaused = false;
-    });
-    final s = await _resolveStreams(id);
-    if (!mounted || token != _openToken) return;
-    final url = s?.videoUrl;
-    if (url == null) {
-      setState(() {
-        _mediaLoading = false;
-        _mediaError = true;
-      });
-      return;
-    }
-    try {
-      final autoplay = _active == true;
-      if (autoplay) _pauseMainPlayer();
-      await _player.open(Media(url), play: autoplay);
-      final audio = s?.audioUrl;
-      if (audio != null) {
-        await _player.setAudioTrack(AudioTrack.uri(audio));
-      }
-      await _player.setVolume(100);
-    } catch (_) {
-      if (mounted && token == _openToken) {
-        setState(() {
-          _mediaLoading = false;
-          _mediaError = true;
-        });
-      }
-      return;
-    }
-    if (!mounted || token != _openToken) return;
-    setState(() => _mediaLoading = false);
-  }
-
-  void _togglePlay() {
-    if (_mediaLoading || _mediaError) return;
-    if (_playing) {
-      _userPaused = true;
-    } else {
-      _userPaused = false;
-      _pauseMainPlayer();
-    }
-    _player.playOrPause();
-  }
-
-  // ───────────────────────── paging ─────────────────────────
-
-  void _onShown(int i) {
-    if (i < 0 || i >= _songs.length) return;
-    _index = i;
-    _openMedia(i);
+  void _prefetch(int i) {
     _resolveCanvas(i);
-    // Prefetch the next two so swiping starts instantly.
-    for (var k = 1; k <= 2; k++) {
-      if (i + k < _songs.length) {
-        _resolveStreams(_songs[i + k]['videoId'] as String);
+    _lyricsFor(i);
+    if (i + 1 < _feed.items.length) _lyricsFor(i + 1);
+    if (i >= _feed.items.length - 4) _feed.loadMore();
+  }
+
+  /// Settled-page selection → command on the single shared player. Rapid
+  /// swipes only ever command the final destination (request id + debounce).
+  void _select(int i, {bool immediate = false}) {
+    if (i < 0 || i >= _feed.items.length) return;
+    final req = ++_request;
+    _debounce?.cancel();
+    void run() {
+      if (!mounted || req != _request || _active != true) return;
+      final item = _feed.items[i];
+      final songs = _feed.items.map((e) => e.song).toList();
+      if (_currentId == item.id) {
+        _owns = true;
+        _mp.flowActive = true;
+        _mp.flowTopUp(songs, i);
+        return;
       }
+      if (!_owns) {
+        _prevQueue = List<Map<String, dynamic>>.from(_mp.queueSnapshot.value);
+        _prevId = _currentId;
+        _prevPos = _mp.progressBarState.value.current;
+      }
+      _owns = true;
+      // One queue: already-loaded songs are a plain seek, the next few are
+      // resolved in the background (see MediaPlayer.flowPlay).
+      _mp.flowPlay(songs, i);
+      _prefetch(i);
+      if (mounted) setState(() {});
     }
-    if (i >= _songs.length - 4) _loadMore();
+
+    if (immediate) {
+      run();
+    } else {
+      _debounce = Timer(const Duration(milliseconds: 180), run);
+    }
   }
 
   Future<void> _resolveCanvas(int i) async {
-    if (i < 0 || i >= _songs.length) return;
-    final id = _songs[i]['videoId'] as String;
-    if (_canvas.containsKey(id) || !_canvasLoading.add(id)) return;
+    if (i < 0 || i >= _feed.items.length) return;
+    final item = _feed.items[i];
+    if (_canvas.containsKey(item.id) || !_canvasLoading.add(item.id)) return;
     String? url;
     try {
-      // Returns null unless the user is logged in to Spotify.
+      // null unless the user is logged in to Spotify.
       url = await SpotifyCanvas.instance.resolveCanvasUrl(
-        title: _title(_songs[i]),
-        artist: _artist(_songs[i]),
-        album: (_songs[i]['album'] as Map?)?['name']?.toString(),
+        title: item.title,
+        artist: item.artist,
+        album: (item.song['album'] as Map?)?['name']?.toString(),
       );
     } catch (_) {
       url = null;
     }
-    _canvasLoading.remove(id);
-    _canvas[id] = url;
+    _canvasLoading.remove(item.id);
+    _canvas[item.id] = url;
     if (mounted) setState(() {});
   }
 
-  // ───────────────────────── helpers ─────────────────────────
-
-  static String _title(Map s) => (s['title'] ?? '').toString();
-
-  static String _artist(Map s) {
-    final a = s['artists'];
-    if (a is List && a.isNotEmpty) {
-      return a
-          .map((e) => e is Map ? (e['name'] ?? '').toString() : e.toString())
-          .where((e) => e.isNotEmpty)
-          .join(', ');
-    }
-    return (s['artist'] ?? '').toString();
-  }
-
-  static String? _cover(Map s) {
-    final t = s['thumbnails'];
-    if (t is List && t.isNotEmpty && t.last is Map) {
-      final url = (t.last as Map)['url']?.toString();
-      if (url != null && url.isNotEmpty) {
-        return getEnhancedImage(url, width: 360);
-      }
-    }
-    return null;
+  Future<LyricsData?>? _lyricsFor(int i) {
+    if (i < 0 || i >= _feed.items.length) return null;
+    final item = _feed.items[i];
+    return _lyrics.putIfAbsent(
+        item.id,
+            () => LyricsService.lookup(
+          title: item.title,
+          artist: item.artist,
+          album: (item.song['album'] as Map?)?['name']?.toString(),
+          videoId: item.id,
+        ).catchError((_) => null));
   }
 
   // ───────────────────────── actions ─────────────────────────
 
-  Future<void> _like(Map<String, dynamic> song, {bool toggle = false}) async {
+  Future<void> _like(FlowItem item, {bool toggle = false}) async {
     HapticFeedback.lightImpact();
     final box = Hive.box('FAVOURITES');
-    final id = song['videoId'];
-    if (box.get(id) == null) {
-      await box.put(id, {
-        ...song,
+    if (box.get(item.id) == null) {
+      await box.put(item.id, {
+        ...item.song,
         'createdAt': DateTime.now().millisecondsSinceEpoch,
       });
     } else if (toggle) {
-      await box.delete(id);
+      await box.delete(item.id);
     }
   }
 
-  void _download(Map<String, dynamic> song) {
+  void _download(FlowItem item) {
     HapticFeedback.lightImpact();
-    GetIt.I<DownloadManager>().downloadSong(song);
-    ScaffoldMessenger.maybeOf(context)
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(
-        content: Text('Downloading…'),
-        duration: Duration(seconds: 1),
-      ));
+    GetIt.I<DownloadManager>().downloadSong(item.song);
+    _snack('Downloading…');
   }
 
-  void _goBranch(int b) {
-    _player.pause();
-    StatefulNavigationShell.of(context).goBranch(b);
+  void _share(FlowItem item) {
+    unawaited(SharePlus.instance.share(
+        ShareParams(uri: Uri.parse('https://music.youtube.com/watch?v=${item.id}'))));
   }
+
+  void _openArtist(FlowItem item) {
+    final a = item.artists;
+    if (a.isEmpty) return;
+    context.push('/artist', extra: {
+      'name': (a.first['name'] ?? '').toString(),
+      'browseId': a.first['id']?.toString(),
+    });
+  }
+
+  Future<void> _showLyrics(FlowItem item, int i) async {
+    final fut = _lyricsFor(i);
+    if (fut == null) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF121212),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.65,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        builder: (context, scroll) => FutureBuilder<LyricsData?>(
+          future: fut,
+          builder: (context, snap) {
+            final d = snap.data;
+            String text;
+            if (snap.connectionState != ConnectionState.done) {
+              text = 'Loading lyrics…';
+            } else if (d == null) {
+              text = 'No lyrics found for this song.';
+            } else if (d.synced != null && d.synced!.isNotEmpty) {
+              text = d.synced!.map((l) => l.text).join('\n');
+            } else {
+              text = (d.plain ?? '').isEmpty ? 'No lyrics found.' : d.plain!;
+            }
+            return ListView(
+              controller: scroll,
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+              children: [
+                Text(item.title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text(item.artist,
+                    style: const TextStyle(color: Colors.white60)),
+                const SizedBox(height: 20),
+                Text(text,
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 17, height: 1.6)),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _lessLikeThis() {
+    if (_page >= _feed.items.length) return;
+    final item = _feed.items[_page];
+    _feed.lessLikeThis(item);
+    _feed.hide(item.id);
+    _snack('You will see less like this');
+    _goNext();
+  }
+
+  Future<void> _restorePrevious() async {
+    if (_prevQueue.isEmpty) {
+      _snack('Nothing to restore');
+      return;
+    }
+    final idx = _prevQueue.indexWhere((e) => e['videoId'] == _prevId);
+    _owns = false;
+    final queue = _prevQueue;
+    final pos = _prevPos;
+    _prevQueue = const [];
+    await _mp.playAll(queue, index: idx < 0 ? 0 : idx);
+    if (pos > Duration.zero) _mp.seekTo(pos);
+    _snack('Previous queue restored');
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _refresh() async {
+    _canvas.clear();
+    _lyrics.clear();
+    _page = 0;
+    if (_pages.hasClients) _pages.jumpToPage(0);
+    await _feed.warm(force: true);
+    if (mounted && _active == true) _select(0, immediate: true);
+  }
+
+  void _snack(String s) {
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+          content: Text(s), duration: const Duration(milliseconds: 1400)));
+  }
+
+  void _goBranch(int b) => StatefulNavigationShell.of(context).goBranch(b);
 
   // ───────────────────────── build ─────────────────────────
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_loading) {
-      return const ColoredBox(
-        color: Colors.black,
-        child: Center(
-          child: SizedBox(
-            width: 26,
-            height: 26,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        ),
-      );
-    }
-    if (_failed) {
-      return ColoredBox(
-        color: Colors.black,
-        child: Stack(
+    final top = MediaQuery.viewPaddingOf(context).top;
+    final items = _feed.items;
+
+    Widget body;
+    if (items.isEmpty) {
+      body = Center(
+        child: _feed.isLoading
+            ? const SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(strokeWidth: 2))
+            : Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.wifi_off_rounded,
-                      color: Colors.white54, size: 36),
-                  const SizedBox(height: 12),
-                  const Text('Discover could not load.',
-                      style: TextStyle(color: Colors.white70)),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: _loadInitial,
-                    child: const Text('Retry',
-                        style: TextStyle(color: Colors.white)),
-                  ),
-                ],
-              ),
+            const Icon(Icons.wifi_off_rounded,
+                color: Colors.white54, size: 36),
+            const SizedBox(height: 12),
+            const Text('Discover could not load.',
+                style: TextStyle(color: Colors.white70)),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: _refresh,
+              child: const Text('Retry',
+                  style: TextStyle(color: Colors.white)),
             ),
-            _BackButton(onTap: () => _goBranch(_kHomeBranch)),
           ],
         ),
       );
+    } else {
+      body = PageView.builder(
+        controller: _pages,
+        scrollDirection: Axis.vertical,
+        itemCount: items.length,
+        onPageChanged: _onPageChanged,
+        itemBuilder: (context, i) {
+          final item = items[i];
+          return _FlowPage(
+            key: ValueKey(item.id),
+            item: item,
+            current: i == _page,
+            mp: _mp,
+            canvasUrl: _canvas[item.id],
+            lyrics: i == _page ? _lyricsFor(i) : null,
+            onTap: _mp.togglePlayPause,
+            onLike: () => _like(item),
+            onLikeToggle: () => _like(item, toggle: true),
+            onPlaylist: () => Modals.addToPlaylist(context, item.song),
+            onLyrics: () => _showLyrics(item, i),
+            onShare: () => _share(item),
+            onDownload: () => _download(item),
+            onMore: () => Modals.showSongBottomModal(context, item.song),
+            onArtist: () => _openArtist(item),
+          );
+        },
+      );
     }
 
-    final top = MediaQuery.viewPaddingOf(context).top;
     return NotificationListener<UserScrollNotification>(
       // Feed scrolling must not touch the shell's auto-hide logic.
       onNotification: (_) => true,
@@ -439,40 +467,58 @@ class _DiscoverPageState extends State<DiscoverPage>
           child: Stack(
             fit: StackFit.expand,
             children: [
-              PageView.builder(
-                controller: _pages,
-                scrollDirection: Axis.vertical,
-                itemCount: _songs.length,
-                onPageChanged: _onShown,
-                itemBuilder: (context, i) {
-                  final song = _songs[i];
-                  final current = i == _index;
-                  return _DiscoverCard(
-                    key: ValueKey(song['videoId']),
-                    song: song,
-                    current: current,
-                    player: _player,
-                    video: _video,
-                    playing: current && _playing,
-                    loading: current && _mediaLoading,
-                    error: current && _mediaError,
-                    title: _title(song),
-                    artist: _artist(song),
-                    cover: _cover(song),
-                    canvasUrl: _canvas[song['videoId']],
-                    onTap: _togglePlay,
-                    onRetry: () => _openMedia(i),
-                    onLike: () => _like(song),
-                    onLikeToggle: () => _like(song, toggle: true),
-                    onDownload: () => _download(song),
-                  );
-                },
-              ),
-              // Exit arrow (top-left).
+              body,
               Positioned(
                 left: 6,
+                right: 6,
                 top: top + 4,
-                child: _BackButton(onTap: () => _goBranch(_kHomeBranch)),
+                child: Row(
+                  children: [
+                    _RoundIcon(
+                        icon: Icons.arrow_back_rounded,
+                        tooltip: 'Back',
+                        onTap: () => _goBranch(_kHomeBranch)),
+                    const Spacer(),
+                    if (_feed.isOffline)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 8),
+                        child: Text('Offline',
+                            style: TextStyle(
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    PopupMenuButton<String>(
+                      tooltip: 'Menu',
+                      color: const Color(0xFF1E1E1E),
+                      icon: const _RoundIconBody(icon: Icons.more_vert_rounded),
+                      onSelected: (v) {
+                        switch (v) {
+                          case 'refresh':
+                            _refresh();
+                          case 'less':
+                            _lessLikeThis();
+                          case 'restore':
+                            _restorePrevious();
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
+                            value: 'refresh',
+                            child: Text('Refresh feed',
+                                style: TextStyle(color: Colors.white))),
+                        const PopupMenuItem(
+                            value: 'less',
+                            child: Text('Less like this',
+                                style: TextStyle(color: Colors.white))),
+                        PopupMenuItem(
+                            value: 'restore',
+                            enabled: _prevQueue.isNotEmpty,
+                            child: const Text('Restore previous queue',
+                                style: TextStyle(color: Colors.white))),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -482,69 +528,47 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 }
 
-class _BackButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _BackButton({required this.onTap});
+// ───────────────────────── one page ─────────────────────────
 
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(6),
-        child: IconButton(
-          tooltip: 'Back',
-          onPressed: onTap,
-          style: IconButton.styleFrom(backgroundColor: const Color(0x55000000)),
-          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-        ),
-      ),
-    );
-  }
-}
-
-class _DiscoverCard extends StatefulWidget {
-  final Map<String, dynamic> song;
+class _FlowPage extends StatefulWidget {
+  final FlowItem item;
   final bool current;
-  final Player player;
-  final VideoController video;
-  final bool playing;
-  final bool loading;
-  final bool error;
-  final String title;
-  final String artist;
-  final String? cover;
+  final MediaPlayer mp;
   final String? canvasUrl;
+  final Future<LyricsData?>? lyrics;
   final VoidCallback onTap;
-  final VoidCallback onRetry;
   final VoidCallback onLike;
   final VoidCallback onLikeToggle;
+  final VoidCallback onPlaylist;
+  final VoidCallback onLyrics;
+  final VoidCallback onShare;
   final VoidCallback onDownload;
+  final VoidCallback onMore;
+  final VoidCallback onArtist;
 
-  const _DiscoverCard({
+  const _FlowPage({
     super.key,
-    required this.song,
+    required this.item,
     required this.current,
-    required this.player,
-    required this.video,
-    required this.playing,
-    required this.loading,
-    required this.error,
-    required this.title,
-    required this.artist,
-    required this.cover,
+    required this.mp,
     required this.canvasUrl,
+    required this.lyrics,
     required this.onTap,
-    required this.onRetry,
     required this.onLike,
     required this.onLikeToggle,
+    required this.onPlaylist,
+    required this.onLyrics,
+    required this.onShare,
     required this.onDownload,
+    required this.onMore,
+    required this.onArtist,
   });
 
   @override
-  State<_DiscoverCard> createState() => _DiscoverCardState();
+  State<_FlowPage> createState() => _FlowPageState();
 }
 
-class _DiscoverCardState extends State<_DiscoverCard>
+class _FlowPageState extends State<_FlowPage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _burst = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 750));
@@ -560,41 +584,56 @@ class _DiscoverCardState extends State<_DiscoverCard>
   void _doubleTap() {
     setState(() => _burstAt = _lastDown);
     _burst.forward(from: 0);
-    widget.onLike(); // double tap only likes (never un-likes)
+    widget.onLike(); // double tap only likes
+  }
+
+  String? get _cover {
+    final t = widget.item.song['thumbnails'];
+    if (t is List && t.isNotEmpty && t.last is Map) {
+      final url = (t.last as Map)['url']?.toString();
+      if (url != null && url.isNotEmpty) return getEnhancedImage(url, width: 720);
+    }
+    return null;
+  }
+
+  bool get _isThisSongLoaded {
+    final m = widget.mp.currentSongNotifier.value;
+    if (m == null) return false;
+    return (m.extras?['videoId'] ?? m.id).toString() == widget.item.id;
   }
 
   @override
   Widget build(BuildContext context) {
-    final id = widget.song['videoId'];
+    final item = widget.item;
+    final id = item.id;
     final vp = MediaQuery.viewPaddingOf(context);
-    final useCanvas = widget.canvasUrl != null && widget.current;
+    final cover = _cover;
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Backdrop: dimmed cover art, visible until the first video frame.
-        _CoverStage(cover: widget.cover),
+        // Full-bleed art (no blur: stays smooth on low-end phones).
+        if (cover != null)
+          Image.network(cover,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) =>
+              const ColoredBox(color: Color(0xFF111111)))
+        else
+          const ColoredBox(color: Color(0xFF111111)),
 
-        // Video / Spotify canvas (current page only).
-        if (widget.current)
-          if (useCanvas)
-            VideoBackdrop(
+        // Spotify canvas loop (only when logged in to Spotify).
+        if (widget.current && widget.canvasUrl != null)
+          ValueListenableBuilder<ButtonState>(
+            valueListenable: widget.mp.buttonState,
+            builder: (context, st, _) => VideoBackdrop(
               streamUrl: widget.canvasUrl!,
               shortLoop: true,
-              posterUrl: widget.cover,
-              playing: widget.playing,
-            )
-          else if (!widget.error)
-            Positioned.fill(
-              child: Video(
-                controller: widget.video,
-                controls: NoVideoControls,
-                fit: BoxFit.cover, // fill the 9:16 screen
-                fill: Colors.transparent,
-              ),
+              posterUrl: cover,
+              playing: st == ButtonState.playing && _isThisSongLoaded,
             ),
+          ),
 
-        // Readability gradients (cheap, no blur).
+        // Bottom + top readability gradients.
         const IgnorePointer(
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -602,17 +641,19 @@ class _DiscoverCardState extends State<_DiscoverCard>
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Color(0x66000000),
+                  Color(0x73000000),
                   Color(0x00000000),
-                  Color(0xCC000000)
+                  Color(0x00000000),
+                  Color(0xCC000000),
+                  Color(0xF5000000),
                 ],
-                stops: [0.0, 0.5, 1.0],
+                stops: [0.0, 0.22, 0.45, 0.72, 1.0],
               ),
             ),
           ),
         ),
 
-        // Tap = play/pause, double tap = like.
+        // Tap = play/pause · double-tap = like · long-press = more.
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -620,14 +661,53 @@ class _DiscoverCardState extends State<_DiscoverCard>
             onDoubleTapDown: (d) => _lastDown = d.localPosition,
             onTap: widget.current ? widget.onTap : null,
             onDoubleTap: widget.current ? _doubleTap : null,
+            onLongPress: widget.current ? widget.onMore : null,
           ),
         ),
 
-        // Centre status: spinner / error / big play icon.
+        // Centre: loading spinner / big play icon when paused.
         if (widget.current)
           IgnorePointer(
-            ignoring: !widget.error,
-            child: Center(child: _centerStatus()),
+            child: Center(
+              child: ValueListenableBuilder<ButtonState>(
+                valueListenable: widget.mp.buttonState,
+                builder: (context, st, _) {
+                  final loaded = _isThisSongLoaded;
+                  if (!loaded || st == ButtonState.loading) {
+                    return const SizedBox(
+                      width: 30,
+                      height: 30,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.4, color: Colors.white),
+                    );
+                  }
+                  return AnimatedOpacity(
+                    opacity: st == ButtonState.playing ? 0 : 1,
+                    duration: const Duration(milliseconds: 180),
+                    child: Container(
+                      width: 76,
+                      height: 76,
+                      decoration: const BoxDecoration(
+                          color: Color(0x8C000000), shape: BoxShape.circle),
+                      child: const Icon(Icons.play_arrow_rounded,
+                          color: Colors.white, size: 50),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+
+        // Lyric line capsule.
+        if (widget.current && widget.lyrics != null)
+          Positioned(
+            top: vp.top + 64,
+            left: 0,
+            right: 0,
+            child: _LyricCapsule(
+                future: widget.lyrics!,
+                mp: widget.mp,
+                onTap: widget.onLyrics),
           ),
 
         // Double-tap heart burst.
@@ -655,147 +735,208 @@ class _DiscoverCardState extends State<_DiscoverCard>
           },
         ),
 
-        // Title / artist.
+        // Title / artist + 6 action buttons.
         Positioned(
-          left: 20,
-          right: 90,
-          bottom: vp.bottom + 40,
-          child: IgnorePointer(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(widget.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        height: 1.15)),
-                const SizedBox(height: 6),
-                Text(widget.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 14.5)),
-              ],
-            ),
-          ),
-        ),
-
-        // The two buttons: Like + Download.
-        Positioned(
-          right: 14,
-          bottom: vp.bottom + 40,
+          left: 0,
+          right: 0,
+          bottom: vp.bottom + 26,
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ValueListenableBuilder(
-                valueListenable: Hive.box('FAVOURITES').listenable(keys: [id]),
-                builder: (context, box, _) {
-                  final liked = box.get(id) != null;
-                  return _ActionButton(
-                    icon: liked
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
-                    color: liked ? const Color(0xFFFF3B5C) : Colors.white,
-                    label: 'Like',
-                    onTap: widget.onLikeToggle,
-                  );
-                },
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            height: 1.15)),
+                    const SizedBox(height: 6),
+                    GestureDetector(
+                      onTap: widget.onArtist,
+                      child: Text(item.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 15)),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 22),
-              ValueListenableBuilder(
-                valueListenable: Hive.box('DOWNLOADS').listenable(keys: [id]),
-                builder: (context, box, _) {
-                  final status = (box.get(id) as Map?)?['status'];
-                  final done = status == 'DOWNLOADED';
-                  final busy = status == 'DOWNLOADING' || status == 'QUEUED';
-                  return _ActionButton(
-                    icon: done
-                        ? Icons.download_done_rounded
-                        : Icons.download_rounded,
-                    color: done ? const Color(0xFF4ADE80) : Colors.white,
-                    label: done ? 'Saved' : (busy ? '…' : 'Download'),
-                    onTap: (done || busy) ? null : widget.onDownload,
-                  );
-                },
+              const SizedBox(height: 18),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    ValueListenableBuilder(
+                      valueListenable:
+                      Hive.box('FAVOURITES').listenable(keys: [id]),
+                      builder: (context, box, _) {
+                        final liked = box.get(id) != null;
+                        return _ActionButton(
+                          icon: liked
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          color: liked ? const Color(0xFFFF3B5C) : Colors.white,
+                          label: 'Like',
+                          onTap: widget.onLikeToggle,
+                        );
+                      },
+                    ),
+                    _ActionButton(
+                        icon: Icons.playlist_add_rounded,
+                        label: 'Playlist',
+                        onTap: widget.onPlaylist),
+                    _ActionButton(
+                        icon: Icons.lyrics_outlined,
+                        label: 'Lyrics',
+                        onTap: widget.onLyrics),
+                    _ActionButton(
+                        icon: Icons.ios_share_rounded,
+                        label: 'Share',
+                        onTap: widget.onShare),
+                    ValueListenableBuilder(
+                      valueListenable:
+                      Hive.box('DOWNLOADS').listenable(keys: [id]),
+                      builder: (context, box, _) {
+                        final status = (box.get(id) as Map?)?['status'];
+                        final done = status == 'DOWNLOADED';
+                        final busy =
+                            status == 'DOWNLOADING' || status == 'QUEUED';
+                        return _ActionButton(
+                          icon: done
+                              ? Icons.download_done_rounded
+                              : Icons.download_rounded,
+                          color: done ? const Color(0xFF4ADE80) : Colors.white,
+                          label: done ? 'Saved' : (busy ? '…' : 'Download'),
+                          onTap: (done || busy) ? null : widget.onDownload,
+                        );
+                      },
+                    ),
+                    _ActionButton(
+                        icon: Icons.more_horiz_rounded,
+                        label: 'More',
+                        onTap: widget.onMore),
+                  ],
+                ),
               ),
             ],
           ),
         ),
 
-        // Instagram-style thin seek bar.
+        // Thin seek bar (main player position).
         if (widget.current)
           Positioned(
             left: 0,
             right: 0,
             bottom: vp.bottom,
-            child: _SeekBar(player: widget.player),
+            child: _SeekBar(mp: widget.mp, enabled: _isThisSongLoaded),
           ),
       ],
     );
   }
+}
 
-  Widget _centerStatus() {
-    if (widget.error) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.error_outline, color: Colors.white70, size: 34),
-          const SizedBox(height: 10),
-          const Text('This song could not be played.',
-              style: TextStyle(color: Colors.white70)),
-          const SizedBox(height: 12),
-          OutlinedButton(
-            onPressed: widget.onRetry,
-            child: const Text('Retry', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      );
-    }
-    if (widget.loading) {
-      return const SizedBox(
-        width: 30,
-        height: 30,
-        child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
-      );
-    }
-    return AnimatedOpacity(
-      opacity: widget.playing ? 0 : 1,
-      duration: const Duration(milliseconds: 180),
-      child: Container(
-        width: 78,
-        height: 78,
-        decoration: const BoxDecoration(
-            color: Color(0x66000000), shape: BoxShape.circle),
-        child:
-        const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 52),
-      ),
+// ───────────────────────── small widgets ─────────────────────────
+
+class _LyricCapsule extends StatelessWidget {
+  final Future<LyricsData?> future;
+  final MediaPlayer mp;
+  final VoidCallback onTap;
+  const _LyricCapsule(
+      {required this.future, required this.mp, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<LyricsData?>(
+      future: future,
+      builder: (context, snap) {
+        final lines = snap.data?.synced;
+        if (lines == null || lines.isEmpty) return const SizedBox.shrink();
+        return ValueListenableBuilder<ProgressBarState>(
+          valueListenable: mp.progressBarState,
+          builder: (context, p, _) {
+            final ms = p.current.inMilliseconds;
+            var idx = -1;
+            for (var i = 0; i < lines.length; i++) {
+              if (lines[i].timeMs <= ms) {
+                idx = i;
+              } else {
+                break;
+              }
+            }
+            final text = lines[idx < 0 ? 0 : idx].text.trim();
+            if (text.isEmpty) return const SizedBox.shrink();
+            return Center(
+              child: GestureDetector(
+                onTap: onTap,
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 28),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0x80000000),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: const Color(0x33FFFFFF)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.lyrics_outlined,
+                          size: 16, color: Colors.white70),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          child: Text(text,
+                              key: ValueKey(text),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
 
-/// Thin progress line (Instagram style). Grows while touched; tap or drag
-/// to seek.
+/// Thin progress line (Instagram style); grows while touched. Tap or drag to
+/// seek the main player.
 class _SeekBar extends StatefulWidget {
-  final Player player;
-  const _SeekBar({required this.player});
+  final MediaPlayer mp;
+  final bool enabled;
+  const _SeekBar({required this.mp, required this.enabled});
 
   @override
   State<_SeekBar> createState() => _SeekBarState();
 }
 
 class _SeekBarState extends State<_SeekBar> {
-  double? _drag; // 0..1 while dragging
+  double? _drag;
   bool _down = false;
 
   void _seekTo(double f) {
-    final d = widget.player.state.duration;
-    if (d == Duration.zero) return;
-    widget.player.seek(Duration(
-        milliseconds: (d.inMilliseconds * f.clamp(0.0, 1.0)).round()));
+    final total = widget.mp.progressBarState.value.total;
+    if (total == Duration.zero) return;
+    widget.mp.seekTo(Duration(
+        milliseconds: (total.inMilliseconds * f.clamp(0.0, 1.0)).round()));
   }
 
   @override
@@ -819,29 +960,23 @@ class _SeekBarState extends State<_SeekBar> {
           height: 26,
           child: Align(
             alignment: Alignment.bottomCenter,
-            child: StreamBuilder<Duration>(
-              stream: widget.player.stream.duration,
-              initialData: widget.player.state.duration,
-              builder: (context, durSnap) {
-                final total = (durSnap.data ?? Duration.zero).inMilliseconds;
-                return StreamBuilder<Duration>(
-                  stream: widget.player.stream.position,
-                  initialData: widget.player.state.position,
-                  builder: (context, posSnap) {
-                    final pos = (posSnap.data ?? Duration.zero).inMilliseconds;
-                    final f = _drag ??
-                        (total <= 0 ? 0.0 : (pos / total).clamp(0.0, 1.0));
-                    return Container(
-                      height: _down ? 6 : 2.5,
-                      width: w,
-                      color: const Color(0x44FFFFFF),
-                      alignment: Alignment.centerLeft,
-                      child: FractionallySizedBox(
-                        widthFactor: f,
-                        child: Container(color: Colors.white),
-                      ),
-                    );
-                  },
+            child: ValueListenableBuilder<ProgressBarState>(
+              valueListenable: widget.mp.progressBarState,
+              builder: (context, p, _) {
+                final total = p.total.inMilliseconds;
+                final f = _drag ??
+                    (!widget.enabled || total <= 0
+                        ? 0.0
+                        : (p.current.inMilliseconds / total).clamp(0.0, 1.0));
+                return Container(
+                  height: _down ? 6 : 2.5,
+                  width: w,
+                  color: const Color(0x44FFFFFF),
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: f,
+                    child: Container(color: Colors.white),
+                  ),
                 );
               },
             ),
@@ -860,9 +995,9 @@ class _ActionButton extends StatelessWidget {
 
   const _ActionButton({
     required this.icon,
-    required this.color,
     required this.label,
     required this.onTap,
+    this.color = Colors.white,
   });
 
   @override
@@ -870,75 +1005,63 @@ class _ActionButton extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 54,
-            height: 54,
-            decoration: const BoxDecoration(
-              color: Color(0x55000000),
-              shape: BoxShape.circle,
+      child: SizedBox(
+        width: 56,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: const BoxDecoration(
+                  color: Color(0x40FFFFFF), shape: BoxShape.circle),
+              child: Icon(icon, color: color, size: 25),
             ),
-            child: Icon(icon, color: color, size: 29),
-          ),
-          const SizedBox(height: 5),
-          Text(label,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600)),
-        ],
+            const SizedBox(height: 5),
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// Backdrop: cover art, slowly drifting/zooming under a dark tint.
-/// Transform-only animation (no blur) so low-end phones stay smooth.
-class _CoverStage extends StatefulWidget {
-  final String? cover;
-  const _CoverStage({required this.cover});
-
-  @override
-  State<_CoverStage> createState() => _CoverStageState();
-}
-
-class _CoverStageState extends State<_CoverStage>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(seconds: 14))
-    ..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
+class _RoundIcon extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  const _RoundIcon(
+      {required this.icon, required this.tooltip, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final cover = widget.cover;
-    if (cover == null) return const ColoredBox(color: Color(0xFF111111));
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (context, child) {
-        final t = Curves.easeInOut.transform(_c.value);
-        return Transform.translate(
-          offset: Offset((t - 0.5) * 24, (0.5 - t) * 18),
-          child: Transform.scale(scale: 1.35 + 0.12 * t, child: child),
-        );
-      },
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.network(cover,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
-              const ColoredBox(color: Color(0xFF111111))),
-          const ColoredBox(color: Color(0xAA000000)),
-        ],
-      ),
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onTap,
+      style: IconButton.styleFrom(backgroundColor: const Color(0x55000000)),
+      icon: Icon(icon, color: Colors.white),
+    );
+  }
+}
+
+class _RoundIconBody extends StatelessWidget {
+  final IconData icon;
+  const _RoundIconBody({required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: const BoxDecoration(
+          color: Color(0x55000000), shape: BoxShape.circle),
+      child: Icon(icon, color: Colors.white),
     );
   }
 }

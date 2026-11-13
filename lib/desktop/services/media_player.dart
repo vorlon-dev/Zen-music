@@ -1562,9 +1562,130 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
+  // ─────────────────────── Discover "Music Flow" ───────────────────────
+  //
+  // The Discover feed (mobile) owns the player queue while its tab is the
+  // visible one: flowPlay starts the feed, flowTopUp keeps a few resolved
+  // songs ahead of the playhead and the normal YT auto-fetch is paused
+  // (flowActive) so unrelated tracks never sneak into the feed queue.
+
+  /// True while the Discover feed commands the queue (auto-fetch paused).
+  bool _flowActive = false;
+
+  bool get flowActive => _flowActive;
+
+  set flowActive(bool v) {
+    if (_flowActive == v) return;
+    _flowActive = v;
+    if (v) _restoredPending = false; // Discover takes over a pending restore
+  }
+
+  List<Map<String, dynamic>> _flowSongs = const <Map<String, dynamic>>[];
+  int _flowResolvedThrough = -1; // highest feed index the playlist covers
+  int _flowTargetThrough = -1;
+  bool _flowToppingUp = false;
+  int _flowGen = 0; // invalidates a running top-up when the feed restarts
+
+  /// Discover feed took over the player: replace the queue with the feed's
+  /// songs and start [index]. A song that is already resolved in the
+  /// current playlist is a plain seek (preloaded audio around it survives);
+  /// the next few songs are resolved in the background by [flowTopUp].
+  Future<void> flowPlay(List songs, int index) async {
+    if (songs.isEmpty) return;
+    _restoredPending = false;
+    _flowActive = true;
+    _flowSongs = songs.map((s) => Map<String, dynamic>.from(s as Map)).toList();
+    index = index.clamp(0, _flowSongs.length - 1).toInt();
+    queueSnapshot.value = List<Map<String, dynamic>>.from(_flowSongs);
+    _queueEpoch++;
+    if (_engineOwnsPlayback) await _releaseEngine();
+
+    // Already in the playlist → plain seek, no reload.
+    final vid = _flowSongs[index]['videoId']?.toString();
+    if (vid != null && vid.isNotEmpty) {
+      final pos = _player.sequence.indexWhere(
+          (s) => s.tag is MediaItem && (s.tag as MediaItem).id == vid);
+      if (pos >= 0) {
+        await _player.seek(Duration.zero, index: pos);
+        unawaited(_player.play());
+        _saveCurrentState();
+        unawaited(_flowTopUpFrom(index));
+        return;
+      }
+    }
+
+    // Fresh start (first entry or a jump beyond the preloaded window).
+    _flowGen++;
+    _flowToppingUp = false;
+    _buttonState.value = ButtonState.loading;
+    notifyListeners();
+    try {
+      await _player.stop();
+      await _player.clearAudioSources();
+      final first =
+          await _getAudioSource(Map<String, dynamic>.from(_flowSongs[index]));
+      await _player.setAudioSource(first);
+      _flowResolvedThrough = index;
+      _player.play();
+      _saveCurrentState();
+      unawaited(_flowTopUpFrom(index));
+    } catch (e) {
+      print('[flow] play failed: $e');
+      _buttonState.value = ButtonState.paused;
+      notifyListeners();
+    }
+  }
+
+  /// Playback advanced inside the feed → mirror the feed into the queue
+  /// snapshot and keep ~3 songs resolved ahead of the playhead. Safe to
+  /// call repeatedly; only one resolution loop runs at a time.
+  Future<void> flowTopUp(List songs, int index) async {
+    if (songs.isEmpty) return;
+    _flowSongs = songs.map((s) => Map<String, dynamic>.from(s as Map)).toList();
+    queueSnapshot.value = List<Map<String, dynamic>>.from(_flowSongs);
+    await _flowTopUpFrom(index.clamp(0, _flowSongs.length - 1).toInt());
+  }
+
+  Future<void> _flowTopUpFrom(int feedIndex) async {
+    if (!_flowActive || _flowSongs.isEmpty) return;
+    if (feedIndex > _flowTargetThrough) _flowTargetThrough = feedIndex;
+    final gen = _flowGen;
+    if (_flowToppingUp) return;
+    _flowToppingUp = true;
+    try {
+      while (_flowGen == gen &&
+          _flowActive &&
+          _flowResolvedThrough < _flowTargetThrough &&
+          _flowResolvedThrough + 1 < _flowSongs.length) {
+        // Enough sources already queued ahead of the playhead?
+        final cur = _player.currentIndex;
+        if (cur != null && _player.sequence.length - 1 - cur >= 3) break;
+        final next = _flowResolvedThrough + 1;
+        if (next <= feedIndex) {
+          // Never fall behind the playhead.
+          _flowResolvedThrough = next;
+          continue;
+        }
+        try {
+          final src = await _getAudioSource(
+              Map<String, dynamic>.from(_flowSongs[next]));
+          if (_flowGen != gen || !_flowActive) break;
+          await _player.addAudioSource(src);
+        } catch (_) {
+          // Unresolvable track — skip it, the feed keeps moving.
+        }
+        _flowResolvedThrough = next;
+      }
+    } finally {
+      // Only the current generation may clear the flag; a stale loop from
+      // a restarted feed must not unlock a newer one.
+      if (_flowGen == gen) _flowToppingUp = false;
+    }
+  }
+
   void _listenToAutofetch() {
     player.currentIndexStream.listen((index) async {
-      if (_engineOwnsPlayback) return;
+      if (_engineOwnsPlayback || _flowActive) return;
       if (index == null) return;
       if (player.sequence.length - index < 5 &&
           GetIt.I<SettingsManager>().autofetchSongs &&

@@ -7,6 +7,7 @@ import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:zenmusic/desktop/services/lyric_styles.dart';
 import 'package:zenmusic/desktop/services/sing_mode.dart';
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -19,6 +20,7 @@ import 'package:zenmusic/desktop/main.dart' show ZenDesktopApp, initialiseHive;
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/beat_haptics.dart';
 import 'package:zenmusic/desktop/services/zen_wall_service.dart';
+import 'package:zenmusic/desktop/services/discover_feed.dart';
 import 'package:zenmusic/desktop/services/download_manager.dart';
 import 'package:zenmusic/desktop/services/file_storage.dart';
 import 'package:zenmusic/desktop/services/innertubex_bridge.dart';
@@ -109,6 +111,11 @@ Future<void> main() async {
   GetIt.I.registerSingleton<LyricsService>(LyricsService());
 
   GetIt.I.registerSingleton<YTMusic>(ytMusic);
+
+  // Discover: load songs + resolve first streams now, so the tab is instant.
+  if (Platform.isAndroid || Platform.isIOS) {
+    unawaited(DiscoverFeed.instance.warm());
+  }
 
   JamService.instance.start(mediaPlayer);
 
