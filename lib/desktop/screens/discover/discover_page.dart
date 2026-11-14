@@ -94,19 +94,19 @@ class _DiscoverPageState extends State<DiscoverPage>
     // Branch pages stay alive; TickerMode is switched off while another tab
     // is shown. TickerMode.of() does NOT notify on that change, so listen to
     // its notifier (this is what makes the dock come back after leaving).
-    final notifier = TickerMode.getValuesNotifier(context);
+    final notifier = TickerMode.getNotifier(context);
     if (!identical(notifier, _tickerNotifier)) {
       _tickerNotifier?.removeListener(_onTickerChanged);
       _tickerNotifier = notifier..addListener(_onTickerChanged);
     }
-    _applyActive(notifier.value.enabled);
+    _applyActive(notifier.value);
   }
 
-  ValueListenable<TickerModeData>? _tickerNotifier;
+  ValueListenable<bool>? _tickerNotifier;
 
   void _onTickerChanged() {
     final n = _tickerNotifier;
-    if (n != null && mounted) _applyActive(n.value.enabled);
+    if (n != null && mounted) _applyActive(n.value);
   }
 
   void _applyActive(bool active) {
@@ -278,8 +278,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   void _share(FlowItem item) {
-    unawaited(SharePlus.instance.share(
-        ShareParams(uri: Uri.parse('https://music.youtube.com/watch?v=${item.id}'))));
+    Share.shareUri(Uri.parse('https://music.youtube.com/watch?v=${item.id}'));
   }
 
   void _openArtist(FlowItem item) {
@@ -616,7 +615,7 @@ class _FlowPageState extends State<_FlowPage>
         if (cover != null)
           Image.network(cover,
               fit: BoxFit.cover,
-              errorBuilder: (_, _, _) =>
+              errorBuilder: (_, __, ___) =>
               const ColoredBox(color: Color(0xFF111111)))
         else
           const ColoredBox(color: Color(0xFF111111)),

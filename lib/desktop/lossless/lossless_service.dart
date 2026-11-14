@@ -12,6 +12,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
+import 'package:zenmusic/desktop/lossless/song_quality.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
 class LosslessService {
@@ -99,7 +100,7 @@ class LosslessService {
         return null;
       }
 
-      final wanted = LosslessPrefs.current;
+      final wanted = SongQuality.forSong(tag.id) ?? LosslessPrefs.current;
       for (final tier in _ladderFrom(wanted)) {
         final url = streams[tier.tierKey];
         if (url != null && url.isNotEmpty) {

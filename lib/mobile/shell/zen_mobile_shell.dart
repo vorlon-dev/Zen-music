@@ -15,17 +15,21 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
+import 'package:flutter/gestures.dart'
+    show DragUpdateDetails, DragEndDetails, GestureDragUpdateCallback, GestureDragEndCallback;
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio_background/just_audio_background.dart' show MediaItem;
 
+import 'package:zenmusic/desktop/screens/player/player_page.dart';
 import 'package:zenmusic/desktop/screens/shell/widgets/bottom_player.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
 
 const List<int> kZenMobileBranchOrder = [0, 1, 2, 3, 4];
+const int _kDiscoverBranch = 2; // Home, Search, Discover, Saved, Settings
 
 // ── Dock geometry ───────────────────────────────────────────────────────────
 const double _kBarHeight = 64; // pill bar
@@ -55,14 +59,66 @@ class ZenMobileShell extends StatefulWidget {
   State<ZenMobileShell> createState() => _ZenMobileShellState();
 }
 
-class _ZenMobileShellState extends State<ZenMobileShell> {
+class _ZenMobileShellState extends State<ZenMobileShell>
+    with SingleTickerProviderStateMixin {
   // Only the chrome listens to this; the page below is never rebuilt by it.
   final ValueNotifier<bool> _chromeHidden = ValueNotifier<bool>(false);
 
+  // Player sheet: 0 = closed (mini player), 1 = fully open. Dragged by the
+  // finger, so the sheet, the mini player and the dock all follow it.
+  late final AnimationController _sheet = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+  );
+  bool _sheetBuilt = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _sheet.addListener(() {
+      if (_sheet.value > 0 && !_sheetBuilt) setState(() => _sheetBuilt = true);
+    });
+    // Refresh PopScope (back closes the sheet) when it settles open / closed.
+    _sheet.addStatusListener((status) {
+      if (!mounted) return;
+      setState(() {
+        // Unmount the player once closed: PlayerPage raises
+        // ShellOverlaysBus.fullPageAbove while mounted (hides the dock) and
+        // only clears it on dispose. Keeping it mounted left the dock hidden.
+        if (status == AnimationStatus.dismissed) _sheetBuilt = false;
+      });
+      if (status == AnimationStatus.dismissed) {
+        ShellOverlaysBus.fullPageAbove.value = false;
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _sheet.dispose();
     _chromeHidden.dispose();
     super.dispose();
+  }
+
+  void _openSheet() => _sheet.animateTo(1,
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeOutCubic);
+
+  void _closeSheet() => _sheet.animateTo(0,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeInCubic);
+
+  void _dragSheet(DragUpdateDetails d, double height) {
+    _sheet.value = (_sheet.value - d.delta.dy / height).clamp(0.0, 1.0);
+  }
+
+  void _endDragSheet(DragEndDetails d, double height) {
+    final v = -d.velocity.pixelsPerSecond.dy / height; // + = flinging up
+    if (v.abs() > 0.8) {
+      v > 0 ? _openSheet() : _closeSheet();
+    } else {
+      _sheet.value > 0.5 ? _openSheet() : _closeSheet();
+    }
   }
 
   void _goBranch(int branch) {
@@ -90,48 +146,127 @@ class _ZenMobileShellState extends State<ZenMobileShell> {
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
+    // While the keyboard is open the dock + mini player are hidden and add no
+    // bottom padding; otherwise they float above the keyboard and leave a big
+    // empty bar (Search screen).
+    final keyboardOpen = mq.viewInsets.bottom > 0;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: NotificationListener<UserScrollNotification>(
-        onNotification: _onUserScroll,
-        child: ValueListenableBuilder<bool>(
-          valueListenable: ShellOverlaysBus.fullPageAbove,
-          builder: (context, pageAbove, _) {
-            return ValueListenableBuilder<MediaItem?>(
-              valueListenable: GetIt.I<MediaPlayer>().currentSongNotifier,
-              builder: (context, currentSong, _) {
-                final miniInset =
-                (currentSong == null || pageAbove) ? 0.0 : 82.0;
-                return Stack(
-                  children: [
-                    Positioned.fill(
-                      child: MediaQuery(
-                        data: mq.copyWith(
-                          padding: mq.padding.copyWith(
-                            bottom: math.max(mq.padding.bottom,
-                                mq.padding.bottom + _kDockExtent + miniInset),
+    return PopScope(
+      canPop: _sheet.value == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _sheet.value > 0) _closeSheet();
+      },
+      child: Scaffold(
+        // The inner pages' own Scaffolds handle the keyboard; the shell must not
+        // shrink the whole stack as well.
+        resizeToAvoidBottomInset: false,
+        backgroundColor: Colors.transparent,
+        body: NotificationListener<UserScrollNotification>(
+          onNotification: _onUserScroll,
+          child: ValueListenableBuilder<bool>(
+            valueListenable: ShellOverlaysBus.fullPageAbove,
+            builder: (context, pageAboveRaw, _) {
+              // The "page above" flag only matters while the player sheet is
+              // open or the Discover tab is showing. Anywhere else it is
+              // ignored, so a stale flag can never leave the dock hidden.
+              final pageAbove = pageAboveRaw &&
+                  (_sheet.value > 0 ||
+                      widget.navigationShell.currentIndex == _kDiscoverBranch);
+              return ValueListenableBuilder<MediaItem?>(
+                valueListenable: GetIt.I<MediaPlayer>().currentSongNotifier,
+                builder: (context, currentSong, _) {
+                  final miniInset =
+                  (currentSong == null || pageAbove || keyboardOpen) ? 0.0 : 82.0;
+                  return Stack(
+                    children: [
+                      Positioned.fill(
+                        child: MediaQuery(
+                          data: mq.copyWith(
+                            padding: mq.padding.copyWith(
+                              bottom: keyboardOpen
+                                  ? mq.padding.bottom
+                                  : math.max(mq.padding.bottom,
+                                  mq.padding.bottom + _kDockExtent + miniInset),
+                            ),
+                          ),
+                          child: widget.navigationShell,
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: AnimatedBuilder(
+                          animation: _sheet,
+                          builder: (context, child) => Opacity(
+                            opacity: (1 - _sheet.value * 2).clamp(0.0, 1.0),
+                            child: Transform.translate(
+                              offset: Offset(0, _sheet.value * 140),
+                              child: IgnorePointer(
+                                  ignoring: _sheet.value > 0.05, child: child),
+                            ),
+                          ),
+                          child: ValueListenableBuilder<bool>(
+                            valueListenable: _chromeHidden,
+                            builder: (context, hidden, _) => _Chrome(
+                              hidden: hidden || pageAbove || keyboardOpen,
+                              currentIndex: widget.navigationShell.currentIndex,
+                              onSelect: _goBranch,
+                              onOpenPlayer: _openSheet,
+                              onDragPlayer: (d) =>
+                                  _dragSheet(d, mq.size.height * 0.8),
+                              onDragEndPlayer: (d) =>
+                                  _endDragSheet(d, mq.size.height * 0.8),
+                            ),
                           ),
                         ),
-                        child: widget.navigationShell,
                       ),
-                    ),
-                    Align(
-                      alignment: Alignment.bottomCenter,
-                      child: ValueListenableBuilder<bool>(
-                        valueListenable: _chromeHidden,
-                        builder: (context, hidden, _) => _Chrome(
-                          hidden: hidden || pageAbove,
-                          currentIndex: widget.navigationShell.currentIndex,
-                          onSelect: _goBranch,
+                      if (_sheetBuilt)
+                        Positioned.fill(
+                          child: AnimatedBuilder(
+                            animation: _sheet,
+                            builder: (context, child) {
+                              final v = _sheet.value;
+                              return Visibility(
+                                visible: v > 0,
+                                maintainState: true,
+                                child: Transform.translate(
+                                  offset: Offset(0, (1 - v) * mq.size.height),
+                                  child: IgnorePointer(
+                                      ignoring: v < 0.98, child: child),
+                                ),
+                              );
+                            },
+                            child: Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: Material(
+                                    type: MaterialType.transparency,
+                                    child: PlayerPage(onClose: _closeSheet),
+                                  ),
+                                ),
+                                // Grab area at the top: drag down to close.
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  height: 96,
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.translucent,
+                                    onVerticalDragUpdate: (d) =>
+                                        _dragSheet(d, mq.size.height * 0.8),
+                                    onVerticalDragEnd: (d) =>
+                                        _endDragSheet(d, mq.size.height * 0.8),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            );
-          },
+                    ],
+                  );
+                },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -143,11 +278,17 @@ class _Chrome extends StatelessWidget {
     required this.hidden,
     required this.currentIndex,
     required this.onSelect,
+    required this.onOpenPlayer,
+    required this.onDragPlayer,
+    required this.onDragEndPlayer,
   });
 
   final bool hidden;
   final int currentIndex;
   final ValueChanged<int> onSelect;
+  final VoidCallback onOpenPlayer;
+  final GestureDragUpdateCallback onDragPlayer;
+  final GestureDragEndCallback onDragEndPlayer;
 
   @override
   Widget build(BuildContext context) {
@@ -162,7 +303,12 @@ class _Chrome extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const BottomPlayer(),
+            GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onVerticalDragUpdate: onDragPlayer,
+              onVerticalDragEnd: onDragEndPlayer,
+              child: BottomPlayer(onOpen: onOpenPlayer),
+            ),
             _ZenDock(currentIndex: currentIndex, onSelect: onSelect),
           ],
         ),
@@ -443,7 +589,8 @@ class _Bubble extends StatelessWidget {
               width: _kBubble,
               height: _kBubble,
               child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 160),
+                duration: const Duration(milliseconds: 260),
+                switchInCurve: Curves.easeOutBack,
                 transitionBuilder: (child, anim) => FadeTransition(
                   opacity: anim,
                   child: ScaleTransition(

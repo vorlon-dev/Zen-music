@@ -20,6 +20,7 @@ import 'package:zenmusic/desktop/utils/smooth_scroll.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
 import 'package:zenmusic/desktop/utils/bottom_modals.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
+import 'package:zenmusic/mobile/widgets/echo_motion.dart';
 
 const double _kContentWidth = 960;
 
@@ -350,10 +351,14 @@ class _SectionBlock extends StatelessWidget {
               ),
             ),
           for (final e in contents.asMap().entries)
-            if ((e.value as Map)['isYtVideo'] == true)
-              _VideoCard(item: e.value as Map)
-            else
-              _ResultTile(item: e.value as Map, section: contents, index: e.key),
+            EchoRise(
+              key: ValueKey('${(e.value as Map)['videoId'] ?? (e.value as Map)['title']}-${e.key}'),
+              index: e.key,
+              child: (e.value as Map)['isYtVideo'] == true
+                  ? _VideoCard(item: e.value as Map)
+                  : _ResultTile(
+                  item: e.value as Map, section: contents, index: e.key),
+            ),
         ],
       ),
     );
@@ -568,14 +573,17 @@ class _ResultTile extends StatelessWidget {
         child: SizedBox(
           width: 52,
           height: 52,
-          child: Image.network(
-            _hiRes(item['thumbnails'].last['url'].toString(), 300),
-            fit: BoxFit.cover,
-            filterQuality: FilterQuality.high,
-            errorBuilder: (_, __, ___) => ColoredBox(
-              color: cs.surfaceContainerHighest,
-              child: Icon(FluentIcons.music_note_2_24_regular,
-                  color: cs.onSurfaceVariant),
+          child: _WithNowPlaying(
+            videoId: _isTrack ? item['videoId']?.toString() : null,
+            child: Image.network(
+              _hiRes(item['thumbnails'].last['url'].toString(), 300),
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.high,
+              errorBuilder: (_, __, ___) => ColoredBox(
+                color: cs.surfaceContainerHighest,
+                child: Icon(FluentIcons.music_note_2_24_regular,
+                    color: cs.onSurfaceVariant),
+              ),
             ),
           ),
         ),
@@ -892,6 +900,43 @@ class _YtThumbState extends State<_YtThumb> {
           if (mounted) setState(() => _i++);
         });
         return const SizedBox.shrink();
+      },
+    );
+  }
+}
+
+
+/// Dims the thumbnail and shows animated bars while this song is the one
+/// playing in the main player.
+class _WithNowPlaying extends StatelessWidget {
+  const _WithNowPlaying({required this.videoId, required this.child});
+  final String? videoId;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (videoId == null || videoId!.isEmpty) return child;
+    final mp = GetIt.I<MediaPlayer>();
+    return ValueListenableBuilder(
+      valueListenable: mp.currentSongNotifier,
+      builder: (context, current, _) {
+        if (current?.id != videoId) return child;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            child,
+            ColoredBox(color: Colors.black.withValues(alpha: 0.45)),
+            Center(
+              child: ValueListenableBuilder<ButtonState>(
+                valueListenable: mp.buttonState,
+                builder: (context, state, _) => EchoNowPlayingBars(
+                  playing: state == ButtonState.playing,
+                  size: 20,
+                ),
+              ),
+            ),
+          ],
+        );
       },
     );
   }

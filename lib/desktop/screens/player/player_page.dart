@@ -42,6 +42,8 @@ import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 // TODO: change this file name if your service file is named differently.
 import 'package:zenmusic/desktop/lossless/lossless_service.dart';
+import 'package:zenmusic/mobile/widgets/echo_motion.dart';
+import 'package:zenmusic/desktop/utils/track_sheet.dart';
 
 class _Ic {
   _Ic._();
@@ -228,8 +230,8 @@ class _PlayerPageState extends State<PlayerPage>
         spotifyUri: (spUri?.isNotEmpty ?? false) ? spUri : null,
         title: song.title,
         artist:
-            (song.artist ?? song.album ?? song.extras?['subtitle'] ?? '')
-                .toString(),
+        (song.artist ?? song.album ?? song.extras?['subtitle'] ?? '')
+            .toString(),
         album: song.album,
         durationMs: totalMs > 0 ? totalMs : null,
       );
@@ -363,12 +365,14 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _skipNext() {
+    EchoSkipPulse.next.value++;
     if (!(_swipeKey.currentState?.swipeNext() ?? false)) {
       GetIt.I<MediaPlayer>().skipNext();
     }
   }
 
   void _skipPrevious() {
+    EchoSkipPulse.previous.value++;
     if (!(_swipeKey.currentState?.swipePrev() ?? false)) {
       GetIt.I<MediaPlayer>().skipPrevious();
     }
@@ -527,154 +531,154 @@ class _PlayerPageState extends State<PlayerPage>
 
             final Widget stage = Stack(
               children: [
-                  if (_isMobile)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: RepaintBoundary(
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 700),
-                            decoration: BoxDecoration(
-                              gradient: RadialGradient(
-                                center: const Alignment(0, -0.30),
-                                radius: 1.0,
-                                colors: [
-                                  _tint.withValues(alpha: 0.16),
-                                  _tint.withValues(alpha: 0.05),
-                                  Colors.black,
-                                ],
-                                stops: const [0, 0.55, 1],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    )
-                  else
-                  // Desktop: animated palette gradient (own repaint layer)
-                    Positioned.fill(
+                if (_isMobile)
+                  Positioned.fill(
+                    child: IgnorePointer(
                       child: RepaintBoundary(
-                        child: AnimatedGradientBackground(
-                          colors: paletteColors.isNotEmpty
-                              ? paletteColors
-                              : [
-                            Colors.deepPurple.shade900,
-                            Colors.deepPurple.shade700,
-                            Colors.purple.shade800,
-                            Colors.indigo.shade900,
-                          ],
-                        ),
-                      ),
-                    ),
-
-                  const WindowsVideoBackdrop(),
-
-                  if (_videoBackdropUrl != null)
-                    Positioned.fill(
-                      child: ValueListenableBuilder<ButtonState>(
-                        valueListenable: mediaPlayerOf(context).buttonState,
-                        builder: (context, state, _) => VideoBackdrop(
-                          streamUrl: _videoBackdropUrl!,
-                          playing: state == ButtonState.playing,
-                          shortLoop: _isSpotifyCanvas,
-                          synchronized: !_isSpotifyCanvas,
-                          positionStream: _isSpotifyCanvas
-                              ? null
-                              : mediaPlayerOf(context).player.positionStream,
-                          posterUrl: song.artUri?.toString(),
-                          httpHeaders: _videoHeaders,
-                          onReadyChanged: (ready) {
-                            if (mounted && ready != _canvasReady) {
-                              setState(() => _canvasReady = ready);
-                            }
-                          },
-                          onUnavailable: (_) {
-                            if (mounted) {
-                              setState(() {
-                                _videoBackdropUrl = null;
-                                _isSpotifyCanvas = false;
-                                _canvasReady = false;
-                              });
-                              _giveWindowsBackdropBack();
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-
-                  // Desktop only: cover-colour ambient wash (top-centre glow)
-                  if (!_isMobile)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: RepaintBoundary(
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 700),
-                            decoration: BoxDecoration(
-                              gradient: RadialGradient(
-                                center: const Alignment(0, -0.45),
-                                radius: 1.05,
-                                colors: [
-                                  _tint.withValues(alpha: 0.38),
-                                  _tint.withValues(alpha: 0.0),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                  // Legibility scrim. Desktop: always. Mobile: only over video.
-                  if (!_isMobile || _videoBackdropUrl != null)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 700),
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: _isMobile
-                                  ? [
-                                Colors.black.withValues(alpha: 0.25),
-                                Colors.black.withValues(alpha: 0.45),
-                                Colors.black.withValues(alpha: 0.80),
-                              ]
-                                  : [
-                                Colors.black.withValues(alpha: 0.12),
-                                Colors.black.withValues(alpha: 0.30),
-                                Colors.black.withValues(alpha: 0.72),
+                            gradient: RadialGradient(
+                              center: const Alignment(0, -0.30),
+                              radius: 1.0,
+                              colors: [
+                                _tint.withValues(alpha: 0.16),
+                                _tint.withValues(alpha: 0.05),
+                                Colors.black,
                               ],
-                              stops: const [0, 0.45, 1],
+                              stops: const [0, 0.55, 1],
                             ),
                           ),
                         ),
                       ),
                     ),
-
-                  SafeArea(
-                    child: Column(
-                      children: [
-                        _topBar(song),
-                        Expanded(
-                          child: LayoutBuilder(
-                            builder: (context, box) => _buildBody(song, box),
-                          ),
-                        ),
-                      ],
+                  )
+                else
+                // Desktop: animated palette gradient (own repaint layer)
+                  Positioned.fill(
+                    child: RepaintBoundary(
+                      child: AnimatedGradientBackground(
+                        colors: paletteColors.isNotEmpty
+                            ? paletteColors
+                            : [
+                          Colors.deepPurple.shade900,
+                          Colors.deepPurple.shade700,
+                          Colors.purple.shade800,
+                          Colors.indigo.shade900,
+                        ],
+                      ),
                     ),
                   ),
-                ],
+
+                const WindowsVideoBackdrop(),
+
+                if (_videoBackdropUrl != null)
+                  Positioned.fill(
+                    child: ValueListenableBuilder<ButtonState>(
+                      valueListenable: mediaPlayerOf(context).buttonState,
+                      builder: (context, state, _) => VideoBackdrop(
+                        streamUrl: _videoBackdropUrl!,
+                        playing: state == ButtonState.playing,
+                        shortLoop: _isSpotifyCanvas,
+                        synchronized: !_isSpotifyCanvas,
+                        positionStream: _isSpotifyCanvas
+                            ? null
+                            : mediaPlayerOf(context).player.positionStream,
+                        posterUrl: song.artUri?.toString(),
+                        httpHeaders: _videoHeaders,
+                        onReadyChanged: (ready) {
+                          if (mounted && ready != _canvasReady) {
+                            setState(() => _canvasReady = ready);
+                          }
+                        },
+                        onUnavailable: (_) {
+                          if (mounted) {
+                            setState(() {
+                              _videoBackdropUrl = null;
+                              _isSpotifyCanvas = false;
+                              _canvasReady = false;
+                            });
+                            _giveWindowsBackdropBack();
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+
+                // Desktop only: cover-colour ambient wash (top-centre glow)
+                if (!_isMobile)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: RepaintBoundary(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 700),
+                          decoration: BoxDecoration(
+                            gradient: RadialGradient(
+                              center: const Alignment(0, -0.45),
+                              radius: 1.05,
+                              colors: [
+                                _tint.withValues(alpha: 0.38),
+                                _tint.withValues(alpha: 0.0),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Legibility scrim. Desktop: always. Mobile: only over video.
+                if (!_isMobile || _videoBackdropUrl != null)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: _isMobile
+                                ? [
+                              Colors.black.withValues(alpha: 0.25),
+                              Colors.black.withValues(alpha: 0.45),
+                              Colors.black.withValues(alpha: 0.80),
+                            ]
+                                : [
+                              Colors.black.withValues(alpha: 0.12),
+                              Colors.black.withValues(alpha: 0.30),
+                              Colors.black.withValues(alpha: 0.72),
+                            ],
+                            stops: const [0, 0.45, 1],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                SafeArea(
+                  child: Column(
+                    children: [
+                      _topBar(song),
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, box) => _buildBody(song, box),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             );
 
             final Widget body = _isMobile
                 ? GestureDetector(
-                    onVerticalDragUpdate: _onDismissDragUpdate,
-                    onVerticalDragEnd: _onDismissDragEnd,
-                    onVerticalDragCancel: () => _springDismissBack(),
-                    child: Transform.translate(
-                      offset: Offset(0, _dismissDragY),
-                      child: stage,
-                    ),
-                  )
+              onVerticalDragUpdate: _onDismissDragUpdate,
+              onVerticalDragEnd: _onDismissDragEnd,
+              onVerticalDragCancel: () => _springDismissBack(),
+              child: Transform.translate(
+                offset: Offset(0, _dismissDragY),
+                child: stage,
+              ),
+            )
                 : stage;
 
             return Scaffold(
@@ -1181,17 +1185,16 @@ class _PlayerPageState extends State<PlayerPage>
                   tooltip:
                   liked ? 'Remove from favourites' : 'Add to favourites',
                   onTap: () => _toggleFavourite(song),
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
-                    transitionBuilder: (child, anim) =>
-                        ScaleTransition(scale: anim, child: child),
-                    child: Icon(
-                      liked ? _Ic.heartFill : _Ic.heart,
-                      key: ValueKey(liked),
+                  child: IgnorePointer(
+                    child: EchoLikeButton(
+                      liked: liked,
+                      onTap: () {},
                       size: 24,
-                      color: liked
-                          ? _kHeartRed
-                          : Colors.white.withValues(alpha: 0.85),
+                      pad: 0,
+                      likedColor: _kHeartRed,
+                      idleColor: Colors.white.withValues(alpha: 0.85),
+                      outline: _Ic.heart,
+                      filled: _Ic.heartFill,
                     ),
                   ),
                 );
@@ -1297,8 +1300,15 @@ class _PlayerPageState extends State<PlayerPage>
             tooltip: 'Previous (Ctrl+←)'.tr,
             pressScale: 0.85,
             onTap: _skipPrevious,
-            child: Icon(_Ic.previous,
-                size: 28, color: Colors.white.withValues(alpha: 0.94)),
+            child: IgnorePointer(
+              child: EchoSkipButton(
+                next: false,
+                size: 28,
+                box: 28,
+                color: Colors.white.withValues(alpha: 0.94),
+                onTap: () {},
+              ),
+            ),
           ),
           const SizedBox(width: 16),
           ValueListenableBuilder<ButtonState>(
@@ -1324,16 +1334,10 @@ class _PlayerPageState extends State<PlayerPage>
                   child: CircularProgressIndicator(
                       color: _onAccent, strokeWidth: 3),
                 )
-                    : AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  transitionBuilder: (child, anim) =>
-                      ScaleTransition(scale: anim, child: child),
-                  child: Icon(
-                    playing ? _Ic.pause : _Ic.play,
-                    key: ValueKey(playing),
-                    size: 34,
-                    color: _onAccent,
-                  ),
+                    : EchoPlayPauseIcon(
+                  playing: playing,
+                  size: 34,
+                  color: _onAccent,
                 ),
               );
             },
@@ -1347,8 +1351,15 @@ class _PlayerPageState extends State<PlayerPage>
             tooltip: 'Next (Ctrl+→)'.tr,
             pressScale: 0.85,
             onTap: _skipNext,
-            child: Icon(_Ic.next,
-                size: 28, color: Colors.white.withValues(alpha: 0.94)),
+            child: IgnorePointer(
+              child: EchoSkipButton(
+                next: true,
+                size: 28,
+                box: 28,
+                color: Colors.white.withValues(alpha: 0.94),
+                onTap: () {},
+              ),
+            ),
           ),
         ],
       ),
@@ -1639,20 +1650,28 @@ class _PlayerPageState extends State<PlayerPage>
                     await value.delete(song.extras!['videoId']);
                   }
                 },
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  transitionBuilder: (child, anim) =>
-                      ScaleTransition(scale: anim, child: child),
-                  child: Icon(
-                    liked ? _Ic.heartFill : _Ic.heart,
-                    key: ValueKey(liked),
+                child: IgnorePointer(
+                  child: EchoLikeButton(
+                    liked: liked,
+                    onTap: () {},
                     size: 26,
-                    color: liked
-                        ? _kHeartRed
-                        : Colors.white.withValues(alpha: 0.78),
+                    pad: 0,
+                    likedColor: _kHeartRed,
+                    idleColor: Colors.white.withValues(alpha: 0.78),
+                    outline: _Ic.heart,
+                    filled: _Ic.heartFill,
                   ),
                 ),
               );
+            },
+          ),
+          _IconBtn(
+            icon: Icons.info_outline_rounded,
+            tooltip: 'Track info'.tr,
+            size: 24,
+            onPressed: () {
+              final extras = mediaPlayer.currentSongNotifier.value?.extras;
+              if (extras != null) showTrackSheet(context, extras);
             },
           ),
           Builder(
@@ -1770,7 +1789,15 @@ class _PlayerPageState extends State<PlayerPage>
             },
           ),
           _IconBtn(
-            icon: _Ic.previous,
+            child: IgnorePointer(
+              child: EchoSkipButton(
+                next: false,
+                size: 32,
+                box: 32,
+                color: Colors.white,
+                onTap: () {},
+              ),
+            ),
             tooltip: 'Previous (Ctrl+←)'.tr,
             size: 32,
             box: 52,
@@ -1788,7 +1815,15 @@ class _PlayerPageState extends State<PlayerPage>
             ),
           ),
           _IconBtn(
-            icon: _Ic.next,
+            child: IgnorePointer(
+              child: EchoSkipButton(
+                next: true,
+                size: 32,
+                box: 32,
+                color: Colors.white,
+                onTap: () {},
+              ),
+            ),
             tooltip: 'Next (Ctrl+→)'.tr,
             size: 32,
             box: 52,
@@ -2620,10 +2655,11 @@ class _ToggleBtn extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _IconBtn(
-          icon: icon,
+          child: IgnorePointer(
+            child: EchoPopIcon(icon: icon, active: active, size: 24),
+          ),
           tooltip: tooltip,
           size: 24,
-          color: active ? Colors.white : Colors.white.withValues(alpha: 0.55),
           onPressed: onPressed,
         ),
         AnimatedContainer(
@@ -2708,16 +2744,10 @@ class _PlayButtonState extends State<_PlayButton> {
                   child: CircularProgressIndicator(
                       color: Colors.black, strokeWidth: 3),
                 )
-                    : AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  transitionBuilder: (child, anim) =>
-                      ScaleTransition(scale: anim, child: child),
-                  child: Icon(
-                    playing ? _Ic.pause : _Ic.play,
-                    key: ValueKey(playing),
-                    size: 34,
-                    color: Colors.black,
-                  ),
+                    : EchoPlayPauseIcon(
+                  playing: playing,
+                  size: 34,
+                  color: Colors.black,
                 ),
               ),
             ),
