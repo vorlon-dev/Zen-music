@@ -1916,7 +1916,7 @@ class _AudioQuality {
     if (c != null && bitDepth != null && sampleRateHz != null) {
       return '$c $bitDepth/${_khzNum(sampleRateHz!)}';
     }
-    if (c != null && bitrateKbps != null) return '$c $bitrateKbps';
+    if (c != null && bitrateKbps != null) return '$c $bitrateKbps kbps';
     if (bitrateKbps != null) return '$bitrateKbps kbps';
     if (c != null) return c;
     return label;
@@ -2495,9 +2495,6 @@ class _QualityPill extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(_Ic.hq,
-                  size: 22, color: Colors.white.withValues(alpha: 0.92)),
-              const SizedBox(width: 8),
               Text(
                 info.pillText,
                 maxLines: 1,
