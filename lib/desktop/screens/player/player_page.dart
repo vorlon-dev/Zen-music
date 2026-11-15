@@ -43,7 +43,6 @@ import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 // TODO: change this file name if your service file is named differently.
 import 'package:zenmusic/desktop/lossless/lossless_service.dart';
 import 'package:zenmusic/desktop/lossless/mirror_source.dart';
-import 'package:zenmusic/desktop/lossless/real_format.dart';
 import 'package:zenmusic/mobile/widgets/echo_motion.dart';
 import 'package:zenmusic/desktop/utils/track_sheet.dart';
 
