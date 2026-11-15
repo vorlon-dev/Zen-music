@@ -95,24 +95,28 @@ class MirrorSource {
         if (!expired()) {
           final tidalFuture = _resolveTidal(identity);
           final dzFuture = _resolveDeezer(identity);
-          final tidal = await tidalFuture;
-          if (tidal != null) {
-            unawaited(dzFuture);
+          // FORCE-FULL: walk every plausible Tidal catalog match (the same
+          // song often exists as several releases, and only some of them
+          // hand out a full stream), and when none yields a full FLAC fall
+          // through to Deezer — a preview is never served.
+          final tidalMatches = await tidalFuture;
+          for (final m in tidalMatches) {
+            if (expired()) break;
             final source = await _buildTidalSource(
-                tidal, tag, identity.durationMs, deadline);
+                m, tag, identity.durationMs, deadline);
             if (source != null) {
+              unawaited(dzFuture);
               _noteNetOk();
               return source;
             }
-          } else {
-            final dz = await dzFuture;
-            if (dz != null && !expired()) {
-              final source = await _buildDeezerSource(
-                  dz, tag, identity.durationMs, deadline);
-              if (source != null) {
-                _noteNetOk();
-                return source;
-              }
+          }
+          final dz = await dzFuture;
+          if (dz != null && !expired()) {
+            final source = await _buildDeezerSource(
+                dz, tag, identity.durationMs, deadline);
+            if (source != null) {
+              _noteNetOk();
+              return source;
             }
           }
         }
@@ -243,7 +247,7 @@ class MirrorSource {
 
   // --------------------------------------------------------------- tidal
 
-  Future<_TidalMatch?> _resolveTidal(_Identity id) async {
+  Future<List<_TidalMatch>> _resolveTidal(_Identity id) async {
     try {
       final query = '${id.title} ${id.artist}'.trim();
       final res = await _http
@@ -252,14 +256,13 @@ class MirrorSource {
                   .replace(queryParameters: {'s': query}),
               headers: MirrorConfig.jsonHeaders)
           .timeout(MirrorConfig.searchTimeout);
-      if (res.statusCode != 200) return null;
+      if (res.statusCode != 200) return const [];
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       final items =
           ((data is Map ? data['data'] : null) as Map?)?['items'];
-      if (items is! List || items.isEmpty) return null;
+      if (items is! List || items.isEmpty) return const [];
 
-      _TidalMatch? best;
-      var bestScore = 0.0;
+      final scored = <(double, _TidalMatch)>[];
       for (final raw in items) {
         if (raw is! Map) continue;
         final artist = ((raw['artist'] as Map?)?['name'] ?? '').toString();
@@ -269,25 +272,25 @@ class MirrorSource {
             : null;
         final score =
             _score(id, '${raw['title'] ?? ''}', artist, durMs);
-        if (score > bestScore) {
-          bestScore = score;
-          best = _TidalMatch(
-            '${raw['id'] ?? ''}',
-            '${raw['audioQuality'] ?? ''}'
-                .toUpperCase()
-                .contains('HI_RES'),
-            durMs,
-          );
+        if (score >= 0.62 && '${raw['id'] ?? ''}'.isNotEmpty) {
+          scored.add((
+            score,
+            _TidalMatch(
+              '${raw['id']}',
+              '${raw['audioQuality'] ?? ''}'.toUpperCase().contains('HI_RES'),
+              durMs,
+            )
+          ));
         }
       }
-      if (best == null || best.trackId.isEmpty) return null;
-      // Mirrors relay best-effort catalog matches — a weak text match is
-      // worse than falling through to Deezer / the regular chain.
-      return bestScore >= 0.62 ? best : null;
+      // Mirrors relay best-effort catalog matches — weak text matches are
+      // dropped; the best three are tried in order.
+      scored.sort((a, b) => b.$1.compareTo(a.$1));
+      return [for (final e in scored.take(3)) e.$2];
     } catch (e) {
       print('[mirror] tidal search error: $e');
       if (_isNetError(e)) _noteNetFail();
-      return null;
+      return const [];
     }
   }
 
@@ -300,7 +303,9 @@ class MirrorSource {
     // strict_24 when the user picked a Hi-Res tier; the server answers 409
     // when the track has no 24-bit master — then we still serve CD
     // lossless instead of giving up.
-    final attempts = wantsHiRes ? ['strict_24=1', 'prefer_16=1'] : ['prefer_16=1'];
+    final attempts = wantsHiRes
+        ? ['strict_24=1', 'prefer_16=1', 'quality=LOSSLESS']
+        : ['prefer_16=1', 'quality=LOSSLESS'];
 
     for (final param in attempts) {
       if (!DateTime.now().isBefore(deadline)) return null;
