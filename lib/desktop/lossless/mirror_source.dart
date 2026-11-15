@@ -51,6 +51,17 @@ class MirrorSource {
 
   final http.Client _http = http.Client();
 
+  // SP71b: these two live here, not in MirrorConfig, so mirror_config.dart
+  // drift on either side can never break the build again (the user's tree
+  // carries its own endpoint-fixed config — it is never overwritten).
+
+  /// Search window per mirror host request.
+  static const Duration _searchTimeout = Duration(seconds: 4);
+
+  /// Whole-resolution budget for one tryBuildSource call (search + manifest
+  /// + probe across both mirrors). Once spent the chain falls through.
+  static const Duration _resolveBudget = Duration(seconds: 10);
+
   // --------------------------------------------------------------- entry
 
   /// Free-lossless AudioSource for [song] at the selected FLAC tier, or
@@ -78,7 +89,7 @@ class MirrorSource {
       // Whole-resolution budget: mirrors are an upgrade, never a blocker.
       // Once spent, remaining stages are skipped and the chain falls
       // through to JioSaavn / cache / YouTube.
-      final deadline = now.add(MirrorConfig.resolveBudget);
+      final deadline = now.add(_resolveBudget);
       bool expired() => !DateTime.now().isBefore(deadline);
 
       final acquired = await _acquireSlot();
@@ -251,7 +262,7 @@ class MirrorSource {
               Uri.parse('${MirrorConfig.tidal}/search/')
                   .replace(queryParameters: {'s': query}),
               headers: MirrorConfig.jsonHeaders)
-          .timeout(MirrorConfig.searchTimeout);
+          .timeout(_searchTimeout);
       if (res.statusCode != 200) return null;
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       final items =
@@ -386,7 +397,7 @@ class MirrorSource {
                     'limit': '5',
                   }),
               headers: MirrorConfig.jsonHeaders)
-          .timeout(MirrorConfig.searchTimeout);
+          .timeout(_searchTimeout);
       if (res.statusCode != 200) return null;
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       final results = data is Map ? data['results'] : null;
@@ -898,19 +909,27 @@ class MirrorSource {
   /// STREAMINFO per spec). Layout at file offset 8: min/max blocksize
   /// (2+2), min/max framesize (3+3), then 20 bits sample rate | 3 bits
   /// channels-1 | 5 bits bits-per-sample-1 | 36 bits total samples.
+  ///
+  /// SP71 FIX: total samples are the low nibble of b[21] plus b[22..25]
+  /// (the 36-bit field starts AFTER the 20+3+5 = 28 rate/channel/bps
+  /// bits). The old b[20..24] indexing consumed the bits-per-sample bits
+  /// and produced astronomically wrong durations — which made every
+  /// 30-second preview parse as "hours long" and slip through the
+  /// full-stream gate. Cross-checked against qobuz manifest metadata
+  /// (48000 Hz / 24-bit) and STREAMINFO bytes.
   static int? flacDurationSeconds(Uint8List b) {
-    if (b.length < 33) return null;
+    if (b.length < 34) return null;
     if (b[0] != 0x66 || b[1] != 0x4C || b[2] != 0x61 || b[3] != 0x43) {
       return null; // 'fLaC'
     }
     if ((b[4] & 0x7F) != 0) return null; // first block must be STREAMINFO
     final sr = (b[18] << 12) | (b[19] << 4) | (b[20] >> 4);
     if (sr <= 0) return null;
-    final totalSamples = ((b[20] & 0x0F) << 32) |
-        (b[21] << 24) |
-        (b[22] << 16) |
-        (b[23] << 8) |
-        b[24];
+    final totalSamples = ((b[21] & 0x0F) << 32) |
+        (b[22] << 24) |
+        (b[23] << 16) |
+        (b[24] << 8) |
+        b[25];
     if (totalSamples <= 0) return null;
     return (totalSamples / sr).round();
   }

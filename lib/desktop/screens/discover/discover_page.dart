@@ -24,6 +24,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio/just_audio.dart' show ProcessingState;
 import 'package:share_plus/share_plus.dart';
 import 'package:zenmusic/desktop/core/widgets/video_backdrop.dart';
+import 'package:zenmusic/desktop/instagram_canvas/instagram_canvas.dart';
 import 'package:zenmusic/desktop/services/discover_feed.dart';
 import 'package:zenmusic/desktop/services/download_manager.dart';
 import 'package:zenmusic/desktop/services/lyrics_service.dart';
@@ -237,6 +238,21 @@ class _DiscoverPageState extends State<DiscoverPage>
       );
     } catch (_) {
       url = null;
+    }
+    // Instagram reel canvas (SP72): when Spotify has no canvas for this
+    // song (e.g. not logged in), find a related public reel for THIS song
+    // (its song videos / edits / dance videos) — same muted short loop.
+    if (url == null) {
+      try {
+        final reel = await InstagramCanvas.instance.resolveBackdrop(
+          songKey: item.id,
+          title: item.title,
+          artist: item.artist,
+        );
+        url = reel?.url;
+      } catch (_) {
+        url = null;
+      }
     }
     _canvasLoading.remove(item.id);
     _canvas[item.id] = url;

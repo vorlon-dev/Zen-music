@@ -12,6 +12,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
+import 'package:zenmusic/desktop/lossless/mirror_arbiter.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
 class LosslessService {
@@ -108,7 +109,12 @@ class LosslessService {
         _warnedDisabled = true;
         print('[lossless] qobuz endpoint disabled (dead host) — skipping');
       }
-      return null;
+      // SP71: the dead qobuz endpoint used to end the upgrade attempt
+      // here — now the dual-engine mirror chain takes over instead
+      // (Dart mirror engine -> Kotlin engine -> emergency endpoint).
+      // On Windows and other non-Android platforms the arbiter is the
+      // Dart mirror engine alone, i.e. exactly the pre-SP71 behaviour.
+      return MirrorArbiter.instance.tryBuildSource(song, tag);
     }
     try {
       final videoId = await _youtubeIdFor(song);

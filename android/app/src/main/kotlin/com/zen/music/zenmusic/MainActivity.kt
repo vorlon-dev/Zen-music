@@ -17,6 +17,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import android.view.WindowManager
@@ -31,6 +32,7 @@ import com.zen.music.zenmusic.dsp.core.models.FilterType
 import com.zen.music.zenmusic.dsp.core.models.ParametricEQ
 import com.zen.music.zenmusic.dsp.core.models.ParametricEQBand
 import com.zen.music.zenmusic.dsp.core.parser.ParametricEQParser
+import com.zen.music.zenmusic.mirror.MirrorEngine
 import com.zen.music.zenmusic.innertube.ZenInnertubeResolver
 import com.zen.music.zenmusic.lossless.NativeAudioEngine
 import com.zen.music.zenmusic.lossless.broadcastNativeEqualizer
@@ -109,6 +111,10 @@ class MainActivity : AudioServiceActivity() {
         // instances — main + crossfade player).
         registerLosslessChannel(flutterEngine)
         registerAddonChannel(flutterEngine)
+        // SP71: native mirror engine — the Kotlin hot-standby that resolves
+        // lossless while the Dart mirror engine is resting (see
+        // lib/desktop/lossless/mirror_arbiter.dart for the alternation).
+        registerMirrorEngineChannel(flutterEngine)
         // In-app APK installer channel (OTA updates)
         InstallApkPlugin.register(flutterEngine, this)
         registerLauncherLogoChannel(flutterEngine)
@@ -662,6 +668,68 @@ class MainActivity : AudioServiceActivity() {
                                     )
                                 }
                             }
+                        }.start()
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+
+    private fun registerMirrorEngineChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/mirror_engine")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "configure" -> {
+                        val hosts = call.argument<Map<*, *>>("hosts")
+                        val timeoutsRaw = call.argument<Map<*, *>>("timeouts")
+                        val timeouts = HashMap<String, Int>()
+                        timeoutsRaw?.forEach { (k, v) ->
+                            (v as? Number)?.let { timeouts["$k"] = it.toInt() }
+                        }
+                        val ok = try {
+                            MirrorEngine.configure(
+                                tidal = hosts?.get("tidal") as? String,
+                                deezer = hosts?.get("deezer") as? String,
+                                qobuz = hosts?.get("qobuz") as? String,
+                                apiKeyValue = (hosts?.get("apiKey") as? String) ?: "",
+                                timeouts = timeouts
+                            )
+                        } catch (t: Throwable) {
+                            Log.e("ZenMirror", "configure failed", t)
+                            false
+                        }
+                        result.success(ok)
+                    }
+                    "resolve" -> {
+                        val title = call.argument<String>("title") ?: ""
+                        val artist = call.argument<String>("artist") ?: ""
+                        val durationMs = (call.argument<Any?>("durationMs") as? Number)?.toInt()
+                        val wantsHiRes = call.argument<Boolean>("wantsHiRes") ?: false
+                        val budgetMs = (call.argument<Any?>("budgetMs") as? Number)?.toLong() ?: 7000L
+                        Thread {
+                            val reply = try {
+                                MirrorEngine.resolve(title, artist, durationMs, wantsHiRes, budgetMs)
+                            } catch (t: Throwable) {
+                                Log.e("ZenMirror", "resolve failed", t)
+                                mapOf("status" to "error", "message" to "${t.javaClass.simpleName}")
+                            }
+                            mainHandler.post { result.success(reply) }
+                        }.start()
+                    }
+                    "emergency" -> {
+                        val title = call.argument<String>("title") ?: ""
+                        val artist = call.argument<String>("artist") ?: ""
+                        val durationMs = (call.argument<Any?>("durationMs") as? Number)?.toInt()
+                        val budgetMs = (call.argument<Any?>("budgetMs") as? Number)?.toLong() ?: 8000L
+                        Thread {
+                            val reply = try {
+                                MirrorEngine.emergency(title, artist, durationMs, budgetMs)
+                            } catch (t: Throwable) {
+                                Log.e("ZenMirror", "emergency failed", t)
+                                mapOf("status" to "error", "message" to "${t.javaClass.simpleName}")
+                            }
+                            mainHandler.post { result.success(reply) }
                         }.start()
                     }
                     else -> result.notImplemented()

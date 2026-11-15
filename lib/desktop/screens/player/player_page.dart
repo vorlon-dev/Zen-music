@@ -31,6 +31,7 @@ import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/innertubex_bridge.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
+import 'package:zenmusic/desktop/instagram_canvas/instagram_canvas.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_canvas.dart';
 import 'package:zenmusic/desktop/themes/colors.dart';
@@ -246,6 +247,30 @@ class _PlayerPageState extends State<PlayerPage>
           // The canvas owns the screen — ask the blurred Windows video
           // backdrop to stand down for this track (media_player re-feeds
           // it on the next track change).
+          WindowsBackdropService.instance.trackChanged(videoId: null);
+        }
+        return;
+      }
+    }
+
+    // 1.5 Instagram reel canvas (SP72) — a related public reel for THIS
+    // song (its song videos / edits / dance videos, found per song), played
+    // muted + short-loop exactly like a canvas. No reel -> step 2 below.
+    if (song != null) {
+      final reel = await InstagramCanvas.instance.resolveBackdrop(
+        songKey: id,
+        title: song.title,
+        artist: (song.artist ?? song.album ?? song.extras?['subtitle'] ?? '')
+            .toString(),
+      );
+      if (!mounted || currentSong?.id != id) return;
+      if (reel != null) {
+        setState(() {
+          _videoBackdropUrl = reel.url;
+          _videoHeaders = reel.headers;
+          _isSpotifyCanvas = true; // reel loops muted exactly like a canvas
+        });
+        if (Platform.isWindows) {
           WindowsBackdropService.instance.trackChanged(videoId: null);
         }
         return;
