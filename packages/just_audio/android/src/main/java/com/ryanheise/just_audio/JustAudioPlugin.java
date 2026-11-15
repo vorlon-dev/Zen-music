@@ -26,15 +26,6 @@ public class JustAudioPlugin implements FlutterPlugin {
 
         channel = new MethodChannel(messenger, "com.ryanheise.just_audio.methods");
         channel.setMethodCallHandler(methodCallHandler);
-        // ZEN: real stream format (codec / bitrate / sample rate) probe.
-        new MethodChannel(messenger, "zen.audio_format")
-                .setMethodCallHandler((call, result) -> {
-                    if ("get".equals(call.method)) {
-                        result.success(AudioPlayer.lastAudioFormat);
-                    } else {
-                        result.notImplemented();
-                    }
-                });
         @SuppressWarnings("deprecation")
         FlutterEngine engine = binding.getFlutterEngine();
         engine.addEngineLifecycleListener(new EngineLifecycleListener() {

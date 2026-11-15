@@ -273,38 +273,8 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         }
     }
 
-    /** ZEN: real decoder-reported format of the track being played. */
-    public static volatile Map<String, Object> lastAudioFormat = null;
-
-    private void captureAudioFormat(Tracks tracks) {
-        try {
-            for (Tracks.Group g : tracks.getGroups()) {
-                if (g.getType() != C.TRACK_TYPE_AUDIO) continue;
-                for (int j = 0; j < g.length; j++) {
-                    if (!g.isTrackSelected(j)) continue;
-                    androidx.media3.common.Format f = g.getTrackFormat(j);
-                    Map<String, Object> m = new HashMap<>();
-                    m.put("mime", f.sampleMimeType);
-                    m.put("containerMime", f.containerMimeType);
-                    m.put("codecs", f.codecs);
-                    m.put("bitrate", f.bitrate);
-                    m.put("averageBitrate", f.averageBitrate);
-                    m.put("peakBitrate", f.peakBitrate);
-                    m.put("sampleRate", f.sampleRate);
-                    m.put("channels", f.channelCount);
-                    m.put("pcmEncoding", f.pcmEncoding);
-                    m.put("time", System.currentTimeMillis());
-                    lastAudioFormat = m;
-                    return;
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-    }
-
     @Override
     public void onTracksChanged(Tracks tracks) {
-        captureAudioFormat(tracks);
         for (int i = 0; i < tracks.getGroups().size(); i++) {
             TrackGroup trackGroup = tracks.getGroups().get(i).getMediaTrackGroup();
 

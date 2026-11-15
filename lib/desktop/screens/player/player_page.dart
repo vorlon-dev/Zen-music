@@ -1,10 +1,13 @@
 // ZenMusic · vorlon-dev
 
 import 'package:zenmusic/desktop/services/l10n.dart';
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:math';
 import 'dart:ui' show FontFeature, ImageFilter;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart' show SpringDescription, SpringSimulation;
 import 'package:flutter/services.dart'
@@ -42,7 +45,6 @@ import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 // TODO: change this file name if your service file is named differently.
 import 'package:zenmusic/desktop/lossless/lossless_service.dart';
-import 'package:zenmusic/desktop/lossless/mirror_source.dart';
 import 'package:zenmusic/mobile/widgets/echo_motion.dart';
 import 'package:zenmusic/desktop/utils/track_sheet.dart';
 
@@ -136,7 +138,7 @@ class _PlayerPageState extends State<PlayerPage>
   void initState() {
     super.initState();
     ShellOverlaysBus.fullPageAbove.value = true;
-    RealAudioFormat.instance.attach(GetIt.I<MediaPlayer>().player);
+    _StreamProbe.attach(GetIt.I<MediaPlayer>().player);
     _dismissSpring = const SpringDescription(
       mass: 1,
       stiffness: 650,
@@ -1402,7 +1404,7 @@ class _PlayerPageState extends State<PlayerPage>
             // Rebuilds when the lossless service reports a served tier.
             child: ListenableBuilder(
               listenable: Listenable.merge(
-                  [LosslessService.servedRevision, RealAudioFormat.revision]),
+                  [LosslessService.servedRevision, _StreamProbe.revision]),
               builder: (context, _) {
                 final q = _AudioQuality.of(song);
                 return _QualityPill(
@@ -1708,7 +1710,7 @@ class _PlayerPageState extends State<PlayerPage>
           // Rebuilds when the lossless service reports a served tier.
           ListenableBuilder(
             listenable: Listenable.merge(
-                  [LosslessService.servedRevision, RealAudioFormat.revision]),
+                  [LosslessService.servedRevision, _StreamProbe.revision]),
             builder: (context, _) {
               final q = _AudioQuality.of(song);
               return _QualityChip(info: q, onTap: () => _openQuality(song));
@@ -2032,50 +2034,34 @@ class _AudioQuality {
     }
   }
 
-  /// Metadata estimate overlaid with what the decoder really reports.
+  /// Metadata estimate, overlaid with what the actual audio stream really
+  /// is (container header + real file size over real duration), so the
+  /// page tells the true quality: low stays low, high stays high.
   static _AudioQuality of(MediaItem song) {
     final base = _base(song);
-    final real = RealAudioFormat.instance.forSong(song.id);
-    if (real == null) {
-      // Mirror FLAC: at least the measured file bitrate is real.
-      final measured = MirrorSource.instance.measuredKbps(song.id);
-      if (measured == null) return base;
-      return _merge(base, bitrateKbps: measured);
-    }
-    final mime = '${real['mime'] ?? ''} ${real['codecs'] ?? ''}';
-    final codec = _codecFrom(mime) ?? base.codec;
-    int? kbps;
-    for (final k in const ['averageBitrate', 'bitrate', 'peakBitrate']) {
-      final v = real[k];
-      if (v is num && v > 0) {
-        kbps = (v / 1000).round();
-        break;
-      }
-    }
-    kbps ??= MirrorSource.instance.measuredKbps(song.id);
-    final sr = real['sampleRate'];
-    final rate = (sr is num && sr > 0) ? sr.round() : null;
-    int? depth;
-    switch (real['pcmEncoding']) {
-      case 2:
-        depth = 16;
-      case 21:
-        depth = 24;
-      case 22:
-        depth = 32;
-      case 3:
-        depth = 8;
+    final real = _StreamProbe.forSong(song.id);
+    if (real == null || real.codec == null) {
+      if (real?.kbps != null) return _merge(base, bitrateKbps: real!.kbps);
+      return base;
     }
     return _merge(base,
-        codec: codec, bitrateKbps: kbps, sampleRateHz: rate, bitDepth: depth);
+        codec: real.codec,
+        bitrateKbps: real.kbps,
+        sampleRateHz: real.sampleRate,
+        bitDepth: real.bitDepth,
+        trustReal: true);
   }
 
   static _AudioQuality _merge(_AudioQuality b,
-      {String? codec, int? bitrateKbps, int? sampleRateHz, int? bitDepth}) {
+      {String? codec,
+      int? bitrateKbps,
+      int? sampleRateHz,
+      int? bitDepth,
+      bool trustReal = false}) {
     final c = codec ?? b.codec;
-    final kbps = bitrateKbps ?? b.bitrateKbps;
-    final rate = sampleRateHz ?? b.sampleRateHz;
-    final depth = bitDepth ?? b.bitDepth;
+    final kbps = bitrateKbps ?? (trustReal ? null : b.bitrateKbps);
+    final rate = sampleRateHz ?? (trustReal ? null : b.sampleRateHz);
+    final depth = bitDepth ?? (trustReal ? null : b.bitDepth);
     final cl = (c ?? '').toLowerCase();
     final lossless = cl == 'flac' || cl == 'alac' || cl == 'wav';
     _Tier tier = b.tier;
@@ -2190,6 +2176,296 @@ class _AudioQuality {
       bitDepth: depth,
       source: src?.toString(),
     );
+  }
+}
+
+
+/// Result of looking inside the real audio stream of a song.
+class _ProbeInfo {
+  const _ProbeInfo(
+      {this.codec, this.kbps, this.sampleRate, this.bitDepth, this.channels});
+  final String? codec;
+  final int? kbps;
+  final int? sampleRate;
+  final int? bitDepth;
+  final int? channels;
+}
+
+/// Reads the first bytes of the stream that is actually playing (a file, a
+/// URL, the mirror loopback or a YouTube stream source), identifies the
+/// container / codec from its header and works out the true average bitrate
+/// from the real byte size and the real duration. Lives here on purpose:
+/// no other file is involved.
+class _StreamProbe {
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
+  static final Map<String, _ProbeInfo> _cache = {};
+  static final Set<String> _busy = {};
+  static bool _attached = false;
+
+  static _ProbeInfo? forSong(String id) => _cache[id];
+
+  static void attach(AudioPlayer player) {
+    if (_attached) return;
+    _attached = true;
+    player.currentIndexStream.listen((_) => _kick(player));
+    player.durationStream.listen((_) => _kick(player));
+    _kick(player);
+  }
+
+  static void _kick(AudioPlayer player) {
+    final tag = player.sequenceState?.currentSource?.tag;
+    if (tag is! MediaItem) return;
+    final id = tag.id;
+    final dur = player.duration;
+    // Bitrate needs the duration; wait for it (the stream re-fires).
+    if (dur == null || dur.inSeconds <= 0) return;
+    if (_cache.containsKey(id) || !_busy.add(id)) return;
+    unawaited(_run(player, id, dur));
+  }
+
+  static Future<void> _run(AudioPlayer player, String id, Duration dur) async {
+    try {
+      final src = player.sequenceState?.currentSource;
+      final got = await _readHead(src);
+      if (got == null) return;
+      final info = _parse(got.$1, got.$2, dur);
+      if (info == null) return;
+      _cache[id] = info;
+      if (_cache.length > 60) _cache.remove(_cache.keys.first);
+      revision.value++;
+    } catch (_) {
+      // Unprobeable stream (DRM, DASH, ...): the page keeps its estimate.
+    } finally {
+      _busy.remove(id);
+    }
+  }
+
+  static const int _headBytes = 65536;
+
+  /// (first bytes, total size in bytes or null)
+  static Future<(Uint8List, int?)?> _readHead(Object? src) async {
+    if (src is UriAudioSource) {
+      final uri = src.uri;
+      if (uri.scheme == 'file') {
+        final f = File(uri.toFilePath());
+        final total = await f.length();
+        final b = BytesBuilder();
+        await for (final c in f.openRead(0, _headBytes)) {
+          b.add(c);
+        }
+        return (b.toBytes(), total);
+      }
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 6);
+      try {
+        final req = await client.getUrl(uri);
+        src.headers?.forEach(req.headers.set);
+        req.headers.set(HttpHeaders.rangeHeader, 'bytes=0-${_headBytes - 1}');
+        final res = await req.close().timeout(const Duration(seconds: 8));
+        if (res.statusCode != 200 && res.statusCode != 206) return null;
+        int? total;
+        final cr = res.headers.value(HttpHeaders.contentRangeHeader);
+        final m = cr == null ? null : RegExp(r'/(\d+)$').firstMatch(cr);
+        if (m != null) {
+          total = int.parse(m.group(1)!);
+        } else if (res.statusCode == 200 && res.contentLength > 0) {
+          total = res.contentLength;
+        }
+        final b = BytesBuilder();
+        await for (final c in res.timeout(const Duration(seconds: 8))) {
+          b.add(c);
+          if (b.length >= _headBytes) break;
+        }
+        return (b.toBytes(), total);
+      } finally {
+        client.close(force: true);
+      }
+    }
+    if (src is StreamAudioSource) {
+      final r = await src.request(0, _headBytes - 1);
+      final b = BytesBuilder();
+      await for (final c in r.stream) {
+        b.add(c);
+        if (b.length >= _headBytes) break;
+      }
+      return (b.toBytes(), r.sourceLength ?? r.contentLength);
+    }
+    return null;
+  }
+
+  static int _le32(Uint8List b, int o) =>
+      b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24);
+
+  static int _indexOf(Uint8List b, String needle, [int from = 0]) {
+    final n = needle.codeUnits;
+    for (var i = from; i <= b.length - n.length; i++) {
+      var ok = true;
+      for (var j = 0; j < n.length; j++) {
+        if (b[i + j] != n[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return i;
+    }
+    return -1;
+  }
+
+  static int? _avgKbps(int? total, Duration dur) {
+    if (total == null || total <= 0 || dur.inMilliseconds <= 0) return null;
+    return (total * 8 / dur.inMilliseconds).round(); // bits/ms == kbps
+  }
+
+  static _ProbeInfo? _parse(Uint8List b, int? total, Duration dur) {
+    if (b.length < 16) return null;
+    final avg = _avgKbps(total, dur);
+
+    // Skip an ID3v2 tag in front of FLAC / MP3 / AAC data.
+    var o = 0;
+    if (b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33 && b.length > 10) {
+      o = 10 +
+          ((b[6] & 0x7F) << 21 |
+              (b[7] & 0x7F) << 14 |
+              (b[8] & 0x7F) << 7 |
+              (b[9] & 0x7F));
+      if (o + 16 > b.length) return null;
+    }
+
+    // FLAC: STREAMINFO is exact.
+    if (b[o] == 0x66 && b[o + 1] == 0x4C && b[o + 2] == 0x61 &&
+        b[o + 3] == 0x43 && b.length >= o + 30) {
+      final sr = (b[o + 18] << 12) | (b[o + 19] << 4) | (b[o + 20] >> 4);
+      final ch = ((b[o + 20] >> 1) & 7) + 1;
+      final bps = (((b[o + 20] & 1) << 4) | (b[o + 21] >> 4)) + 1;
+      return _ProbeInfo(
+          codec: 'FLAC', kbps: avg, sampleRate: sr, bitDepth: bps, channels: ch);
+    }
+
+    // WAV
+    if (b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46 &&
+        b.length > 36) {
+      final ch = b[22] | (b[23] << 8);
+      final sr = _le32(b, 24);
+      final bits = b[34] | (b[35] << 8);
+      return _ProbeInfo(
+          codec: 'WAV',
+          kbps: (sr * ch * bits / 1000).round(),
+          sampleRate: sr,
+          bitDepth: bits,
+          channels: ch);
+    }
+
+    // Ogg: Opus or Vorbis.
+    if (b[0] == 0x4F && b[1] == 0x67 && b[2] == 0x67 && b[3] == 0x53) {
+      final op = _indexOf(b, 'OpusHead');
+      if (op >= 0 && op + 12 < b.length) {
+        return _ProbeInfo(
+            codec: 'Opus', kbps: avg, sampleRate: 48000, channels: b[op + 9]);
+      }
+      final vb = _indexOf(b, 'vorbis');
+      if (vb >= 1 && vb + 20 < b.length) {
+        return _ProbeInfo(
+            codec: 'Vorbis',
+            kbps: avg,
+            sampleRate: _le32(b, vb + 11),
+            channels: b[vb + 10]);
+      }
+    }
+
+    // Matroska / WebM
+    if (b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3) {
+      if (_indexOf(b, 'A_OPUS') >= 0) {
+        return _ProbeInfo(codec: 'Opus', kbps: avg, sampleRate: 48000);
+      }
+      if (_indexOf(b, 'A_VORBIS') >= 0) {
+        return _ProbeInfo(codec: 'Vorbis', kbps: avg);
+      }
+      if (_indexOf(b, 'A_FLAC') >= 0) {
+        return _ProbeInfo(codec: 'FLAC', kbps: avg);
+      }
+      if (_indexOf(b, 'A_AAC') >= 0) {
+        return _ProbeInfo(codec: 'AAC', kbps: avg);
+      }
+    }
+
+    // MP4 / M4A: read the sample entry of the audio track.
+    if (b.length > 12 && b[4] == 0x66 && b[5] == 0x74 && b[6] == 0x79 &&
+        b[7] == 0x70) {
+      var t = -1;
+      final stsd = _indexOf(b, 'stsd');
+      if (stsd >= 0 && stsd + 20 < b.length) t = stsd + 16;
+      String type = t >= 0
+          ? String.fromCharCodes(b.sublist(t, t + 4))
+          : (_indexOf(b, 'alac') >= 0
+              ? 'alac'
+              : (_indexOf(b, 'mp4a') >= 0 ? 'mp4a' : ''));
+      if (t < 0 && type.isNotEmpty) t = _indexOf(b, type);
+      int? rate;
+      int? depth;
+      int? ch;
+      if (t >= 0 && t + 30 < b.length) {
+        ch = (b[t + 20] << 8) | b[t + 21];
+        depth = (b[t + 22] << 8) | b[t + 23];
+        rate = (b[t + 28] << 8) | b[t + 29];
+        if (rate == 0) rate = null;
+      }
+      switch (type) {
+        case 'alac':
+          return _ProbeInfo(
+              codec: 'ALAC',
+              kbps: avg,
+              sampleRate: rate,
+              bitDepth: (depth != null && depth > 0) ? depth : 16,
+              channels: ch);
+        case 'Opus':
+          return _ProbeInfo(
+              codec: 'Opus', kbps: avg, sampleRate: 48000, channels: ch);
+        case 'fLaC':
+          return _ProbeInfo(
+              codec: 'FLAC',
+              kbps: avg,
+              sampleRate: rate,
+              bitDepth: depth,
+              channels: ch);
+        case 'mp4a':
+          return _ProbeInfo(
+              codec: 'AAC', kbps: avg, sampleRate: rate, channels: ch);
+      }
+    }
+
+    // Raw MP3 / ADTS AAC: first frame header.
+    for (var i = o; i < b.length - 4 && i < o + 8192; i++) {
+      if (b[i] != 0xFF) continue;
+      final b1 = b[i + 1];
+      if ((b1 & 0xE0) != 0xE0) continue;
+      // ADTS (layer bits 00)
+      if ((b1 & 0x06) == 0) {
+        const rates = [
+          96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000,
+          12000, 11025, 8000
+        ];
+        final idx = (b[i + 2] >> 2) & 0x0F;
+        if (idx < rates.length) {
+          return _ProbeInfo(codec: 'AAC', kbps: avg, sampleRate: rates[idx]);
+        }
+        continue;
+      }
+      final ver = (b1 >> 3) & 3; // 3 = MPEG1, 2 = MPEG2, 0 = MPEG2.5
+      final layer = (b1 >> 1) & 3; // 1 = Layer III, 2 = II
+      final br = (b[i + 2] >> 4) & 0x0F;
+      final sri = (b[i + 2] >> 2) & 3;
+      if (ver == 1 || layer == 0 || br == 0 || br == 15 || sri == 3) continue;
+      const v1l3 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+      const v2l3 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+      const r1 = [44100, 48000, 32000];
+      final rate = ver == 3 ? r1[sri] : (ver == 2 ? r1[sri] ~/ 2 : r1[sri] ~/ 4);
+      final headerKbps = layer == 1 ? (ver == 3 ? v1l3[br] : v2l3[br]) : null;
+      return _ProbeInfo(
+          codec: layer == 1 ? 'MP3' : 'MP2',
+          kbps: avg ?? headerKbps,
+          sampleRate: rate);
+    }
+    return null;
   }
 }
 
