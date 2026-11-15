@@ -346,11 +346,47 @@ class MirrorSource {
       }
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       if (data is! Map) return null;
+      // One-line diagnostic of what the mirror really answered, so a
+      // preview that slips through can be traced from the log.
+      print('[mirror] tidal manifest $trackId ($param) keys='
+          '${data.keys.join(',')} presentation='
+          '${data['assetPresentation'] ?? data['asset_presentation'] ?? '-'} '
+          'quality=${data['audioQuality'] ?? data['audio_quality'] ?? '-'}');
+      // Explicit preview markers anywhere in the payload.
+      final presentation =
+          '${data['assetPresentation'] ?? data['asset_presentation'] ?? ''}'
+              .toUpperCase();
+      if (presentation.contains('PREVIEW') ||
+          data['preview'] == true ||
+          data['isPreview'] == true ||
+          data['is_preview'] == true) {
+        print('[mirror] tidal manifest $trackId: payload says PREVIEW');
+        return null;
+      }
       final urls = data['streamUrls'];
-      final url = (urls is List && urls.isNotEmpty)
-          ? urls.first.toString()
-          : '${data['streamUrl'] ?? ''}';
-      if (url.isEmpty) return null;
+      final candidates = <String>[
+        if (urls is List) ...urls.map((e) => e.toString()),
+        if ('${data['streamUrl'] ?? ''}'.isNotEmpty) '${data['streamUrl']}',
+      ].where((u) => u.isNotEmpty).toList();
+      if (candidates.isEmpty) return null;
+      // The list can hold several variants; take the first that is a
+      // verifiable, full-size FLAC instead of blindly using urls.first.
+      String? url;
+      int? seconds;
+      for (final c in candidates) {
+        if (MirrorSource.looksLikePreviewUrl(c)) continue;
+        final sec = await _probeFlacSeconds(c);
+        if (sec == null) continue;
+        if (!MirrorSource.bytesLookFull(c, sec, _probeBytes)) continue;
+        url = c;
+        seconds = sec;
+        break;
+      }
+      if (url == null || seconds == null) {
+        print('[mirror] tidal manifest $trackId ($param): no full FLAC in '
+            '${candidates.length} candidate url(s)');
+        return null;
+      }
       // Refuse anything that is not plain FLAC (fake-lossless AAC guard).
       final codec = '${data['codec'] ?? ''}'.toLowerCase();
       if (codec.isNotEmpty && !codec.contains('flac')) return null;
@@ -362,12 +398,8 @@ class MirrorSource {
       // Full-stream guarantee: probe the CDN bytes and read the real
       // duration out of the FLAC STREAMINFO header. Previews (30-s cuts)
       // never make it into the cache.
-      final seconds = await _probeFlacSeconds(url);
-      if (seconds == null) {
-        print('[mirror] tidal manifest $trackId ($param): not a verifiable '
-            'full FLAC — rejected');
-        return null;
-      }
+      print('[mirror] tidal $trackId ($param): ${seconds}s, '
+          '${_probeBytes[url] ?? '?'} bytes');
       final manifest = _TidalManifest(url, seconds);
       _tidalManifestCache[cacheKey] = (manifest, now.add(_manifestTtl));
       _evict(_tidalManifestCache);
