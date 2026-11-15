@@ -43,11 +43,103 @@ Future<void> main() async {
     ..maximumSizeBytes = 48 << 20
     ..maximumSize = 120;
 
-  await initialiseHive();
+  // First frame IMMEDIATELY. All initialisation used to run before runApp, so
+  // a phone showed nothing and then stuttered for seconds/minutes while Hive,
+  // the audio service, Discover, the YouTube bridge and the last session were
+  // all loaded at the same moment. Now a splash is on screen at once, the
+  // essential setup runs behind it in short steps (each step yields a frame so
+  // the spinner keeps moving), and the heavy warm-ups start one after another
+  // right after the UI is up - never all together.
+  runApp(const _ZenBoot());
+}
 
-  // These four do not depend on each other (only on Hive, which is ready), so
-  // run them together instead of one after another: the first frame no longer
-  // waits for the sum of all of them.
+/// Let the engine draw one frame between boot steps.
+Future<void> _yieldFrame() =>
+    Future<void>.delayed(const Duration(milliseconds: 16));
+
+class _ZenBoot extends StatefulWidget {
+  const _ZenBoot();
+
+  @override
+  State<_ZenBoot> createState() => _ZenBootState();
+}
+
+class _ZenBootState extends State<_ZenBoot> {
+  Widget? _app;
+
+  @override
+  void initState() {
+    super.initState();
+    // Start once the splash has been painted.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _boot());
+  }
+
+  Future<void> _boot() async {
+    final app = await _bootstrap();
+    if (!mounted) return;
+    setState(() => _app = app);
+    _startBackgroundServices();
+  }
+
+  @override
+  Widget build(BuildContext context) => _app ?? const _BootSplash();
+}
+
+class _BootSplash extends StatelessWidget {
+  const _BootSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+        Brightness.dark;
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: ColoredBox(
+        color: dark ? const Color(0xFF000000) : const Color(0xFFFFFFFF),
+        child: Center(
+          child: SizedBox(
+            width: 34,
+            height: 34,
+            child: CircularProgressIndicator(
+              strokeWidth: 3,
+              color: dark ? Colors.white : Colors.black,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Heavy warm-ups, staggered so no two land on the same frames.
+void _startBackgroundServices() {
+  void later(int ms, void Function() job) {
+    Future<void>.delayed(Duration(milliseconds: ms), () {
+      try {
+        job();
+      } catch (_) {}
+    });
+  }
+
+  final mediaPlayer = GetIt.I<MediaPlayer>();
+  later(500, () {
+    GetIt.I<BeatHapticsEngine>().start();
+    ZenWallService.instance.attach(mediaPlayer.currentSongNotifier);
+  });
+  later(900, () => unawaited(mediaPlayer.restoreLastSession()));
+  later(1800, () => unawaited(InnertubexBridge.warm()));
+  if (Platform.isAndroid || Platform.isIOS) {
+    later(3000, () => unawaited(DiscoverFeed.instance.warm()));
+  }
+  later(4500, () => JamService.instance.start(mediaPlayer));
+}
+
+Future<Widget> _bootstrap() async {
+  await initialiseHive();
+  await _yieldFrame();
+
+  // These do not depend on each other (only on Hive, which is ready), so run
+  // them together.
   final audioServerFuture = createAudioStreamServer();
   await Future.wait<void>([
     JustAudioBackground.init(
@@ -61,6 +153,7 @@ Future<void> main() async {
     AppearancePrefs.load(),
     _initFileStorage(),
   ]);
+  await _yieldFrame();
   // Feature pack prefs (need Hive/SETTINGS, so they run after the block above)
   await L10n.load();
   LyricStylePrefs.load();
@@ -68,9 +161,6 @@ Future<void> main() async {
   LyricsTranslation.instance.load();
   LyricsRomanizer.instance.load();
   unawaited(SingMode.instance.restore());
-
-  unawaited(InnertubexBridge.warm());
-
 
   String? visitorId = await Hive.box('SETTINGS').get('VISITOR_ID');
   YTMusic ytMusic = YTMusic(
@@ -87,18 +177,18 @@ Future<void> main() async {
   final String audioStreamUrl = await audioServerFuture;
   GetIt.I.registerSingleton<String>(audioStreamUrl,
       instanceName: 'audioStreamUrl');
+  await _yieldFrame();
 
   final MediaPlayer mediaPlayer = MediaPlayer();
   GetIt.I.registerSingleton<MediaPlayer>(mediaPlayer);
+  await _yieldFrame();
 
+  // Registered now (the UI may look it up); started in
+  // _startBackgroundServices().
   GetIt.I.registerSingleton<BeatHapticsEngine>(
       BeatHapticsEngine(mediaPlayer));
-  GetIt.I<BeatHapticsEngine>().start();
-  ZenWallService.instance.attach(mediaPlayer.currentSongNotifier);
 
   unawaited(SpotifyAuth.instance.load());
-
-  unawaited(mediaPlayer.restoreLastSession());
 
   final libraryService = LibraryService();
   GetIt.I.registerSingleton<LibraryService>(libraryService);
@@ -112,24 +202,16 @@ Future<void> main() async {
 
   GetIt.I.registerSingleton<YTMusic>(ytMusic);
 
-  // Discover: load songs + resolve first streams now, so the tab is instant.
-  if (Platform.isAndroid || Platform.isIOS) {
-    unawaited(DiscoverFeed.instance.warm());
-  }
-
-  JamService.instance.start(mediaPlayer);
-
   YtmAuth.instance.load();
+  await _yieldFrame();
 
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => settingsManager),
-        ChangeNotifierProvider(create: (_) => mediaPlayer),
-        ChangeNotifierProvider(create: (_) => libraryService),
-      ],
-      child: const ZenDesktopApp(),
-    ),
+  return MultiProvider(
+    providers: [
+      ChangeNotifierProvider(create: (_) => settingsManager),
+      ChangeNotifierProvider(create: (_) => mediaPlayer),
+      ChangeNotifierProvider(create: (_) => libraryService),
+    ],
+    child: const ZenDesktopApp(),
   );
 }
 
