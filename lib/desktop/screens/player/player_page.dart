@@ -2482,33 +2482,59 @@ class _QualityPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _Squircle(
-      height: 46,
-      radius: 20,
-      color: color,
-      tooltip: 'Audio quality'.tr,
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                info.pillText,
-                maxLines: 1,
-                style: TextStyle(
-                  fontSize: 15.5,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white.withValues(alpha: 0.95),
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
+    // The pill takes the colour of the real quality: gold for lossless /
+    // Hi-Res, green for high, silver for standard, orange for low.
+    final accent = info.accent;
+    return TweenAnimationBuilder<Color?>(
+      tween: ColorTween(end: accent),
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOutCubic,
+      builder: (context, c, _) {
+        final a = c ?? accent;
+        return _Squircle(
+          height: 46,
+          radius: 20,
+          color: Color.alphaBlend(a.withValues(alpha: 0.20), color),
+          tooltip: 'Audio quality'.tr,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: a,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: a.withValues(alpha: 0.65),
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 9),
+                  Text(
+                    info.pillText,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w800,
+                      color: a,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
