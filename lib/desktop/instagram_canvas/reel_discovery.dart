@@ -52,8 +52,15 @@ class ReelDiscovery {
   static final RegExp _reelUrlInTextRe =
       RegExp('https?://(?:www\\.)?$_shortcodePattern');
 
+  // Bing's HTML writes the separator as an entity (&amp;u=a1...), so the old
+  // r'&u=a1' pattern never matched. Accept ?, &, ; before u=a1.
   static final RegExp _bingWrappedRe2 =
-      RegExp(r'&u=a1([A-Za-z0-9_\-%]{20,})');
+      RegExp(r'[?&;]u=a1([A-Za-z0-9_\-%]{20,})');
+  // Visible breadcrumb:  instagram.com › reel › DfuUTROyNNV
+  static final RegExp _citeRe = RegExp(
+      r'instagram\.com\s*(?:›|&rsaquo;|&#8250;|&#x203A;|&gt;)\s*(reels?|p)'
+      r'\s*(?:›|&rsaquo;|&#8250;|&#x203A;|&gt;)\s*([A-Za-z0-9_-]{5,25})',
+      caseSensitive: false);
   static final RegExp _ddgWrappedRe =
       RegExp(r'uddg=([A-Za-z0-9_%\-\.]{10,400})');
 
@@ -324,6 +331,12 @@ class ReelDiscovery {
       final reel = _reelUrlInTextRe.firstMatch(decoded);
       if (reel == null) continue;
       textSpots.add(_wrappedContextText(body, m.start, decoded, reel.group(1)!));
+    }
+
+    // 2b. Breadcrumb text (works even when the href is wrapped oddly).
+    for (final m in _citeRe.allMatches(body)) {
+      textSpots.add('https://www.instagram.com/${m.group(1)}/${m.group(2)} '
+          '${_contextText(body, m.start, m.end)}');
     }
 
     // 3. DDG-wrapped links: ...uddg=<url-encoded real url>&rut=...
