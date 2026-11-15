@@ -189,7 +189,7 @@ class InstagramReelFinder {
   /// Build the Range-capable playback URL for a reel via the service proxy.
   static String streamProxyUrlFor(String igPostUrl) {
     final encoded = Uri.encodeComponent(igPostUrl);
-    return '${InstagramCanvasConfig.serviceBase}'
+    return '${InstagramCanvasConfig.serviceBaseUrl.replaceAll(RegExp(r'/+$'), '')}'
         '/api/stream?url=$encoded';
   }
 
@@ -202,7 +202,7 @@ class InstagramReelFinder {
       final client = HttpClient()
         ..connectionTimeout = const Duration(seconds: 6);
       try {
-        final uri = '${InstagramCanvasConfig.serviceBase}'
+        final uri = '${InstagramCanvasConfig.serviceBaseUrl.replaceAll(RegExp(r'/+$'), '')}'
             '/api/video?url=${Uri.encodeComponent(postUrl)}';
         final req = await client
             .getUrl(Uri.parse(uri))
