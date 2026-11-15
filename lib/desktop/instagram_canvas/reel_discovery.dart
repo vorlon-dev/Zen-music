@@ -174,7 +174,7 @@ class ReelDiscovery {
     // 1. Service-side search (v3 endpoint).
     if (InstagramCanvasConfig.serviceSearchEnabled) {
       try {
-        final uri = '${InstagramCanvasConfig.serviceBaseUrl}'
+        final uri = '${InstagramCanvasConfig.serviceBase}'
             '/api/search?q=${Uri.encodeQueryComponent(query)}&limit=12';
         final body = await _fetchPlain(
             uri, InstagramCanvasConfig.serviceSearchTimeout);

@@ -17,6 +17,11 @@ class InstagramCanvasConfig {
   /// Set false to disable the whole feature (every call returns null fast).
   static const bool enabled = true;
 
+  /// [serviceBaseUrl] without any trailing slash — always build URLs from
+  /// this (a base ending in '/' produced //api/... and a 404).
+  static String get serviceBase =>
+      serviceBaseUrl.replaceAll(RegExp(r'/+$'), '');
+
   // ── Self-hosted reel resolver service ─────────────────────────────────
   /// The user-deployed instagram-video-scraper instance (v2, keyless embed
   /// resolve, no browser needed). Endpoints:
