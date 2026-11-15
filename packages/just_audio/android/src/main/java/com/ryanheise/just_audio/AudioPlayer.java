@@ -799,7 +799,13 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         }
         DefaultHttpDataSource.Factory httpDataSourceFactory = new DefaultHttpDataSource.Factory()
                 .setUserAgent(userAgent)
-                .setAllowCrossProtocolRedirects(true);
+                .setAllowCrossProtocolRedirects(true)
+                // Media3 defaults to 8s connect/read — too tight on flaky
+                // mobile networks for big FLAC responses. The read timeout
+                // is a between-bytes gap, so slow-but-flowing streams are
+                // unaffected; only fully stalled sources fail later.
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(15000);
         if (stringHeaders != null && stringHeaders.size() > 0) {
             httpDataSourceFactory.setDefaultRequestProperties(stringHeaders);
         }

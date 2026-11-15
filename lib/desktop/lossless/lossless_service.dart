@@ -12,7 +12,6 @@ import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
-import 'package:zenmusic/desktop/lossless/song_quality.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
 class LosslessService {
@@ -21,6 +20,17 @@ class LosslessService {
 
   /// The user's deployed qobuz-api instance. One-line change if it moves.
   static const String endpoint = 'https://jobfolw.antideploy.app/';
+
+  /// DEAD ENDPOINT (Nov 2026): the host above answers HTTP 404 for every
+  /// track and then drops connections outright. It only burned 8-12 s per
+  /// song (connect timeout + io timeout) and spammed the log before the
+  /// real chain even started — the direct cause of "song loads and loads
+  /// but never plays". While this flag is false every call returns null
+  /// INSTANTLY (no request is ever made) and playback goes straight to
+  /// the mirror pool / JioSaavn / cache / YouTube. Flip it back to true
+  /// only if a fresh, working qobuz-api instance is deployed.
+  static const bool endpointEnabled = false;
+  static bool _warnedDisabled = false;
 
   static const _connectTimeout = Duration(seconds: 8);
   static const _ioTimeout = Duration(seconds: 12);
@@ -37,6 +47,12 @@ class LosslessService {
   static final ValueNotifier<int> servedRevision = ValueNotifier<int>(0);
 
   LosslessQuality? servedTierFor(String songId) => _served[songId];
+
+  /// MirrorSource (free Antra-pool FLAC) reports the tier it actually
+  /// served for a song — same map, same revision counter, so the player
+  /// page quality pill lights up with zero UI changes.
+  void noteMirrorServed(String id, LosslessQuality? tier) =>
+      _setServed(id, tier);
 
   void _setServed(String id, LosslessQuality? tier) {
     if (tier == null) {
@@ -87,6 +103,13 @@ class LosslessService {
   /// to its normal source). Never throws.
   Future<AudioSource?> tryBuildSource(
       Map<String, dynamic> song, MediaItem tag) async {
+    if (!endpointEnabled) {
+      if (!_warnedDisabled) {
+        _warnedDisabled = true;
+        print('[lossless] qobuz endpoint disabled (dead host) — skipping');
+      }
+      return null;
+    }
     try {
       final videoId = await _youtubeIdFor(song);
       if (videoId == null || videoId.isEmpty) {
@@ -100,7 +123,7 @@ class LosslessService {
         return null;
       }
 
-      final wanted = SongQuality.forSong(tag.id) ?? LosslessPrefs.current;
+      final wanted = LosslessPrefs.current;
       for (final tier in _ladderFrom(wanted)) {
         final url = streams[tier.tierKey];
         if (url != null && url.isNotEmpty) {
@@ -178,6 +201,7 @@ class LosslessService {
   /// Returns null on ANY failure (HTTP error, error status, timeout,
   /// no streams) — negative results are remembered for [_negativeTtl].
   Future<Map<String, String>?> resolveStreams(String videoId) async {
+    if (!endpointEnabled) return null; // dead host — never contacted
     final now = DateTime.now();
 
     final hit = _streamCache[videoId];

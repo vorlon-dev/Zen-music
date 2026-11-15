@@ -75,7 +75,9 @@ class CrossfadeEngine {
   final AudioPlayer _player;
 
   /// Builds a fresh audio source for a song map (the app's own resolver).
-  final Future<AudioSource> Function(Map<String, dynamic> song) buildSource;
+  /// Null = no source under the selected quality tier (strict lossless
+  /// mode) — the blend is skipped and the transition stays a hard cut.
+  final Future<AudioSource?> Function(Map<String, dynamic> song) buildSource;
 
   /// The song map at a queue index, or null.
   final Map<String, dynamic>? Function(int index) songAt;
@@ -187,6 +189,13 @@ class CrossfadeEngine {
       // Load the outgoing track on the second deck, parked at the switch point.
       deck = AudioPlayer();
       final src = await buildSource(out);
+      if (src == null) {
+        // Strict lossless miss — no lossless replay available for the
+        // outgoing track: let the transition stay a normal hard cut.
+        await deck.dispose();
+        deck = null;
+        return;
+      }
       await deck.setAudioSource(src, initialPosition: switchAt);
       await deck.setVolume(0.0);
       if (token != _token) {
