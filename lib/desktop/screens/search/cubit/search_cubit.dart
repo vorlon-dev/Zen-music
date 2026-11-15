@@ -120,6 +120,37 @@ class SearchCubit extends Cubit<SearchState> {
       final feed = await _ytmusic.search(query, endpoint: endpoint);
 
       if (endpoint == null) {
+        // Songs first: the mixed YTM result is full of music VIDEOS (clips,
+        // lyric videos). Ask YTM for the real "songs" shelf (audio tracks)
+        // and drop video items from the mixed sections — real videos still
+        // live in the YouTube videos section below.
+        try {
+          final songsFeed = await _ytmusic.search(query, filter: 'songs');
+          final songItems = <dynamic>[
+            for (final sec in (songsFeed['sections'] as List? ?? const []))
+              ...((sec as Map)['contents'] as List? ?? const []),
+          ].where((e) => e is Map && e['type'] != 'VIDEO').toList();
+
+          final kept = <Map<String, dynamic>>[];
+          for (final sec in (feed['sections'] as List? ?? const [])) {
+            final m = Map<String, dynamic>.from(sec as Map);
+            final t = (m['title'] ?? '').toString().toLowerCase();
+            if (t == 'songs' || t == 'videos') continue;
+            m['contents'] = ((m['contents'] as List?) ?? const [])
+                .where((e) => !(e is Map && e['type'] == 'VIDEO'))
+                .toList();
+            if ((m['contents'] as List).isEmpty) continue;
+            kept.add(m);
+          }
+          if (songItems.isNotEmpty) {
+            final at = (kept.isNotEmpty && kept.first['title'] == null) ? 1 : 0;
+            kept.insert(at, {'title': 'Songs', 'contents': songItems});
+          }
+          if (kept.isNotEmpty) feed['sections'] = kept;
+        } catch (e) {
+          print('[search] songs shelf error (using mixed result): $e');
+        }
+
         // YouTube videos preview (top results for the keyword).
         try {
           final page = await YouTubeVideoSearch.instance.search(query);

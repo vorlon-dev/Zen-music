@@ -42,6 +42,8 @@ import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 // TODO: change this file name if your service file is named differently.
 import 'package:zenmusic/desktop/lossless/lossless_service.dart';
+import 'package:zenmusic/desktop/lossless/mirror_source.dart';
+import 'package:zenmusic/desktop/lossless/real_format.dart';
 import 'package:zenmusic/mobile/widgets/echo_motion.dart';
 import 'package:zenmusic/desktop/utils/track_sheet.dart';
 
@@ -135,6 +137,7 @@ class _PlayerPageState extends State<PlayerPage>
   void initState() {
     super.initState();
     ShellOverlaysBus.fullPageAbove.value = true;
+    RealAudioFormat.instance.attach(GetIt.I<MediaPlayer>().player);
     _dismissSpring = const SpringDescription(
       mass: 1,
       stiffness: 650,
@@ -1399,7 +1402,8 @@ class _PlayerPageState extends State<PlayerPage>
             flex: 13,
             // Rebuilds when the lossless service reports a served tier.
             child: ListenableBuilder(
-              listenable: LosslessService.servedRevision,
+              listenable: Listenable.merge(
+                  [LosslessService.servedRevision, RealAudioFormat.revision]),
               builder: (context, _) {
                 final q = _AudioQuality.of(song);
                 return _QualityPill(
@@ -1704,7 +1708,8 @@ class _PlayerPageState extends State<PlayerPage>
         children: [
           // Rebuilds when the lossless service reports a served tier.
           ListenableBuilder(
-            listenable: LosslessService.servedRevision,
+            listenable: Listenable.merge(
+                  [LosslessService.servedRevision, RealAudioFormat.revision]),
             builder: (context, _) {
               final q = _AudioQuality.of(song);
               return _QualityChip(info: q, onTap: () => _openQuality(song));
@@ -1999,7 +2004,7 @@ class _AudioQuality {
           tier: _Tier.high,
           codec: 'MP3',
           bitrateKbps: 320,
-          source: 'Qobuz',
+          source: 'Lossless mirror',
         );
       case LosslessQuality.flacCd:
         return const _AudioQuality(
@@ -2007,7 +2012,7 @@ class _AudioQuality {
           codec: 'FLAC',
           sampleRateHz: 44100,
           bitDepth: 16,
-          source: 'Qobuz',
+          source: 'Lossless mirror',
         );
       case LosslessQuality.flacHiRes96:
         return const _AudioQuality(
@@ -2015,7 +2020,7 @@ class _AudioQuality {
           codec: 'FLAC',
           sampleRateHz: 96000,
           bitDepth: 24,
-          source: 'Qobuz',
+          source: 'Lossless mirror',
         );
       case LosslessQuality.flacHiResMax:
         return const _AudioQuality(
@@ -2023,12 +2028,79 @@ class _AudioQuality {
           codec: 'FLAC',
           sampleRateHz: 192000,
           bitDepth: 24,
-          source: 'Qobuz',
+          source: 'Lossless mirror',
         );
     }
   }
 
+  /// Metadata estimate overlaid with what the decoder really reports.
   static _AudioQuality of(MediaItem song) {
+    final base = _base(song);
+    final real = RealAudioFormat.instance.forSong(song.id);
+    if (real == null) {
+      // Mirror FLAC: at least the measured file bitrate is real.
+      final measured = MirrorSource.instance.measuredKbps(song.id);
+      if (measured == null) return base;
+      return _merge(base, bitrateKbps: measured);
+    }
+    final mime = '${real['mime'] ?? ''} ${real['codecs'] ?? ''}';
+    final codec = _codecFrom(mime) ?? base.codec;
+    int? kbps;
+    for (final k in const ['averageBitrate', 'bitrate', 'peakBitrate']) {
+      final v = real[k];
+      if (v is num && v > 0) {
+        kbps = (v / 1000).round();
+        break;
+      }
+    }
+    kbps ??= MirrorSource.instance.measuredKbps(song.id);
+    final sr = real['sampleRate'];
+    final rate = (sr is num && sr > 0) ? sr.round() : null;
+    int? depth;
+    switch (real['pcmEncoding']) {
+      case 2:
+        depth = 16;
+      case 21:
+        depth = 24;
+      case 22:
+        depth = 32;
+      case 3:
+        depth = 8;
+    }
+    return _merge(base,
+        codec: codec, bitrateKbps: kbps, sampleRateHz: rate, bitDepth: depth);
+  }
+
+  static _AudioQuality _merge(_AudioQuality b,
+      {String? codec, int? bitrateKbps, int? sampleRateHz, int? bitDepth}) {
+    final c = codec ?? b.codec;
+    final kbps = bitrateKbps ?? b.bitrateKbps;
+    final rate = sampleRateHz ?? b.sampleRateHz;
+    final depth = bitDepth ?? b.bitDepth;
+    final cl = (c ?? '').toLowerCase();
+    final lossless = cl == 'flac' || cl == 'alac' || cl == 'wav';
+    _Tier tier = b.tier;
+    if (lossless) {
+      tier = ((depth ?? 16) >= 24 || (rate ?? 44100) > 48000)
+          ? _Tier.hiRes
+          : _Tier.lossless;
+    } else if (kbps != null) {
+      final opus = cl == 'opus';
+      tier = kbps >= (opus ? 128 : 256)
+          ? _Tier.high
+          : (kbps >= (opus ? 64 : 128) ? _Tier.standard : _Tier.low);
+    }
+    return _AudioQuality(
+      tier: tier,
+      codec: c,
+      bitrateKbps: kbps,
+      sampleRateHz: rate,
+      bitDepth: depth,
+      source: b.source,
+    );
+  }
+
+  static _AudioQuality _base(MediaItem song) {
     // Lossless service served this song -> exact tier it really got.
     final served = LosslessService.instance.servedTierFor(song.id);
     if (served != null) return _fromTier(served);

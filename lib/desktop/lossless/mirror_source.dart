@@ -95,24 +95,28 @@ class MirrorSource {
         if (!expired()) {
           final tidalFuture = _resolveTidal(identity);
           final dzFuture = _resolveDeezer(identity);
-          final tidal = await tidalFuture;
-          if (tidal != null) {
-            unawaited(dzFuture);
+          // FORCE-FULL: walk every plausible Tidal catalog match (the same
+          // song often exists as several releases, and only some of them
+          // hand out a full stream), and when none yields a full FLAC fall
+          // through to Deezer — a preview is never served.
+          final tidalMatches = await tidalFuture;
+          for (final m in tidalMatches) {
+            if (expired()) break;
             final source = await _buildTidalSource(
-                tidal, tag, identity.durationMs, deadline);
+                m, tag, identity.durationMs, deadline);
             if (source != null) {
+              unawaited(dzFuture);
               _noteNetOk();
               return source;
             }
-          } else {
-            final dz = await dzFuture;
-            if (dz != null && !expired()) {
-              final source = await _buildDeezerSource(
-                  dz, tag, identity.durationMs, deadline);
-              if (source != null) {
-                _noteNetOk();
-                return source;
-              }
+          }
+          final dz = await dzFuture;
+          if (dz != null && !expired()) {
+            final source = await _buildDeezerSource(
+                dz, tag, identity.durationMs, deadline);
+            if (source != null) {
+              _noteNetOk();
+              return source;
             }
           }
         }
@@ -243,7 +247,7 @@ class MirrorSource {
 
   // --------------------------------------------------------------- tidal
 
-  Future<_TidalMatch?> _resolveTidal(_Identity id) async {
+  Future<List<_TidalMatch>> _resolveTidal(_Identity id) async {
     try {
       final query = '${id.title} ${id.artist}'.trim();
       final res = await _http
@@ -252,14 +256,13 @@ class MirrorSource {
                   .replace(queryParameters: {'s': query}),
               headers: MirrorConfig.jsonHeaders)
           .timeout(MirrorConfig.searchTimeout);
-      if (res.statusCode != 200) return null;
+      if (res.statusCode != 200) return const [];
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       final items =
           ((data is Map ? data['data'] : null) as Map?)?['items'];
-      if (items is! List || items.isEmpty) return null;
+      if (items is! List || items.isEmpty) return const [];
 
-      _TidalMatch? best;
-      var bestScore = 0.0;
+      final scored = <(double, _TidalMatch)>[];
       for (final raw in items) {
         if (raw is! Map) continue;
         final artist = ((raw['artist'] as Map?)?['name'] ?? '').toString();
@@ -269,24 +272,25 @@ class MirrorSource {
             : null;
         final score =
             _score(id, '${raw['title'] ?? ''}', artist, durMs);
-        if (score > bestScore) {
-          bestScore = score;
-          best = _TidalMatch(
-            '${raw['id'] ?? ''}',
-            '${raw['audioQuality'] ?? ''}'
-                .toUpperCase()
-                .contains('HI_RES'),
-          );
+        if (score >= 0.62 && '${raw['id'] ?? ''}'.isNotEmpty) {
+          scored.add((
+            score,
+            _TidalMatch(
+              '${raw['id']}',
+              '${raw['audioQuality'] ?? ''}'.toUpperCase().contains('HI_RES'),
+              durMs,
+            )
+          ));
         }
       }
-      if (best == null || best.trackId.isEmpty) return null;
-      // Mirrors relay best-effort catalog matches — a weak text match is
-      // worse than falling through to Deezer / the regular chain.
-      return bestScore >= 0.62 ? best : null;
+      // Mirrors relay best-effort catalog matches — weak text matches are
+      // dropped; the best three are tried in order.
+      scored.sort((a, b) => b.$1.compareTo(a.$1));
+      return [for (final e in scored.take(3)) e.$2];
     } catch (e) {
       print('[mirror] tidal search error: $e');
       if (_isNetError(e)) _noteNetFail();
-      return null;
+      return const [];
     }
   }
 
@@ -299,12 +303,19 @@ class MirrorSource {
     // strict_24 when the user picked a Hi-Res tier; the server answers 409
     // when the track has no 24-bit master — then we still serve CD
     // lossless instead of giving up.
-    final attempts = wantsHiRes ? ['strict_24=1', 'prefer_16=1'] : ['prefer_16=1'];
+    final attempts = wantsHiRes
+        ? ['strict_24=1', 'prefer_16=1', 'quality=LOSSLESS']
+        : ['prefer_16=1', 'quality=LOSSLESS'];
 
     for (final param in attempts) {
       if (!DateTime.now().isBefore(deadline)) return null;
       final manifest = await _tidalManifest(match.trackId, param);
       if (manifest == null) continue;
+      expectedMs = match.durationMs ?? expectedMs;
+      if (!MirrorSource.bytesLookFull(manifest.url, manifest.seconds, _probeBytes)) {
+        print('[mirror] tidal ${match.trackId} truncated file rejected');
+        continue;
+      }
       // Full-stream guarantee: a manifest that failed the duration probe
       // (preview cut / AAC preview / unparseable) is never served.
       if (!MirrorSource.isFullTrack(manifest.seconds, expectedMs)) {
@@ -316,6 +327,7 @@ class MirrorSource {
       await _ensureServer();
       final playUrl = Uri.parse('$_baseUrl/tide?u='
           '${Uri.encodeComponent(base64Url.encode(utf8.encode(manifest.url)))}');
+      _noteStats(tag.id, manifest.url, manifest.seconds);
       LosslessService.instance.noteMirrorServed(
           tag.id, param.startsWith('strict') ? wanted : LosslessQuality.flacCd);
       return AudioSource.uri(playUrl, tag: tag);
@@ -340,11 +352,47 @@ class MirrorSource {
       }
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       if (data is! Map) return null;
+      // One-line diagnostic of what the mirror really answered, so a
+      // preview that slips through can be traced from the log.
+      print('[mirror] tidal manifest $trackId ($param) keys='
+          '${data.keys.join(',')} presentation='
+          '${data['assetPresentation'] ?? data['asset_presentation'] ?? '-'} '
+          'quality=${data['audioQuality'] ?? data['audio_quality'] ?? '-'}');
+      // Explicit preview markers anywhere in the payload.
+      final presentation =
+          '${data['assetPresentation'] ?? data['asset_presentation'] ?? ''}'
+              .toUpperCase();
+      if (presentation.contains('PREVIEW') ||
+          data['preview'] == true ||
+          data['isPreview'] == true ||
+          data['is_preview'] == true) {
+        print('[mirror] tidal manifest $trackId: payload says PREVIEW');
+        return null;
+      }
       final urls = data['streamUrls'];
-      final url = (urls is List && urls.isNotEmpty)
-          ? urls.first.toString()
-          : '${data['streamUrl'] ?? ''}';
-      if (url.isEmpty) return null;
+      final candidates = <String>[
+        if (urls is List) ...urls.map((e) => e.toString()),
+        if ('${data['streamUrl'] ?? ''}'.isNotEmpty) '${data['streamUrl']}',
+      ].where((u) => u.isNotEmpty).toList();
+      if (candidates.isEmpty) return null;
+      // The list can hold several variants; take the first that is a
+      // verifiable, full-size FLAC instead of blindly using urls.first.
+      String? url;
+      int? seconds;
+      for (final c in candidates) {
+        if (MirrorSource.looksLikePreviewUrl(c)) continue;
+        final sec = await _probeFlacSeconds(c);
+        if (sec == null) continue;
+        if (!MirrorSource.bytesLookFull(c, sec, _probeBytes)) continue;
+        url = c;
+        seconds = sec;
+        break;
+      }
+      if (url == null || seconds == null) {
+        print('[mirror] tidal manifest $trackId ($param): no full FLAC in '
+            '${candidates.length} candidate url(s)');
+        return null;
+      }
       // Refuse anything that is not plain FLAC (fake-lossless AAC guard).
       final codec = '${data['codec'] ?? ''}'.toLowerCase();
       if (codec.isNotEmpty && !codec.contains('flac')) return null;
@@ -356,12 +404,8 @@ class MirrorSource {
       // Full-stream guarantee: probe the CDN bytes and read the real
       // duration out of the FLAC STREAMINFO header. Previews (30-s cuts)
       // never make it into the cache.
-      final seconds = await _probeFlacSeconds(url);
-      if (seconds == null) {
-        print('[mirror] tidal manifest $trackId ($param): not a verifiable '
-            'full FLAC — rejected');
-        return null;
-      }
+      print('[mirror] tidal $trackId ($param): ${seconds}s, '
+          '${_probeBytes[url] ?? '?'} bytes');
       final manifest = _TidalManifest(url, seconds);
       _tidalManifestCache[cacheKey] = (manifest, now.add(_manifestTtl));
       _evict(_tidalManifestCache);
@@ -404,7 +448,8 @@ class MirrorSource {
             durMs is num && durMs > 0 ? durMs.round() : null);
         if (score > bestScore) {
           bestScore = score;
-          best = _DeezerMatch('${raw['track_id'] ?? ''}');
+          best = _DeezerMatch('${raw['track_id'] ?? ''}',
+              durMs is num && durMs > 0 ? durMs.round() : null);
         }
       }
       if (best == null || best.trackId.isEmpty) return null;
@@ -424,6 +469,11 @@ class MirrorSource {
     // not play 30 seconds.
     final manifest = await _deezerManifest(match.trackId);
     if (manifest == null) return null;
+    expectedMs = match.durationMs ?? expectedMs;
+    if (!MirrorSource.bytesLookFull(manifest.url, manifest.seconds, _probeBytes)) {
+      print('[mirror] deezer ${match.trackId} truncated file rejected');
+      return null;
+    }
     if (!MirrorSource.isFullTrack(manifest.seconds, expectedMs)) {
       print('[mirror] deezer ${match.trackId} preview/short cut rejected '
           '(${manifest.seconds}s)');
@@ -431,6 +481,7 @@ class MirrorSource {
     }
 
     await _ensureServer();
+    _noteStats(tag.id, manifest.url, manifest.seconds);
     LosslessService.instance.noteMirrorServed(tag.id, LosslessQuality.flacCd);
     return AudioSource.uri(
         Uri.parse(
@@ -834,10 +885,39 @@ class MirrorSource {
   static bool isFullTrack(int? seconds, int? expectedMs) {
     if (seconds == null) return false;
     final expected = (expectedMs ?? 0) ~/ 1000;
-    if (expected >= 100 && seconds * 1000 < expectedMs! * 0.6) return false;
-    if (seconds < 45 && expected >= 100) return false;
-    if (seconds < 45 && expectedMs == null) return false;
+    // Anything under 45 s is a preview unless the catalog itself says the
+    // track is that short (a 0 / unknown expected duration used to let a
+    // 30 s preview through).
+    if (seconds < 45 && !(expected > 0 && expected < 60)) return false;
+    if (expected >= 60 && seconds * 1000 < expectedMs! * 0.85) return false;
     return true;
+  }
+
+  /// Measured average bitrate (kbps) per song id: real file bytes over the
+  /// real FLAC duration — what the player page shows as "bitrate".
+  final Map<String, int> _measuredKbps = {};
+  int? measuredKbps(String songId) => _measuredKbps[songId];
+
+  void _noteStats(String songId, String url, int? seconds) {
+    final bytes = _probeBytes[url];
+    if (bytes == null || seconds == null || seconds <= 0) return;
+    _measuredKbps[songId] = (bytes * 8 / seconds / 1000).round();
+    if (_measuredKbps.length > 200) {
+      _measuredKbps.remove(_measuredKbps.keys.first);
+    }
+  }
+
+  /// Total byte size of each probed CDN asset (from Content-Range).
+  final Map<String, int> _probeBytes = {};
+
+  /// A FLAC claiming N seconds but only a few MB long is a cut preview
+  /// whose header still advertises the full length. Real lossless FLAC is
+  /// well above ~40 KB per second of audio.
+  static bool bytesLookFull(
+      String url, int? seconds, Map<String, int> sizes) {
+    final bytes = sizes[url];
+    if (bytes == null || seconds == null || seconds <= 0) return true;
+    return bytes / seconds >= 40000;
   }
 
   /// Fetch the head of the CDN asset and return the FLAC duration in
@@ -855,6 +935,13 @@ class MirrorSource {
       if (res.statusCode != HttpStatus.partialContent &&
           res.statusCode != HttpStatus.ok) {
         return null;
+      }
+      final cr = res.headers.value(HttpHeaders.contentRangeHeader);
+      final crm = cr == null ? null : RegExp(r'/(\d+)$').firstMatch(cr);
+      if (crm != null) {
+        _probeBytes[url] = int.parse(crm.group(1)!);
+      } else if (res.statusCode == HttpStatus.ok && res.contentLength > 0) {
+        _probeBytes[url] = res.contentLength;
       }
       final head = BytesBuilder();
       // The response is a single-subscription stream: once `await for`
@@ -966,9 +1053,12 @@ class _Identity {
 }
 
 class _TidalMatch {
-  _TidalMatch(this.trackId, this.hiRes);
+  _TidalMatch(this.trackId, this.hiRes, this.durationMs);
   final String trackId;
   final bool hiRes;
+
+  /// Full length according to the catalog search result.
+  final int? durationMs;
 }
 
 class _TidalManifest {
@@ -980,8 +1070,9 @@ class _TidalManifest {
 }
 
 class _DeezerMatch {
-  _DeezerMatch(this.trackId);
+  _DeezerMatch(this.trackId, this.durationMs);
   final String trackId;
+  final int? durationMs;
 }
 
 class _DeezerManifest {
