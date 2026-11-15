@@ -125,27 +125,34 @@ class ReelDiscovery {
     final deadline =
         DateTime.now().add(InstagramCanvasConfig.discoveryBudget);
 
-    // All queries run in parallel — each one walks the engine list until it
-    // has enough candidates or the stage deadline passes.
-    final perQuery = queries.map((q) => _runQuery(q, title, artist, deadline));
-    List<Map<String, ReelCandidate>> results;
-    try {
-      results = await Future.wait(perQuery).timeout(
-        InstagramCanvasConfig.discoveryBudget + InstagramCanvasConfig.searchTimeout,
-      );
-    } catch (_) {
-      return const []; // whole discovery failed — fail soft
-    }
-
-    // Merge per-query maps, keeping each shortcode's best score.
+    // Queries run in small WAVES instead of all at once. Firing 8 parallel
+    // searches per song (and Discover resolves many songs) flooded the
+    // resolver service: it rate-limited its own search engines and answered
+    // empty. Stop as soon as enough good candidates exist.
     final found = <String, ReelCandidate>{};
-    for (final map in results) {
-      map.forEach((code, cand) {
-        final existing = found[code];
-        if (existing == null || cand.score > existing.score) {
-          found[code] = cand;
+    const wave = 2;
+    try {
+      for (var i = 0; i < queries.length; i += wave) {
+        if (DateTime.now().isAfter(deadline)) break;
+        final slice = queries.skip(i).take(wave);
+        final results = await Future.wait(
+          slice.map((q) => _runQuery(q, title, artist, deadline)),
+        ).timeout(InstagramCanvasConfig.discoveryBudget);
+        for (final map in results) {
+          map.forEach((code, cand) {
+            final existing = found[code];
+            if (existing == null || cand.score > existing.score) {
+              found[code] = cand;
+            }
+          });
         }
-      });
+        final good = found.values
+            .where((c) => c.score >= InstagramCanvasConfig.minReelScore)
+            .length;
+        if (good >= InstagramCanvasConfig.maxReelResolutions) break;
+      }
+    } catch (_) {
+      // Budget hit / network down — use whatever was found so far.
     }
 
     final list = found.values.toList()
@@ -396,10 +403,25 @@ class ReelDiscovery {
     final query = (t + ' ' + a).trim().toLowerCase();
     final lower = text.toLowerCase();
 
+    // Result text is usually a long caption / page title, so a plain
+    // ratio() against the short song query scored real matches far below
+    // minReelScore. partial / token-set ratios compare the song AGAINST
+    // the part of the text that matches it.
     var best = fw.ratio(query, lower);
+    final partial = fw.partialRatio(query, lower);
+    if (partial > best) best = partial;
+    final tokenSet = fw.tokenSetRatio(query, lower);
+    if (tokenSet > best) best = tokenSet;
     if (t.isNotEmpty) {
-      final titleOnly = fw.ratio(t.toLowerCase(), lower);
-      if (titleOnly > best) best = titleOnly;
+      final tl = t.toLowerCase();
+      final titleOnly = fw.partialRatio(tl, lower);
+      // Title found verbatim in the result text: strong signal, but only
+      // trust it for titles long enough not to match by accident.
+      if (tl.length >= 5 && lower.contains(tl)) {
+        if (best < 78) best = 78;
+      } else if (titleOnly > best) {
+        best = titleOnly;
+      }
     }
     // Artist presence is a strong relevance signal.
     if (a.isNotEmpty && lower.contains(a.toLowerCase())) {

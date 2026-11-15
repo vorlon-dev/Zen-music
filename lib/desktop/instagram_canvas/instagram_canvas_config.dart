@@ -45,7 +45,7 @@ class InstagramCanvasConfig {
   static const bool serviceSearchEnabled = true;
 
   /// Timeout for one /api/search call.
-  static const Duration serviceSearchTimeout = Duration(seconds: 9);
+  static const Duration serviceSearchTimeout = Duration(seconds: 12);
 
   // ── Reel discovery: per-song related-tag queries ──────────────────────
   /// For every song the finder builds several search queries from the song
@@ -74,7 +74,7 @@ class InstagramCanvasConfig {
   static const Duration searchTimeout = Duration(seconds: 7);
 
   /// Whole discovery stage budget (all queries and engines together).
-  static const Duration discoveryBudget = Duration(seconds: 12);
+  static const Duration discoveryBudget = Duration(seconds: 20);
 
   /// Minimum fuzzy score (0-100) between the song and a candidate's result
   /// text. A wrong-song reel is worse than no reel.
@@ -90,14 +90,14 @@ class InstagramCanvasConfig {
   static const int maxReelResolutions = 3;
 
   /// Whole reel stage budget (discovery + validations together).
-  static const Duration reelStageBudget = Duration(seconds: 16);
+  static const Duration reelStageBudget = Duration(seconds: 30);
 
   // ── Cache ──────────────────────────────────────────────────────────────
   /// Successful resolutions live in memory for this long.
   static const Duration cacheTtl = Duration(hours: 4);
 
   /// After a total miss, the song is not retried for this long.
-  static const Duration negativeCooldown = Duration(minutes: 30);
+  static const Duration negativeCooldown = Duration(minutes: 3);
 
   /// Maximum songs remembered (LRU-ish trim).
   static const int maxCacheEntries = 96;

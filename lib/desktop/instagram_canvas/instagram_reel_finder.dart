@@ -92,11 +92,11 @@ class InstagramReelFinder {
       }
     }
 
-    final fut = _resolveUncached(
-      songKey: key,
-      title: title,
-      artist: artist,
-    ).catchError((_) => null);
+    final fut = _gated(() => _resolveUncached(
+          songKey: key,
+          title: title,
+          artist: artist,
+        )).catchError((_) => null);
     _inflight[key] = fut;
     try {
       final result = await fut;
@@ -104,6 +104,28 @@ class InstagramReelFinder {
       return result;
     } finally {
       _inflight.remove(key);
+    }
+  }
+
+  // Only a couple of songs may be resolved at the same moment. Discover
+  // asks for a reel for every card it pre-loads; unthrottled that sent
+  // dozens of searches at once to the resolver service.
+  static const int _maxParallel = 2;
+  int _running = 0;
+  final List<Completer<void>> _waiters = [];
+
+  Future<T> _gated<T>(Future<T> Function() job) async {
+    if (_running >= _maxParallel) {
+      final c = Completer<void>();
+      _waiters.add(c);
+      await c.future;
+    }
+    _running++;
+    try {
+      return await job();
+    } finally {
+      _running--;
+      if (_waiters.isNotEmpty) _waiters.removeAt(0).complete();
     }
   }
 
