@@ -276,6 +276,7 @@ class MirrorSource {
             '${raw['audioQuality'] ?? ''}'
                 .toUpperCase()
                 .contains('HI_RES'),
+            durMs,
           );
         }
       }
@@ -305,6 +306,11 @@ class MirrorSource {
       if (!DateTime.now().isBefore(deadline)) return null;
       final manifest = await _tidalManifest(match.trackId, param);
       if (manifest == null) continue;
+      expectedMs = match.durationMs ?? expectedMs;
+      if (!MirrorSource.bytesLookFull(manifest.url, manifest.seconds, _probeBytes)) {
+        print('[mirror] tidal ${match.trackId} truncated file rejected');
+        continue;
+      }
       // Full-stream guarantee: a manifest that failed the duration probe
       // (preview cut / AAC preview / unparseable) is never served.
       if (!MirrorSource.isFullTrack(manifest.seconds, expectedMs)) {
@@ -404,7 +410,8 @@ class MirrorSource {
             durMs is num && durMs > 0 ? durMs.round() : null);
         if (score > bestScore) {
           bestScore = score;
-          best = _DeezerMatch('${raw['track_id'] ?? ''}');
+          best = _DeezerMatch('${raw['track_id'] ?? ''}',
+              durMs is num && durMs > 0 ? durMs.round() : null);
         }
       }
       if (best == null || best.trackId.isEmpty) return null;
@@ -424,6 +431,11 @@ class MirrorSource {
     // not play 30 seconds.
     final manifest = await _deezerManifest(match.trackId);
     if (manifest == null) return null;
+    expectedMs = match.durationMs ?? expectedMs;
+    if (!MirrorSource.bytesLookFull(manifest.url, manifest.seconds, _probeBytes)) {
+      print('[mirror] deezer ${match.trackId} truncated file rejected');
+      return null;
+    }
     if (!MirrorSource.isFullTrack(manifest.seconds, expectedMs)) {
       print('[mirror] deezer ${match.trackId} preview/short cut rejected '
           '(${manifest.seconds}s)');
@@ -834,10 +846,25 @@ class MirrorSource {
   static bool isFullTrack(int? seconds, int? expectedMs) {
     if (seconds == null) return false;
     final expected = (expectedMs ?? 0) ~/ 1000;
-    if (expected >= 100 && seconds * 1000 < expectedMs! * 0.6) return false;
-    if (seconds < 45 && expected >= 100) return false;
-    if (seconds < 45 && expectedMs == null) return false;
+    // Anything under 45 s is a preview unless the catalog itself says the
+    // track is that short (a 0 / unknown expected duration used to let a
+    // 30 s preview through).
+    if (seconds < 45 && !(expected > 0 && expected < 60)) return false;
+    if (expected >= 60 && seconds * 1000 < expectedMs! * 0.85) return false;
     return true;
+  }
+
+  /// Total byte size of each probed CDN asset (from Content-Range).
+  final Map<String, int> _probeBytes = {};
+
+  /// A FLAC claiming N seconds but only a few MB long is a cut preview
+  /// whose header still advertises the full length. Real lossless FLAC is
+  /// well above ~40 KB per second of audio.
+  static bool bytesLookFull(
+      String url, int? seconds, Map<String, int> sizes) {
+    final bytes = sizes[url];
+    if (bytes == null || seconds == null || seconds <= 0) return true;
+    return bytes / seconds >= 40000;
   }
 
   /// Fetch the head of the CDN asset and return the FLAC duration in
@@ -855,6 +882,13 @@ class MirrorSource {
       if (res.statusCode != HttpStatus.partialContent &&
           res.statusCode != HttpStatus.ok) {
         return null;
+      }
+      final cr = res.headers.value(HttpHeaders.contentRangeHeader);
+      final crm = cr == null ? null : RegExp(r'/(\d+)$').firstMatch(cr);
+      if (crm != null) {
+        _probeBytes[url] = int.parse(crm.group(1)!);
+      } else if (res.statusCode == HttpStatus.ok && res.contentLength > 0) {
+        _probeBytes[url] = res.contentLength;
       }
       final head = BytesBuilder();
       // The response is a single-subscription stream: once `await for`
@@ -966,9 +1000,12 @@ class _Identity {
 }
 
 class _TidalMatch {
-  _TidalMatch(this.trackId, this.hiRes);
+  _TidalMatch(this.trackId, this.hiRes, this.durationMs);
   final String trackId;
   final bool hiRes;
+
+  /// Full length according to the catalog search result.
+  final int? durationMs;
 }
 
 class _TidalManifest {
@@ -980,8 +1017,9 @@ class _TidalManifest {
 }
 
 class _DeezerMatch {
-  _DeezerMatch(this.trackId);
+  _DeezerMatch(this.trackId, this.durationMs);
   final String trackId;
+  final int? durationMs;
 }
 
 class _DeezerManifest {
