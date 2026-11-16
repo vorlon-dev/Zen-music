@@ -182,7 +182,8 @@ class ReelDiscovery {
     if (InstagramCanvasConfig.serviceSearchEnabled) {
       try {
         final uri = '${InstagramCanvasConfig.serviceBaseUrl.replaceAll(RegExp(r'/+$'), '')}'
-            '/api/search?q=${Uri.encodeQueryComponent(query)}&limit=12';
+            '/api/search?q=${Uri.encodeQueryComponent(query)}&limit=12'
+            '&t=${Uri.encodeQueryComponent(_searchTerm(title))}';
         final body = await _fetchPlain(
             uri, InstagramCanvasConfig.serviceSearchTimeout);
         _collectServiceResults(body, title, artist, found);
