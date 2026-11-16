@@ -151,9 +151,24 @@ class _ZenGlassPanelState extends State<ZenGlassPanel> {
   }
 }
 
-/// Telegram-style frosted glass: a moderate gaussian blur under a fairly
-/// opaque tint. The strong tint hides the blur's edge artefacts, so the
-/// blur itself can stay small (cheap) and still read as "frosted".
+/// The shared frost recipe (same idea as BitChord's menu / bar frost): what
+/// is behind is blurred well past legibility and then covered by a slab at
+/// ~80% — so a page behind shows through as colour, never as content seen
+/// through tinted glass (which is what made text and covers look "mixed").
+class ZenFrost {
+  ZenFrost._();
+
+  /// One shared filter instance — no per-frame allocation.
+  static final ImageFilter blur =
+      ImageFilter.blur(sigmaX: 24, sigmaY: 24, tileMode: TileMode.clamp);
+
+  /// BitChord's charcoal for dark, a cool off-white for light.
+  static Color slab(bool dark, {double alpha = 0.80}) =>
+      (dark ? const Color(0xFF1C1C1E) : const Color(0xFFF4F4F8))
+          .withValues(alpha: alpha);
+}
+
+/// Telegram-style frosted glass: blur + a mostly opaque slab.
 class _TelegramFrost extends StatelessWidget {
   const _TelegramFrost({
     required this.radius,
@@ -165,10 +180,6 @@ class _TelegramFrost extends StatelessWidget {
   final bool dark;
   final Widget child;
 
-  // One shared filter instance — no per-frame allocation.
-  static final ImageFilter _blur =
-      ImageFilter.blur(sigmaX: 16, sigmaY: 16, tileMode: TileMode.clamp);
-
   @override
   Widget build(BuildContext context) {
     final r = BorderRadius.circular(radius);
@@ -176,13 +187,11 @@ class _TelegramFrost extends StatelessWidget {
       child: ClipRRect(
         borderRadius: r,
         child: BackdropFilter(
-          filter: _blur,
+          filter: ZenFrost.blur,
           child: DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: r,
-              color: dark
-                  ? const Color(0x59101014) // ~35% near-black
-                  : const Color(0x99FFFFFF), // ~60% white
+              color: ZenFrost.slab(dark),
               border: Border.all(
                 width: 0.6,
                 color: dark

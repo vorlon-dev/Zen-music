@@ -23,7 +23,9 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio_background/just_audio_background.dart' show MediaItem;
 
+import 'package:zenmusic/desktop/liquid/glass_panel.dart';
 import 'package:zenmusic/desktop/screens/player/player_page.dart';
+import 'package:zenmusic/desktop/services/settings_manager.dart';
 import 'package:zenmusic/desktop/screens/shell/widgets/bottom_player.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
@@ -307,7 +309,16 @@ class _Chrome extends StatelessWidget {
               behavior: HitTestBehavior.translucent,
               onVerticalDragUpdate: onDragPlayer,
               onVerticalDragEnd: onDragEndPlayer,
-              child: BottomPlayer(onOpen: onOpenPlayer),
+              child: GetIt.I<SettingsManager>().liquidGlass
+                  // Liquid theme colours are see-through by design; without
+                  // a frosted slab behind them the page bleeds through.
+                  ? ZenGlassPanel(
+                      radius: 20,
+                      margin: const EdgeInsets.fromLTRB(
+                          _kDockSideGap, 0, _kDockSideGap, 6),
+                      child: BottomPlayer(onOpen: onOpenPlayer),
+                    )
+                  : BottomPlayer(onOpen: onOpenPlayer),
             ),
             _ZenDock(currentIndex: currentIndex, onSelect: onSelect),
           ],
@@ -412,7 +423,12 @@ class _ZenDockState extends State<_ZenDock>
     final n = kZenMobileBranchOrder.length;
     final slot = _slotOf(widget.currentIndex);
 
-    final barFill = cs.surfaceContainerHigh;
+    final liquid = GetIt.I<SettingsManager>().liquidGlass;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Liquid theme: surface colours are translucent, so the dock gets the
+    // frost recipe (blur layer below + ~80% slab) instead of a see-through
+    // fill that let covers and text show through.
+    final barFill = liquid ? ZenFrost.slab(isDark) : cs.surfaceContainerHigh;
     final barStroke = cs.primary.withValues(alpha: 0.32);
 
     // Built once per selection change, then only translated while animating.
@@ -457,6 +473,25 @@ class _ZenDockState extends State<_ZenDock>
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
+                      // 0) Frost: blur of whatever scrolls under the dock.
+                      if (liquid)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          top: _kOverhang,
+                          height: _kBarHeight,
+                          child: RepaintBoundary(
+                            child: ClipRRect(
+                              borderRadius:
+                                  BorderRadius.circular(_kBarHeight / 2),
+                              child: BackdropFilter(
+                                filter: ZenFrost.blur,
+                                child: const SizedBox.expand(),
+                              ),
+                            ),
+                          ),
+                        ),
+
                       // 1) Bar outline with the moving notch.
                       Positioned(
                         left: 0,
