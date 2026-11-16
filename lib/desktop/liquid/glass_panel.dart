@@ -123,37 +123,12 @@ class _ZenGlassPanelState extends State<ZenGlassPanel> {
       );
     }
 
-    if (Platform.isAndroid &&
-        (_tier == ZenGlassTier.mid || _tier == ZenGlassTier.high)) {
-      final double blur = dark ? 14.0 : 12.0; // = _zenGlassSettings blur
-      final Color tintTop = dark
-          ? Colors.white.withValues(alpha: 0.14)
-          : Colors.white.withValues(alpha: 0.34);
-      final Color tintBottom = dark
-          ? Colors.white.withValues(alpha: 0.06)
-          : Colors.white.withValues(alpha: 0.20);
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(widget.radius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(widget.radius),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [tintTop, tintBottom],
-              ),
-              border: Border.all(
-                color: dark
-                    ? Colors.white.withValues(alpha: 0.12)
-                    : Colors.white.withValues(alpha: 0.55),
-              ),
-            ),
-            child: widget.child,
-          ),
-        ),
-      );
+    // Phones: Telegram-style frosted glass. One cheap gaussian blur, no
+    // refraction / specular lighting, isolated in its own repaint layer.
+    // Same on every device tier — the old tier switch only made weaker
+    // phones fall back to a flat panel while stronger ones still lagged.
+    if (Platform.isAndroid || Platform.isIOS) {
+      return _TelegramFrost(radius: widget.radius, dark: dark, child: widget.child);
     }
 
     return DecoratedBox(
@@ -171,6 +146,53 @@ class _ZenGlassPanelState extends State<ZenGlassPanel> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(widget.radius),
         child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Telegram-style frosted glass: a moderate gaussian blur under a fairly
+/// opaque tint. The strong tint hides the blur's edge artefacts, so the
+/// blur itself can stay small (cheap) and still read as "frosted".
+class _TelegramFrost extends StatelessWidget {
+  const _TelegramFrost({
+    required this.radius,
+    required this.dark,
+    required this.child,
+  });
+
+  final double radius;
+  final bool dark;
+  final Widget child;
+
+  // One shared filter instance — no per-frame allocation.
+  static final ImageFilter _blur =
+      ImageFilter.blur(sigmaX: 16, sigmaY: 16, tileMode: TileMode.clamp);
+
+  @override
+  Widget build(BuildContext context) {
+    final r = BorderRadius.circular(radius);
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: r,
+        child: BackdropFilter(
+          filter: _blur,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: r,
+              color: dark
+                  ? const Color(0x59101014) // ~35% near-black
+                  : const Color(0x99FFFFFF), // ~60% white
+              border: Border.all(
+                width: 0.6,
+                color: dark
+                    ? const Color(0x1FFFFFFF)
+                    : const Color(0x66FFFFFF),
+              ),
+            ),
+            child: child,
+          ),
+        ),
       ),
     );
   }
