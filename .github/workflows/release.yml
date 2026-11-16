@@ -29,6 +29,16 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Patch flutter_discord_rpc cargokit (SDK "37.0" parse bug)
+        shell: bash
+        run: |
+          F=$(ls $HOME/.pub-cache/hosted/pub.dev/flutter_discord_rpc-*/cargokit/gradle/plugin.gradle 2>/dev/null | head -1)
+          if [ -z "$F" ]; then echo "flutter_discord_rpc not found, skipping"; exit 0; fi
+          echo "Patching $F"
+          echo "--- before (line 163) ---"; sed -n "163p" "$F"
+          sed -i "163s/\\.toInteger()/.toDouble().intValue()/g; 163s/Integer\\.parseInt(\\([^)]*\\))/Double.parseDouble(\\1).intValue()/g" "$F"
+          echo "--- after (line 163) ---";  sed -n "163p" "$F"
+
       - name: Build universal APK
         run: flutter build apk --release
 
