@@ -123,37 +123,12 @@ class _ZenGlassPanelState extends State<ZenGlassPanel> {
       );
     }
 
-    if (Platform.isAndroid &&
-        (_tier == ZenGlassTier.mid || _tier == ZenGlassTier.high)) {
-      final double blur = dark ? 14.0 : 12.0; // = _zenGlassSettings blur
-      final Color tintTop = dark
-          ? Colors.white.withValues(alpha: 0.14)
-          : Colors.white.withValues(alpha: 0.34);
-      final Color tintBottom = dark
-          ? Colors.white.withValues(alpha: 0.06)
-          : Colors.white.withValues(alpha: 0.20);
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(widget.radius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(widget.radius),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [tintTop, tintBottom],
-              ),
-              border: Border.all(
-                color: dark
-                    ? Colors.white.withValues(alpha: 0.12)
-                    : Colors.white.withValues(alpha: 0.55),
-              ),
-            ),
-            child: widget.child,
-          ),
-        ),
-      );
+    // Phones: Telegram-style frosted glass. One cheap gaussian blur, no
+    // refraction / specular lighting, isolated in its own repaint layer.
+    // Same on every device tier — the old tier switch only made weaker
+    // phones fall back to a flat panel while stronger ones still lagged.
+    if (Platform.isAndroid || Platform.isIOS) {
+      return _TelegramFrost(radius: widget.radius, dark: dark, child: widget.child);
     }
 
     return DecoratedBox(
@@ -171,6 +146,62 @@ class _ZenGlassPanelState extends State<ZenGlassPanel> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(widget.radius),
         child: widget.child,
+      ),
+    );
+  }
+}
+
+/// The shared frost recipe (same idea as BitChord's menu / bar frost): what
+/// is behind is blurred well past legibility and then covered by a slab at
+/// ~80% — so a page behind shows through as colour, never as content seen
+/// through tinted glass (which is what made text and covers look "mixed").
+class ZenFrost {
+  ZenFrost._();
+
+  /// One shared filter instance — no per-frame allocation.
+  static final ImageFilter blur =
+      ImageFilter.blur(sigmaX: 24, sigmaY: 24, tileMode: TileMode.clamp);
+
+  /// BitChord's charcoal for dark, a cool off-white for light.
+  static Color slab(bool dark, {double alpha = 0.80}) =>
+      (dark ? const Color(0xFF1C1C1E) : const Color(0xFFF4F4F8))
+          .withValues(alpha: alpha);
+}
+
+/// Telegram-style frosted glass: blur + a mostly opaque slab.
+class _TelegramFrost extends StatelessWidget {
+  const _TelegramFrost({
+    required this.radius,
+    required this.dark,
+    required this.child,
+  });
+
+  final double radius;
+  final bool dark;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = BorderRadius.circular(radius);
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: r,
+        child: BackdropFilter(
+          filter: ZenFrost.blur,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: r,
+              color: ZenFrost.slab(dark),
+              border: Border.all(
+                width: 0.6,
+                color: dark
+                    ? const Color(0x1FFFFFFF)
+                    : const Color(0x66FFFFFF),
+              ),
+            ),
+            child: child,
+          ),
+        ),
       ),
     );
   }

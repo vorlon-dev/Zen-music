@@ -103,3 +103,4 @@ Desktop.ini
 assets/**/*.exe
 assets/**/*.zip
 assets/**/*.msi
+._unused_backup/

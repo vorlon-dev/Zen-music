@@ -217,6 +217,14 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Rendering engine. Impeller on this class of phone falls back to
+             its OpenGLES path, which is slow with blurs (frosted dock, mini
+             player). Skia is smoother there. To go back to Impeller set the
+             value to "true" or delete this block. -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
     </application>
 
     <queries>

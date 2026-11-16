@@ -34,14 +34,22 @@ class _LiquidBackdropState extends State<LiquidBackdrop>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   /// Aurora phase in [0, 1) — one lap per [_kAuroraCycleSeconds]. Repaints
   /// only the CustomPaint (it sits alone inside a RepaintBoundary).
-  final ValueNotifier<double> _phase = ValueNotifier<double>(0);
+  // Starts at a pleasant fixed pose: on phones the aurora never moves (see
+  // [_lowTier]) and this is the frame that stays on screen.
+  final ValueNotifier<double> _phase = ValueNotifier<double>(0.18);
 
   late final Ticker _ticker;
   Duration _lastPaint = Duration.zero;
   bool _animating = false;
 
+  /// Phones get a STILL aurora. An animated full-screen backdrop changes
+  /// every frame, which forces every BackdropFilter above it (nav bar,
+  /// mini player, sheets) to re-blur every frame — the main cause of the
+  /// liquid theme's lag. Still, the blur is computed once and only redone
+  /// when something actually scrolls under it. Desktop keeps the motion.
   bool get _lowTier =>
-      Platform.isAndroid &&
+      Platform.isAndroid ||
+      Platform.isIOS ||
       LiquidGlassBridge.instance.tier == ZenGlassTier.low;
 
   @override
