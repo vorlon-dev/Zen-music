@@ -23,6 +23,9 @@ import 'package:zenmusic/desktop/utils/zen_settings_kit.dart';
 
 enum PlayerSkin {
   classic('Classic', 'The standard Zen layout', Icons.music_note_outlined),
+  m3Liquid('M3 Expressive · Liquid',
+      'Expressive connected controls, wavy bar, blurred liquid backdrop',
+      Icons.blur_on),
   appleMusic('Apple Music style',
       'Artwork shrinks on pause, thick bar, volume slider',
       Icons.queue_music),
@@ -114,6 +117,7 @@ class PlayerSkinView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (skin) {
+    PlayerSkin.m3Liquid => _M3Liquid(ctx),
     PlayerSkin.appleMusic => _Apple(ctx),
     PlayerSkin.appleMusicMesh => _AppleMesh(ctx),
     PlayerSkin.lastWave => _LastWave(ctx),
@@ -1556,6 +1560,290 @@ class _BitChord extends StatelessWidget {
       child: _frost(p, wide: true),
     ),
   ]);
+}
+
+
+/// SimpMusic-style Material 3 Expressive player on a blurred "liquid"
+/// backdrop. Connected button group with asymmetric corners, wavy seek bar,
+/// morphing play button. Only ONE live BackdropFilter (the button group) —
+/// the backdrop itself is a static pre-blurred artwork, so it stays smooth.
+class _M3Liquid extends StatelessWidget {
+  const _M3Liquid(this.x);
+  final PlayerCtx x;
+
+  static const _w = Colors.white;
+  static const _heart = Color(0xFFFF6B81);
+  static const _capL = BorderRadius.only(
+      topLeft: Radius.circular(30),
+      bottomLeft: Radius.circular(30),
+      topRight: Radius.circular(8),
+      bottomRight: Radius.circular(8));
+  static const _capR = BorderRadius.only(
+      topLeft: Radius.circular(8),
+      bottomLeft: Radius.circular(8),
+      topRight: Radius.circular(30),
+      bottomRight: Radius.circular(30));
+  static const _mid = BorderRadius.all(Radius.circular(8));
+
+  /// Heavily blurred artwork + tint wash. Cached by the RepaintBoundary, so
+  /// it is only re-blurred when the song changes.
+  Widget _bg(Color t) => Stack(fit: StackFit.expand, children: [
+    RepaintBoundary(
+      child: ClipRect(
+        child: ImageFiltered(
+          imageFilter: ImageFilter.blur(
+              sigmaX: 48, sigmaY: 48, tileMode: TileMode.decal),
+          child: Transform.scale(
+              scale: 1.7, child: SizedBox.expand(child: x.art(0))),
+        ),
+      ),
+    ),
+    _grad([
+      _dark(t, .50).withValues(alpha: .55),
+      _dark(t, .32).withValues(alpha: .78),
+      _dark(t, .14),
+    ]),
+  ]);
+
+  /// Round translucent icon button (no BackdropFilter → cheap).
+  Widget _c(IconData i, VoidCallback? t, String tip,
+      {double s = 44, Color? fg, Color? bg}) =>
+      Opacity(
+        opacity: t == null ? .4 : 1,
+        child: _Tap(
+          onTap: t,
+          tip: tip,
+          child: Container(
+            width: s,
+            height: s,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: bg ?? _w.withValues(alpha: .12),
+            ),
+            child: Icon(i, size: s * .46, color: fg ?? _w),
+          ),
+        ),
+      );
+
+  Widget _head() => Row(children: [
+    _c(_Ic.down, x.close, 'Close'),
+    Expanded(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('NOW PLAYING', style: _s(10.5, Colors.white60, ls: 1.8)),
+        const SizedBox(height: 2),
+        Text(
+          x.song.album?.isNotEmpty == true
+              ? x.song.album!
+              : '${x.index} of ${x.total}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: _s(13, _w),
+        ),
+      ]),
+    ),
+    _c(_Ic.queue, x.openQueue, 'Queue'),
+  ]);
+
+  Widget _info() => Row(children: [
+    Expanded(child: _titles(x, _w, Colors.white70, size: 24)),
+    const SizedBox(width: 10),
+    _fav(
+      x.song,
+          (l, t) => _c(l ? _Ic.heartFill : _Ic.heart, t,
+          l ? 'Remove from favourites' : 'Add to favourites',
+          fg: l ? _heart : _w,
+          bg: l ? _heart.withValues(alpha: .18) : null),
+    ),
+    const SizedBox(width: 10),
+    Builder(
+      builder: (c) => _c(_Ic.more, () => _more(c, x.song), 'More'),
+    ),
+  ]);
+
+  Widget _slot(Widget child, VoidCallback? t, String tip, BorderRadius r,
+      {Color? bg}) =>
+      Opacity(
+        opacity: t == null ? .4 : 1,
+        child: _Tap(
+          onTap: t,
+          tip: tip,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutCubic,
+            height: 62,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+                color: bg ?? _w.withValues(alpha: .10), borderRadius: r),
+            child: child,
+          ),
+        ),
+      );
+
+  /// M3 Expressive connected button group:
+  /// [shuffle][prev][ PLAY ][next][repeat]
+  Widget _group(_Pal p) => _glass(
+    Padding(
+      padding: const EdgeInsets.all(4),
+      child: Row(children: [
+        Expanded(
+          child: _shuffle((on, t) => _slot(
+            Icon(_Ic.shuffle, size: 22, color: on ? p.prim : _w),
+            t,
+            on ? 'Shuffle: on' : 'Shuffle: off',
+            _capL,
+            bg: on ? p.prim.withValues(alpha: .30) : null,
+          )),
+        ),
+        const SizedBox(width: 3),
+        Expanded(
+          child: _slot(Icon(_Ic.prev, size: 28, color: _w), x.prev,
+              'Previous', _mid),
+        ),
+        const SizedBox(width: 3),
+        Expanded(
+          flex: 2,
+          child: _playing((s) => _slot(
+            s == ButtonState.loading
+                ? SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(
+                    strokeWidth: 3, color: p.onPrim))
+                : Icon(s == ButtonState.playing ? _Ic.pause : _Ic.play,
+                size: 34, color: p.onPrim),
+            _toggle,
+            s == ButtonState.playing ? 'Pause' : 'Play',
+            // shape morph: rounded square while playing, pill when paused
+            BorderRadius.circular(s == ButtonState.playing ? 22 : 31),
+            bg: p.prim,
+          )),
+        ),
+        const SizedBox(width: 3),
+        Expanded(
+          child: _slot(Icon(_Ic.next, size: 28, color: _w), x.next,
+              'Next', _mid),
+        ),
+        const SizedBox(width: 3),
+        Expanded(
+          child: _repeat((m, t) => _slot(
+            Icon(m == LoopMode.one ? _Ic.repeatOne : _Ic.repeat,
+                size: 22, color: m != LoopMode.off ? p.prim : _w),
+            t,
+            m == LoopMode.off
+                ? 'Repeat: off'
+                : m == LoopMode.one
+                ? 'Repeat: one'
+                : 'Repeat: all',
+            _capR,
+            bg: m != LoopMode.off ? p.prim.withValues(alpha: .30) : null,
+          )),
+        ),
+      ]),
+    ),
+    r: 34,
+    blur: 20,
+    bg: _w.withValues(alpha: .06),
+  );
+
+  Widget _actions(_Pal p) => Row(children: [
+    Expanded(
+      child: _pill(_Ic.lyrics, 'Lyrics',
+          x.hasLyrics ? x.toggleLyrics : null, _w,
+          on: x.showLyrics && x.hasLyrics, onC: p.prim, h: 46),
+    ),
+    const SizedBox(width: 8),
+    Expanded(
+      child: _pill(_Ic.quality, 'Quality', x.openQuality, _w, h: 46),
+    ),
+    const SizedBox(width: 8),
+    Expanded(
+      child: _pill(_Ic.queue, 'Queue', x.openQueue, _w, h: 46),
+    ),
+  ]);
+
+  Widget _seek(_Pal p) => Column(mainAxisSize: MainAxisSize.min, children: [
+    _WavyBar(p.prim, _w.withValues(alpha: .2)),
+    _times(Colors.white60, fs: 11),
+  ]);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _t(x);
+    final p = _Pal.of(t);
+    return _shell(
+      _bg(t),
+      LayoutBuilder(
+        builder: (_, c) => _isWide(c) ? _wide(p) : _mobile(p),
+      ),
+    );
+  }
+
+  Widget _mobile(_Pal p) => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+    child: Column(children: [
+      _head(),
+      const SizedBox(height: 14),
+      Expanded(
+        child: _playing((s) => AnimatedScale(
+          scale: s == ButtonState.playing ? 1 : .93,
+          duration: const Duration(milliseconds: 420),
+          curve: Curves.easeOutCubic,
+          child: _art(x, r: 36),
+        )),
+      ),
+      const SizedBox(height: 18),
+      _info(),
+      const SizedBox(height: 4),
+      _seek(p),
+      const SizedBox(height: 8),
+      _group(p),
+      const SizedBox(height: 12),
+      _actions(p),
+    ]),
+  );
+
+  Widget _wide(_Pal p) => Padding(
+    padding: const EdgeInsets.fromLTRB(32, 12, 32, 20),
+    child: Column(children: [
+      _head(),
+      const SizedBox(height: 14),
+      Expanded(
+        child: Row(children: [
+          Expanded(
+            flex: 5,
+            child: Column(children: [
+              Expanded(
+                child: _playing((s) => AnimatedScale(
+                  scale: s == ButtonState.playing ? 1 : .94,
+                  duration: const Duration(milliseconds: 420),
+                  curve: Curves.easeOutCubic,
+                  child: _art(x, r: 36, swap: false),
+                )),
+              ),
+              const SizedBox(height: 14),
+              _info(),
+            ]),
+          ),
+          const SizedBox(width: 28),
+          Expanded(
+            flex: 6,
+            child: _glass(_lyr(x, r: 32, bg: Colors.transparent), r: 32),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 6),
+      _seek(p),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(flex: 5, child: _group(p)),
+        const SizedBox(width: 20),
+        SizedBox(
+            width: 150, child: _vol(_w, _w.withValues(alpha: .2))),
+        const SizedBox(width: 20),
+        Expanded(flex: 4, child: _actions(p)),
+      ]),
+    ]),
+  );
 }
 
 

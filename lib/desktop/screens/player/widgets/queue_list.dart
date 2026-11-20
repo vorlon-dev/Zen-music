@@ -1,19 +1,21 @@
 // ZenMusic · vorlon-dev
 
 import 'package:zenmusic/desktop/services/l10n.dart';
-import 'dart:io';
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:get_it/get_it.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import 'package:zenmusic/desktop/services/media_player.dart';
-import 'package:zenmusic/desktop/services/settings_manager.dart';
 import 'package:zenmusic/desktop/utils/song_thumbnail.dart';
 
+/// Queue drawer — Material 3 Expressive cards on a frosted "liquid" slab
+/// (same recipe as the rest of the app: one blur, opaque-ish tint, no
+/// per-tile BackdropFilters, so scrolling stays smooth).
 class QueueList extends StatelessWidget {
   const QueueList({super.key});
 
@@ -29,9 +31,10 @@ class QueueList extends StatelessWidget {
           return ValueListenableBuilder<List<Map<String, dynamic>>>(
             valueListenable: mediaPlayer.queueSnapshot,
             builder: (context, snapshot, _) => _Shell(
-              mediaPlayer: mediaPlayer,
               player: player,
-              children: [
+              count: snapshot.length,
+              reorderable: false,
+              items: [
                 for (int i = 0; i < snapshot.length; i++)
                   _EngineQueueTile(
                     key: ValueKey('eng-${snapshot[i]['videoId'] ?? i}'),
@@ -39,7 +42,6 @@ class QueueList extends StatelessWidget {
                     song: snapshot[i],
                   ),
               ],
-              reorderable: false,
             ),
           );
         }
@@ -49,18 +51,19 @@ class QueueList extends StatelessWidget {
             final sequence = snapshot.data?.sequence ?? [];
             final currentIndex = snapshot.data?.currentIndex ?? 0;
             return _Shell(
-              mediaPlayer: mediaPlayer,
               player: player,
-              children: [
+              count: sequence.length,
+              currentIndex: currentIndex,
+              reorderable: true,
+              items: [
                 for (int i = 0; i < sequence.length; i++)
                   QueueTile(
-                    key: Key(sequence[i].tag?.id ?? '$i'),
+                    key: ValueKey(sequence[i].tag?.id ?? '$i'),
                     index: i,
                     isCurrent: i == currentIndex,
                     source: sequence[i],
                   ),
               ],
-              reorderable: true,
             );
           },
         );
@@ -69,98 +72,276 @@ class QueueList extends StatelessWidget {
   }
 }
 
+const _slab = Color(0xFF1C1C1E);
+
 class _Shell extends StatelessWidget {
   const _Shell({
-    required this.mediaPlayer,
     required this.player,
-    required this.children,
+    required this.items,
+    required this.count,
     required this.reorderable,
+    this.currentIndex = 0,
   });
-  final MediaPlayer mediaPlayer;
   final AudioPlayer player;
-  final List<Widget> children;
+  final List<Widget> items;
+  final int count, currentIndex;
   final bool reorderable;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: GetIt.I<SettingsManager>().isMaterial3
-            ? Theme.of(context)
-                .colorScheme
-                .surfaceContainer
-                .withValues(alpha: 0.88)
-            : Theme.of(context).scaffoldBackgroundColor.withAlpha(70),
-      ),
-      child: ClipRRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 3, sigmaY: 3),
+    final accent = Theme.of(context).colorScheme.primary;
+    final upNext = reorderable
+        ? (count - currentIndex - 1).clamp(0, 1 << 30)
+        : count;
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.horizontal(left: Radius.circular(28)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(
+            sigmaX: 24, sigmaY: 24, tileMode: TileMode.clamp),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _slab.withValues(alpha: .84),
+            border: Border(
+              left: BorderSide(
+                  color: Colors.white.withValues(alpha: .10), width: .6),
+            ),
+          ),
           child: SafeArea(
-            top: false,
             child: Column(
               children: [
-                Expanded(
-                  child: reorderable
-                      ? ReorderableListView(
-                    onReorder: (oldIndex, newIndex) async {
-                      if (newIndex > oldIndex) newIndex -= 1;
-                      await player.moveAudioSource(oldIndex, newIndex);
-                    },
-                    children: children,
-                  )
-                      : ListView(children: children),
-                ),
-                if (Platform.isAndroid)
-                  StreamBuilder<bool>(
-                    stream: player.shuffleModeEnabledStream,
-                    builder: (context, snapshot) {
-                      final shuffle = snapshot.data ?? false;
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
+                // ── header ──
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 14, 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            TextButton.icon(
-                              style: ButtonStyle(
-                                backgroundColor: WidgetStatePropertyAll(
-                                  shuffle
-                                      ? (GetIt.I<SettingsManager>().isMaterial3
-                                          ? Theme.of(context)
-                                              .colorScheme
-                                              .primaryContainer
-                                          : Colors.white)
-                                      : (GetIt.I<SettingsManager>().isMaterial3
-                                          ? Theme.of(context)
-                                              .colorScheme
-                                              .surfaceContainerHigh
-                                          : Colors.white.withAlpha(50)),
-                                ),
-                                foregroundColor: WidgetStatePropertyAll(
-                                  shuffle
-                                      ? (GetIt.I<SettingsManager>().isMaterial3
-                                          ? Theme.of(context)
-                                              .colorScheme
-                                              .onPrimaryContainer
-                                          : Theme.of(context)
-                                              .scaffoldBackgroundColor)
-                                      : (GetIt.I<SettingsManager>().isMaterial3
-                                          ? Theme.of(context)
-                                              .colorScheme
-                                              .onSurfaceVariant
-                                          : Colors.white),
-                                ),
-                              ),
-                              onPressed: () {
-                                player.setShuffleModeEnabled(!shuffle);
-                              },
-                              icon: const Icon(Icons.shuffle_outlined),
-                              label: Text('Shuffle'.tr),
+                            Text('Queue'.tr,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -.4)),
+                            const SizedBox(height: 2),
+                            Text(
+                              '$count ${'songs'.tr} · $upNext ${'up next'.tr}',
+                              style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w500),
                             ),
                           ],
                         ),
-                      );
-                    },
+                      ),
+                      StreamBuilder<bool>(
+                        stream: player.shuffleModeEnabledStream,
+                        builder: (context, snap) {
+                          final on = snap.data ?? false;
+                          return _HeadBtn(
+                            icon: Icons.shuffle_rounded,
+                            tip: on ? 'Shuffle: on' : 'Shuffle: off',
+                            on: on,
+                            accent: accent,
+                            onTap: () => player.setShuffleModeEnabled(!on),
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      StreamBuilder<LoopMode>(
+                        stream: player.loopModeStream,
+                        builder: (context, snap) {
+                          final m = snap.data ?? LoopMode.off;
+                          return _HeadBtn(
+                            icon: m == LoopMode.one
+                                ? Icons.repeat_one_rounded
+                                : Icons.repeat_rounded,
+                            tip: m == LoopMode.off
+                                ? 'Repeat: off'
+                                : m == LoopMode.one
+                                    ? 'Repeat: one'
+                                    : 'Repeat: all',
+                            on: m != LoopMode.off,
+                            accent: accent,
+                            onTap: () => player.setLoopMode(
+                              m == LoopMode.off
+                                  ? LoopMode.all
+                                  : m == LoopMode.all
+                                      ? LoopMode.one
+                                      : LoopMode.off,
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      _HeadBtn(
+                        icon: Icons.close_rounded,
+                        tip: 'Close',
+                        on: false,
+                        accent: accent,
+                        onTap: () {
+                          final sc = Scaffold.maybeOf(context);
+                          if (sc?.isEndDrawerOpen == true) {
+                            sc!.closeEndDrawer();
+                          } else {
+                            Navigator.of(context).maybePop();
+                          }
+                        },
+                      ),
+                    ],
                   ),
+                ),
+                // ── list ──
+                Expanded(
+                  child: items.isEmpty
+                      ? Center(
+                          child: Text('Queue is empty'.tr,
+                              style: const TextStyle(color: Colors.white54)),
+                        )
+                      : reorderable
+                          ? ReorderableListView(
+                              padding:
+                                  const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                              buildDefaultDragHandles: false,
+                              proxyDecorator: (child, _, anim) =>
+                                  AnimatedBuilder(
+                                animation: anim,
+                                builder: (_, c) => Transform.scale(
+                                  scale: 1 + .03 * anim.value,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    elevation: 12 * anim.value,
+                                    shadowColor: Colors.black,
+                                    borderRadius: BorderRadius.circular(22),
+                                    child: c,
+                                  ),
+                                ),
+                                child: child,
+                              ),
+                              onReorder: (oldIndex, newIndex) async {
+                                if (newIndex > oldIndex) newIndex -= 1;
+                                HapticFeedback.selectionClick();
+                                await player.moveAudioSource(
+                                    oldIndex, newIndex);
+                              },
+                              children: items,
+                            )
+                          : ListView(
+                              padding:
+                                  const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                              children: items,
+                            ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Round tonal header button (shuffle / repeat / close).
+class _HeadBtn extends StatelessWidget {
+  const _HeadBtn({
+    required this.icon,
+    required this.tip,
+    required this.on,
+    required this.accent,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tip;
+  final bool on;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: tip,
+        child: Material(
+          color: on
+              ? accent.withValues(alpha: .28)
+              : Colors.white.withValues(alpha: .10),
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onTap();
+            },
+            child: SizedBox(
+              width: 40,
+              height: 40,
+              child: Icon(icon, size: 20, color: on ? accent : Colors.white),
+            ),
+          ),
+        ),
+      );
+}
+
+/// One expressive row. Current track = tonal pill; others = faint card.
+class _Card extends StatelessWidget {
+  const _Card({
+    required this.isCurrent,
+    required this.leading,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.trailing,
+  });
+  final bool isCurrent;
+  final Widget leading;
+  final String title, subtitle;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: isCurrent
+            ? accent.withValues(alpha: .24)
+            : Colors.white.withValues(alpha: .06),
+        borderRadius: BorderRadius.circular(isCurrent ? 26 : 20),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 6, 8),
+            child: Row(
+              children: [
+                leading,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: isCurrent ? accent : Colors.white,
+                              fontSize: 14.5,
+                              fontWeight: isCurrent
+                                  ? FontWeight.w800
+                                  : FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ),
+                if (trailing != null) trailing!,
               ],
             ),
           ),
@@ -187,60 +368,30 @@ class _EngineQueueTile extends StatelessWidget {
     final thumb = (song['thumbnails'] as List?)?.isNotEmpty == true
         ? (song['thumbnails'].first as Map)['url']?.toString() ?? ''
         : '';
-    return Material(
-      type: MaterialType.transparency,
-      child: ListTile(
-        key: ValueKey('eng-tile-$index'),
-        title: Text(
-          song['title']?.toString() ?? '',
-          maxLines: 1,
-          style: isCurrent && GetIt.I<SettingsManager>().isMaterial3
-              ? TextStyle(
-                  color: Theme.of(context).colorScheme.primary,
-                  fontWeight: FontWeight.w600,
-                )
-              : null,
-        ),
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Stack(
-            children: [
-              thumb.isEmpty
-                  ? const SizedBox(
-                  width: 50,
-                  height: 50,
-                  child: Icon(Icons.music_note))
-                  : CachedNetworkImage(
-                imageUrl: thumb,
-                height: 50,
-                width: 50,
-                memCacheWidth: 160,
-                fit: BoxFit.cover,
-              ),
-              if (isCurrent)
-                Container(
-                  height: 50,
-                  width: 50,
-                  color: Colors.black.withOpacity(0.6),
-                ),
-              if (isCurrent)
-                const Positioned(
-                  width: 34,
-                  height: 34,
-                  left: 8,
-                  top: 8,
-                  child: Center(
-                    child:
-                    Icon(Icons.music_note_outlined, color: Colors.white),
+    return _Card(
+      isCurrent: isCurrent,
+      title: song['title']?.toString() ?? '',
+      subtitle: song['artist']?.toString() ?? '',
+      onTap: () => mp.playFromSection(mp.queueSnapshot.value, index),
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Stack(
+          children: [
+            thumb.isEmpty
+                ? const SizedBox(
+                    width: 52,
+                    height: 52,
+                    child: Icon(Icons.music_note, color: Colors.white54))
+                : CachedNetworkImage(
+                    imageUrl: thumb,
+                    height: 52,
+                    width: 52,
+                    memCacheWidth: 160,
+                    fit: BoxFit.cover,
                   ),
-                ),
-            ],
-          ),
+            if (isCurrent) const _NowBadge(),
+          ],
         ),
-        subtitle: Text(song['artist']?.toString() ?? '', maxLines: 1),
-        onTap: () {
-          mp.playFromSection(mp.queueSnapshot.value, index);
-        },
       ),
     );
   }
@@ -266,38 +417,74 @@ class QueueTile extends StatelessWidget {
     if (song == null) return const SizedBox();
 
     return Dismissible(
-      key: Key(song.id),
+      key: ValueKey('dis-${song.id}-$index'),
       direction: DismissDirection.endToStart,
+      background: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 22),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFF453A).withValues(alpha: .28),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Icon(Icons.delete_outline_rounded,
+              color: Color(0xFFFF6B63)),
+        ),
+      ),
       confirmDismiss: (_) async {
+        HapticFeedback.mediumImpact();
         await player.removeAudioSourceAt(index);
         return true;
       },
-      child: Material(
-        type: MaterialType.transparency,
-        child: ListTile(
-          key: Key(index.toString()),
-          title: Text(
-            song.title,
-            maxLines: 1,
-            style: isCurrent && GetIt.I<SettingsManager>().isMaterial3
-                ? TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  )
-                : null,
-          ),
-          leading: ArtworkWidget(song: song, isCurrent: isCurrent),
-          subtitle: Text(
+      child: _Card(
+        isCurrent: isCurrent,
+        title: song.title,
+        subtitle:
             song.artist ?? song.album ?? song.extras?['subtitle'] ?? '',
-            maxLines: 1,
-          ),
-          onTap: () {
-            player.seek(Duration.zero, index: index);
-          },
+        onTap: () => player.seek(Duration.zero, index: index),
+        leading: ArtworkWidget(song: song, isCurrent: isCurrent),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: 'Remove from queue'.tr,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.close_rounded,
+                  size: 18, color: Colors.white54),
+              onPressed: () async {
+                HapticFeedback.selectionClick();
+                await player.removeAudioSourceAt(index);
+              },
+            ),
+            ReorderableDragStartListener(
+              index: index,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+                child: Icon(Icons.drag_indicator_rounded,
+                    size: 22, color: Colors.white38),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+class _NowBadge extends StatelessWidget {
+  const _NowBadge();
+
+  @override
+  Widget build(BuildContext context) => Positioned.fill(
+        child: ColoredBox(
+          color: Colors.black.withValues(alpha: .55),
+          child: const Center(
+            child: Icon(Icons.graphic_eq_rounded,
+                color: Colors.white, size: 24),
+          ),
+        ),
+      );
 }
 
 class ArtworkWidget extends StatelessWidget {
@@ -315,37 +502,25 @@ class ArtworkWidget extends StatelessWidget {
     final double dp = MediaQuery.of(context).devicePixelRatio;
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Stack(
-        children: [
-          SongThumbnail(
-            song: song.extras!,
-            dp: dp,
-            height: 50,
-            width: 50,
-            fit: BoxFit.fill,
-            errorWidget: (_, __, ___) => const Icon(Icons.music_note, size: 32),
-          ),
-          if (isCurrent)
-            Container(
-              height: 50,
-              width: 50,
-              color: Colors.black.withOpacity(0.6),
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: 52,
+        height: 52,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            SongThumbnail(
+              song: song.extras ?? const {},
+              dp: dp,
+              height: 52,
+              width: 52,
+              fit: BoxFit.cover,
+              errorWidget: (_, __, ___) =>
+                  const Icon(Icons.music_note, size: 28, color: Colors.white54),
             ),
-          if (isCurrent)
-            const Positioned(
-              width: 34,
-              height: 34,
-              left: 8,
-              top: 8,
-              child: Center(
-                child: Icon(
-                  Icons.music_note_outlined,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-        ],
+            if (isCurrent) const _NowBadge(),
+          ],
+        ),
       ),
     );
   }
