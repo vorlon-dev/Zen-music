@@ -1,6 +1,9 @@
 // ZenMusic · vorlon-dev
 
 import 'package:zenmusic/desktop/services/l10n.dart';
+import 'dart:async' show StreamSubscription;
+import 'package:audio_session/audio_session.dart'
+    show AudioDevice, AudioSession;
 import 'dart:io' show File, Platform;
 import 'dart:math' as math;
 import 'package:zenmusic/desktop/screens/player/widgets/apple_mesh.dart';
@@ -958,6 +961,76 @@ Widget _volBoth(Color a, Color i, {double t = 8}) => StreamBuilder<double>(
   },
 );
 
+/// Current audio output ("Nothing Phone (4a)", "AirPods Pro", …) shown as a
+/// tiny caption under the dock, like SimpMusic. Android only.
+class _OutputName extends StatefulWidget {
+  const _OutputName();
+
+  @override
+  State<_OutputName> createState() => _OutputNameState();
+}
+
+class _OutputNameState extends State<_OutputName> {
+  String? _name;
+  StreamSubscription<dynamic>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!Platform.isAndroid) return;
+    _load();
+    AudioSession.instance.then((s) {
+      if (!mounted) return;
+      _sub = s.devicesChangedEventStream.listen((_) => _load());
+    }).catchError((_) {});
+  }
+
+  static int _rank(AudioDevice d) {
+    final t = d.type.name.toLowerCase();
+    if (t.contains('bluetooth') ||
+        t.contains('wired') ||
+        t.contains('usb') ||
+        t.contains('hdmi')) {
+      return 2; // headphones / BT / USB win over the phone speaker
+    }
+    return t.contains('speaker') ? 1 : 0;
+  }
+
+  Future<void> _load() async {
+    try {
+      final s = await AudioSession.instance;
+      final devs = await s.getDevices(includeInputs: false);
+      AudioDevice? best;
+      for (final d in devs) {
+        if (!d.isOutput) continue;
+        if (best == null || _rank(d) > _rank(best)) best = d;
+      }
+      if (mounted) setState(() => _name = best?.name);
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final n = _name?.trim();
+    if (n == null || n.isEmpty) return const SizedBox(height: 14);
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(n,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: _s(10.5, Colors.white.withValues(alpha: .5),
+              w: FontWeight.w500)),
+    );
+  }
+}
+
 // ═════════════════════════ 1 · Blur style – Liquid glass ═════════════════
 class _SimpLiquid extends StatelessWidget {
   const _SimpLiquid(this.x);
@@ -1198,6 +1271,7 @@ class _SimpLiquid extends StatelessWidget {
         ] else ...[
           _dock(),
         ],
+        const _OutputName(),
       ]);
 
   @override
