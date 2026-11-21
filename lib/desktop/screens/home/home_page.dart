@@ -13,6 +13,7 @@ import 'package:zenmusic/desktop/core/widgets/section_item.dart';
 import 'package:zenmusic/desktop/core/widgets/zen_top_bar.dart';
 import 'package:zenmusic/desktop/utils/internet_guard.dart';
 import 'package:zenmusic/desktop/utils/smooth_scroll.dart';
+import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import '../../utils/adaptive_widgets/adaptive_widgets.dart';
