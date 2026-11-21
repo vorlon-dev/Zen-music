@@ -219,6 +219,39 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  /// The canvas / reel / video backdrop widget, shared by the classic page
+  /// and every skin (skins place it between their backdrop and content).
+  Widget _canvasVideo(MediaItem song) =>
+      ValueListenableBuilder<ButtonState>(
+        valueListenable: mediaPlayerOf(context).buttonState,
+        builder: (context, state, _) => VideoBackdrop(
+          streamUrl: _videoBackdropUrl!,
+          playing: state == ButtonState.playing,
+          shortLoop: _isSpotifyCanvas,
+          synchronized: !_isSpotifyCanvas,
+          positionStream: _isSpotifyCanvas
+              ? null
+              : mediaPlayerOf(context).player.positionStream,
+          posterUrl: song.artUri?.toString(),
+          httpHeaders: _videoHeaders,
+          onReadyChanged: (ready) {
+            if (mounted && ready != _canvasReady) {
+              setState(() => _canvasReady = ready);
+            }
+          },
+          onUnavailable: (_) {
+            if (mounted) {
+              setState(() {
+                _videoBackdropUrl = null;
+                _isSpotifyCanvas = false;
+                _canvasReady = false;
+              });
+              _giveWindowsBackdropBack();
+            }
+          },
+        ),
+      );
+
   Future<void> _maybeLoadVideoBackdrop() async {
     if (!AppearancePrefs.canvasEnabled.value) return;
     final id = currentSong?.id ?? '';
@@ -545,6 +578,10 @@ class _PlayerPageState extends State<PlayerPage>
                 next: _skipNext,
                 prev: _skipPrevious,
                 tint: color,
+                canvas: _videoBackdropUrl != null
+                    ? _canvasVideo(song)
+                    : const SizedBox.shrink(),
+                canvasOn: _canvasOwnsScreen,
               );
 
               final Widget skinStage = Stack(

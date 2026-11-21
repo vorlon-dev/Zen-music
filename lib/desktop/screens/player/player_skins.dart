@@ -65,6 +65,8 @@ class PlayerCtx {
     required this.next,
     required this.prev,
     this.tint,
+    this.canvas = const SizedBox.shrink(),
+    this.canvasOn = false,
   });
 
   final MediaItem song;
@@ -72,6 +74,8 @@ class PlayerCtx {
   final String quality; // e.g. "High, 256 kbps" or "Auto"
   final bool hasLyrics, showLyrics;
   final Color? tint; // palette colour of the front artwork (if known)
+  final Widget canvas; // Spotify canvas / reel / video backdrop (may be empty)
+  final bool canvasOn; // true once the canvas is rendering → hide artwork
   final Widget Function(Size) lyrics; // the page's LyricsBox
   final Widget swipeArt; // swipe stack (fills its parent)
   final Widget Function(double radius) art; // plain square artwork
@@ -683,6 +687,42 @@ class _WavyBarState extends State<_WavyBar>
       );
 }
 
+/// Canvas video layer + legibility scrim, drawn between a skin's backdrop
+/// and its content. Does nothing when there is no canvas.
+Widget _canvasBg(PlayerCtx x) => Positioned.fill(
+      child: Stack(fit: StackFit.expand, children: [
+        x.canvas,
+        IgnorePointer(
+          child: AnimatedOpacity(
+            opacity: x.canvasOn ? 1 : 0,
+            duration: const Duration(milliseconds: 320),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: .18),
+                    Colors.black.withValues(alpha: .22),
+                    Colors.black.withValues(alpha: .74),
+                  ],
+                  stops: const [0, .42, 1],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ]),
+    );
+
+/// Artwork fades out while the canvas owns the screen.
+Widget _hideForCanvas(PlayerCtx x, Widget child) => AnimatedOpacity(
+      opacity: x.canvasOn ? 0 : 1,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOut,
+      child: child,
+    );
+
 class _Pal {
   const _Pal(this.prim, this.onPrim, this.surf, this.tonal);
   factory _Pal.of(Color t) {
@@ -765,7 +805,7 @@ class _AppleMesh extends StatelessWidget {
                   scale: s == ButtonState.playing ? 1 : 0.86,
                   duration: const Duration(milliseconds: 380),
                   curve: Curves.easeOutCubic,
-                  child: _art(x, r: 16, swap: false),
+                  child: _hideForCanvas(x, _art(x, r: 16, swap: false)),
                 )),
           ),
           const SizedBox(height: 16),
@@ -854,11 +894,14 @@ class _AppleMesh extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _shell(
-      AppleMeshBackdrop(
-        artKey: x.song.id,
-        provider: _provider(),
-        fallback: _t(x),
-      ),
+      Stack(fit: StackFit.expand, children: [
+        AppleMeshBackdrop(
+          artKey: x.song.id,
+          provider: _provider(),
+          fallback: _t(x),
+        ),
+        _canvasBg(x),
+      ]),
       LayoutBuilder(
         builder: (_, c) => _isWide(c)
             ? Center(
@@ -1299,6 +1342,7 @@ class _SimpLiquid extends StatelessWidget {
       _dark(t, .22).withValues(alpha: .84),
       _dark(t, .10),
     ]),
+    _canvasBg(x),
   ]);
 
   /// Full-bleed artwork that fades into the blurred backdrop. Lyrics replace
@@ -1329,7 +1373,7 @@ class _SimpLiquid extends StatelessWidget {
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onHorizontalDragEnd: (d) => _swipeSong(x, d),
-        child: art,
+        child: _hideForCanvas(x, art),
       );
     });
   }
@@ -1790,6 +1834,7 @@ class _SimpM3 extends StatelessWidget {
           duration: const Duration(milliseconds: 600),
           color: p.bg,
         ),
+        _canvasBg(x),
         _lyricsLayer(
           x,
           SafeArea(
@@ -1828,7 +1873,8 @@ class _SimpM3 extends StatelessWidget {
                 scale: s == ButtonState.playing ? 1 : .94,
                 duration: const Duration(milliseconds: 420),
                 curve: Curves.easeOutCubic,
-                child: _art(x, r: 30, shadow: false, swap: false),
+                child: _hideForCanvas(
+                    x, _art(x, r: 30, shadow: false, swap: false)),
               )),
             ),
             SizedBox(height: compact ? 8 : 18),
@@ -1857,7 +1903,8 @@ class _SimpM3 extends StatelessWidget {
               scale: s == ButtonState.playing ? 1 : .95,
               duration: const Duration(milliseconds: 420),
               curve: Curves.easeOutCubic,
-              child: _art(x, r: 32, swap: false, shadow: false),
+              child: _hideForCanvas(
+                  x, _art(x, r: 32, swap: false, shadow: false)),
             )),
           ),
         ]),
