@@ -744,3 +744,49 @@ class HomeSkeleton extends StatelessWidget {
     );
   }
 }
+
+/// Track-list placeholder (search results, playlists, charts) shown instead
+/// of a centred spinner while the first page loads.
+class ListSkeleton extends StatelessWidget {
+  const ListSkeleton({super.key, this.rows = 9, this.header = false});
+  final int rows;
+  final bool header;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Pulse(
+      child: ListView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        children: [
+          if (header) ...const [
+            Center(child: _Bone(w: 200, h: 200, r: 18)),
+            SizedBox(height: 16),
+            _Bone(w: 220, h: 20, r: 6),
+            SizedBox(height: 8),
+            _Bone(w: 140, h: 12, r: 5),
+            SizedBox(height: 20),
+          ],
+          for (int i = 0; i < rows; i++)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 7),
+              child: Row(children: [
+                _Bone(w: 52, h: 52, r: 10),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Bone(h: 14, r: 5),
+                      SizedBox(height: 8),
+                      _Bone(w: 120, h: 11, r: 5),
+                    ],
+                  ),
+                ),
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
+}

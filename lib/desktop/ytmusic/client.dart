@@ -3,6 +3,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:zenmusic/desktop/core/utils/bg_json.dart';
 import 'package:zenmusic/desktop/ytmusic/helpers.dart';
 import 'package:zenmusic/desktop/ytmusic/modals/yt_config.dart';
 import 'package:http/http.dart';
@@ -216,7 +217,7 @@ class YTClient {
             '${auth != null ? "(authed)" : "(anonymous)"}');
       }
       if (response.statusCode == 200) {
-        return json.decode(response.body) as Map;
+        return (await decodeJsonBg(response.body)) as Map;
       }
       if (auth != null && response.statusCode == 401) {
         await YtmAuth.instance.sessionRejected('HTTP 401');

@@ -51,7 +51,10 @@ class SpotifyHomeSectionState extends State<SpotifyHomeSection> {
   void _onLoginChanged() {
     if (!mounted) return;
     if (SpotifyAuth.instance.loggedIn.value) {
-      _cubit?.load();
+      // Same reason as HomePage: wait for the login route to finish closing.
+      Future<void>.delayed(const Duration(milliseconds: 450), () {
+        if (mounted) _cubit?.load();
+      });
     }
   }
 
