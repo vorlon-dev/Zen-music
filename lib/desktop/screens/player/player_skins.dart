@@ -687,34 +687,6 @@ class _WavyBarState extends State<_WavyBar>
       );
 }
 
-/// Artwork slot that plays the canvas video IN PLACE of the cover (square,
-/// rounded like the artwork). Controls below keep the skin's own colours.
-Widget _artCanvas(PlayerCtx x,
-        {double r = 8, bool swap = true, bool shadow = true}) =>
-    LayoutBuilder(builder: (_, c) {
-      final side = math.max(60.0, math.min(c.maxWidth, c.maxHeight));
-      return Center(
-        child: SizedBox.square(
-          dimension: side,
-          child: Stack(fit: StackFit.expand, children: [
-            AnimatedOpacity(
-              opacity: x.canvasOn ? 0 : 1,
-              duration: const Duration(milliseconds: 320),
-              child: _art(x, r: r, swap: swap, shadow: shadow),
-            ),
-            IgnorePointer(
-              child: AnimatedOpacity(
-                opacity: x.canvasOn ? 1 : 0,
-                duration: const Duration(milliseconds: 320),
-                child: ClipRRect(
-                    borderRadius: BorderRadius.circular(r), child: x.canvas),
-              ),
-            ),
-          ]),
-        ),
-      );
-    });
-
 class _Pal {
   const _Pal(this.prim, this.onPrim, this.surf, this.tonal);
   factory _Pal.of(Color t) {
@@ -797,7 +769,7 @@ class _AppleMesh extends StatelessWidget {
                   scale: s == ButtonState.playing ? 1 : 0.86,
                   duration: const Duration(milliseconds: 380),
                   curve: Curves.easeOutCubic,
-                  child: _artCanvas(x, r: 16, swap: false),
+                  child: _art(x, r: 16, swap: false),
                 )),
           ),
           const SizedBox(height: 16),
@@ -1877,7 +1849,7 @@ class _SimpM3 extends StatelessWidget {
                 scale: s == ButtonState.playing ? 1 : .94,
                 duration: const Duration(milliseconds: 420),
                 curve: Curves.easeOutCubic,
-                child: _artCanvas(x, r: 30, shadow: false, swap: false),
+                child: _art(x, r: 30, shadow: false, swap: false),
               )),
             ),
             SizedBox(height: compact ? 8 : 18),
@@ -1906,7 +1878,7 @@ class _SimpM3 extends StatelessWidget {
               scale: s == ButtonState.playing ? 1 : .95,
               duration: const Duration(milliseconds: 420),
               curve: Curves.easeOutCubic,
-              child: _artCanvas(x, r: 32, swap: false, shadow: false),
+              child: _art(x, r: 32, swap: false, shadow: false),
             )),
           ),
         ]),
