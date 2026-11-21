@@ -547,14 +547,31 @@ class _PlayerPageState extends State<PlayerPage>
                 tint: color,
               );
 
+              final Widget skinStage = Stack(
+                children: [
+                  if (Platform.isWindows) const WindowsVideoBackdrop(),
+                  PlayerSkinView(skin: skin, ctx: ctx),
+                ],
+              );
+              // Same swipe-down-to-close behaviour as the classic page.
               return Scaffold(
+                key: _key,
                 backgroundColor: Colors.black,
-                body: Stack(
-                  children: [
-                    if (Platform.isWindows) const WindowsVideoBackdrop(),
-                    PlayerSkinView(skin: skin, ctx: ctx),
-                  ],
+                endDrawer: SizedBox(
+                  width: min(400, MediaQuery.of(context).size.width) - 50,
+                  child: const QueueList(),
                 ),
+                body: _isMobile
+                    ? GestureDetector(
+                        onVerticalDragUpdate: _onDismissDragUpdate,
+                        onVerticalDragEnd: _onDismissDragEnd,
+                        onVerticalDragCancel: () => _springDismissBack(),
+                        child: Transform.translate(
+                          offset: Offset(0, _dismissDragY),
+                          child: skinStage,
+                        ),
+                      )
+                    : skinStage,
               );
             }
 

@@ -11,7 +11,8 @@ import 'dart:ui' show FontFeature, ImageFilter;
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:flutter/services.dart'
+    show EventChannel, HapticFeedback, MethodChannel;
 import 'package:get_it/get_it.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio/just_audio.dart' show LoopMode;
@@ -315,18 +316,6 @@ Widget _shell(Widget bg, Widget child) => Material(
   ]),
 );
 
-/// Lyrics panel that fills its parent.
-Widget _lyr(PlayerCtx x,
-    {double r = 24, Color bg = const Color(0x14FFFFFF)}) =>
-    ClipRRect(
-      borderRadius: BorderRadius.circular(r),
-      child: ColoredBox(
-        color: bg,
-        child: LayoutBuilder(
-            builder: (_, b) => x.lyrics(Size(b.maxWidth, b.maxHeight))),
-      ),
-    );
-
 /// Square artwork that fills the free space of its parent.
 /// [swap] lets the lyrics button swap the artwork for lyrics (phones).
 Widget _art(PlayerCtx x,
@@ -607,28 +596,8 @@ Widget _bar(Color a, Color i,
       paint: (v) => _LinePainter(v, a, i, t, th),
     ));
 
-Widget _vol(Color a, Color i) => StreamBuilder<double>(
-  stream: _mp.player.volumeStream,
-  initialData: _mp.player.volume,
-  builder: (_, s) {
-    final v = (s.data ?? 1.0).clamp(0.0, 1.0).toDouble();
-    return Row(children: [
-      Icon(_Ic.volume, size: 16, color: a.withValues(alpha: 0.7)),
-      const SizedBox(width: 8),
-      Expanded(
-        child: _Seeker(
-          f: v,
-          live: true,
-          height: 24,
-          onSeek: (n) => _mp.player.setVolume(n),
-          paint: (n) => _LinePainter(n, a, i, 4, _Thumb.none),
-        ),
-      ),
-      const SizedBox(width: 8),
-      Icon(_Ic.volume, size: 22, color: a.withValues(alpha: 0.7)),
-    ]);
-  },
-);
+Widget _vol(Color a, Color i) => _SysVol(a: a, i: i, t: 4, both: false);
+
 
 class _WavyPainter extends CustomPainter {
   _WavyPainter(this.f, this.on, this.off, this.anim) : super(repaint: anim);
@@ -755,20 +724,6 @@ class _AppleMesh extends StatelessWidget {
         ),
       );
 
-  Widget _grab() => _Tap(
-        onTap: x.close,
-        tip: 'Close',
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 30),
-          child: Container(
-            width: 42,
-            height: 5,
-            decoration: BoxDecoration(
-                color: Colors.white38, borderRadius: BorderRadius.circular(3)),
-          ),
-        ),
-      );
-
   Widget _heart() => _fav(
         x.song,
         (l, t) => _rb(Icon(l ? _Ic.heartFill : _Ic.heart, size: 17, color: _w), t,
@@ -804,7 +759,7 @@ class _AppleMesh extends StatelessWidget {
   Widget _mainLayer() => Padding(
         padding: const EdgeInsets.fromLTRB(28, 0, 28, 14),
         child: Column(children: [
-          _grab(),
+          const SizedBox(height: 10),
           Expanded(
             child: _playing((s) => AnimatedScale(
                   scale: s == ButtonState.playing ? 1 : 0.86,
@@ -851,7 +806,7 @@ class _AppleMesh extends StatelessWidget {
   Widget _lyricsLayer(bool shown) => Padding(
         padding: const EdgeInsets.fromLTRB(22, 0, 22, 14),
         child: Column(children: [
-          _grab(),
+          const SizedBox(height: 10),
           Row(children: [
             _mini(x, 52, 10),
             const SizedBox(width: 12),
@@ -937,29 +892,111 @@ void _swipeSong(PlayerCtx x, DragEndDetails d) {
   }
 }
 
-/// Volume row with a speaker icon on both ends (SimpMusic).
-Widget _volBoth(Color a, Color i, {double t = 8}) => StreamBuilder<double>(
-  stream: _mp.player.volumeStream,
-  initialData: _mp.player.volume,
-  builder: (_, s) {
-    final v = (s.data ?? 1.0).clamp(0.0, 1.0).toDouble();
+Widget _volBoth(Color a, Color i, {double t = 8}) =>
+    _SysVol(a: a, i: i, t: t);
+
+/// Volume slider that drives the REAL media volume on Android (so lowering
+/// it works with every playback path and stays in sync with the hardware
+/// buttons). Other platforms fall back to the player volume.
+class _SysVol extends StatefulWidget {
+  const _SysVol(
+      {required this.a, required this.i, this.t = 8, this.both = true});
+  final Color a, i;
+  final double t;
+  final bool both;
+
+  @override
+  State<_SysVol> createState() => _SysVolState();
+}
+
+class _SysVolState extends State<_SysVol> {
+  static const _ch = MethodChannel('zen/audio');
+  static const _ev = EventChannel('zen/volume_events');
+  double _f = 1;
+  int _max = 15;
+  DateTime _last = DateTime.fromMillisecondsSinceEpoch(0);
+  StreamSubscription<dynamic>? _sub;
+  bool get _sys => Platform.isAndroid;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_sys) _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      _apply(await _ch.invokeMapMethod<String, dynamic>('getVolume'));
+    } catch (_) {}
+    if (!mounted) return;
+    _sub = _ev.receiveBroadcastStream().listen((e) {
+      if (e is Map) _apply(e.cast<String, dynamic>());
+    }, onError: (_) {});
+  }
+
+  void _apply(Map<String, dynamic>? m) {
+    final v = (m?['volume'] as num?)?.toDouble();
+    final mx = (m?['max'] as num?)?.toDouble();
+    if (v == null || mx == null || mx <= 0) return;
+    // ignore the echo of our own drag
+    if (DateTime.now().difference(_last).inMilliseconds < 500) return;
+    if (mounted) {
+      setState(() {
+        _max = mx.toInt();
+        _f = (v / mx).clamp(0.0, 1.0).toDouble();
+      });
+    }
+  }
+
+  void _set(double n) {
+    _last = DateTime.now();
+    setState(() => _f = n);
+    _ch
+        .invokeMethod<void>('setVolume', (n * _max).round())
+        .catchError((_) {});
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  Widget _row(double v, ValueChanged<double> set) {
+    final a = widget.a;
     return Row(children: [
-      Icon(Icons.volume_mute_rounded, size: 18, color: a.withValues(alpha: .7)),
+      Icon(widget.both ? Icons.volume_mute_rounded : _Ic.volume,
+          size: widget.both ? 18 : 16, color: a.withValues(alpha: .7)),
       const SizedBox(width: 12),
       Expanded(
         child: _Seeker(
           f: v,
           live: true,
           height: 24,
-          onSeek: (n) => _mp.player.setVolume(n),
-          paint: (n) => _LinePainter(n, a, i, t, _Thumb.none),
+          onSeek: set,
+          paint: (n) => _LinePainter(n, a, widget.i, widget.t, _Thumb.none),
         ),
       ),
-      const SizedBox(width: 12),
-      Icon(Icons.volume_up_rounded, size: 18, color: a.withValues(alpha: .7)),
+      if (widget.both) ...[
+        const SizedBox(width: 12),
+        Icon(Icons.volume_up_rounded, size: 18, color: a.withValues(alpha: .7)),
+      ],
     ]);
-  },
-);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_sys) return _row(_f, _set);
+    return StreamBuilder<double>(
+      stream: _mp.player.volumeStream,
+      initialData: _mp.player.volume,
+      builder: (_, s) => _row(
+          (s.data ?? 1.0).clamp(0.0, 1.0).toDouble(),
+          (n) => _mp.player.setVolume(n)),
+    );
+  }
+}
+
 
 /// Current audio output ("Nothing Phone (4a)", "AirPods Pro", …) shown as a
 /// tiny caption under the dock, like SimpMusic. Android only.
@@ -1031,6 +1068,210 @@ class _OutputNameState extends State<_OutputName> {
   }
 }
 
+/// SimpMusic Material 3 progress bar: wavy played part, straight thin
+/// remainder with an end dot, round thumb.
+class _M3Wave extends StatefulWidget {
+  const _M3Wave(this.on, this.off);
+  final Color on, off;
+
+  @override
+  State<_M3Wave> createState() => _M3WaveState();
+}
+
+class _M3WaveState extends State<_M3Wave> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1600))
+    ..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _progress(
+        (f, pos, tot, pl, seek) => _Seeker(
+          f: f,
+          onSeek: seek,
+          height: 30,
+          paint: (v) => _M3WavePainter(v, widget.on, widget.off, _c, pl),
+        ),
+      );
+}
+
+class _M3WavePainter extends CustomPainter {
+  _M3WavePainter(this.f, this.on, this.off, this.anim, this.playing)
+      : super(repaint: anim);
+  final double f;
+  final Color on, off;
+  final Animation<double> anim;
+  final bool playing;
+
+  @override
+  void paint(Canvas c, Size s) {
+    final y = s.height / 2;
+    final x = (f * s.width).clamp(0.0, s.width).toDouble();
+    final ph = playing ? anim.value * 2 * math.pi : 0.0;
+    const amp = 3.4, k = 2 * math.pi / 22;
+
+    // unplayed: straight thin line + end dot
+    c.drawLine(
+        Offset(x, y),
+        Offset(math.max(x, s.width - 5), y),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3.5
+          ..strokeCap = StrokeCap.round
+          ..color = off);
+    c.drawCircle(Offset(s.width - 3, y), 2.6, Paint()..color = on);
+
+    // played: wave
+    final path = Path()..moveTo(0, y + amp * math.sin(-ph));
+    for (double i = 2; i <= x; i += 2) {
+      path.lineTo(i, y + amp * math.sin(k * i - ph));
+    }
+    c.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4.5
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..color = on);
+
+    // thumb
+    c.drawCircle(Offset(x, y + amp * math.sin(k * x - ph)), 7.5,
+        Paint()..color = on);
+  }
+
+  @override
+  bool shouldRepaint(_M3WavePainter o) =>
+      f != o.f || on != o.on || off != o.off || playing != o.playing;
+}
+
+/// Player ⇄ full-screen lyrics page (SimpMusic). The page replaces the whole
+/// player while lyrics are on.
+Widget _lyricsLayer(
+        PlayerCtx x, Widget main, Widget Function(bool shown) page) {
+  final on = x.hasLyrics && x.showLyrics;
+  return Stack(children: [
+    Positioned.fill(
+      child: IgnorePointer(
+        ignoring: on,
+        child: AnimatedOpacity(
+          opacity: on ? 0 : 1,
+          duration: const Duration(milliseconds: 300),
+          child: main,
+        ),
+      ),
+    ),
+    Positioned.fill(child: HeldCrossfade(on: on, builder: (_, shown) => page(shown))),
+  ]);
+}
+
+class _LyricsPage extends StatelessWidget {
+  const _LyricsPage({
+    required this.x,
+    required this.shown,
+    required this.ink,
+    required this.dim,
+    required this.prim,
+    required this.onPrim,
+    required this.chip,
+    required this.chipInk,
+    this.wavy = false,
+    this.scrim,
+  });
+  final PlayerCtx x;
+  final bool shown, wavy;
+  final Color ink, dim, prim, onPrim, chip, chipInk;
+  final Color? scrim;
+
+  Widget _c(IconData i, VoidCallback? t, String tip) => Opacity(
+        opacity: t == null ? .4 : 1,
+        child: _Tap(
+          onTap: t,
+          tip: tip,
+          child: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: chip),
+            child: Icon(i, size: 21, color: chipInk),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: scrim ?? Colors.transparent,
+      child: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 10),
+              child: Column(children: [
+                Row(children: [
+                  _c(Icons.keyboard_arrow_down_rounded, x.toggleLyrics,
+                      'Close lyrics'),
+                  const SizedBox(width: 12),
+                  _mini(x, 44, 10),
+                  const SizedBox(width: 12),
+                  Expanded(child: _titles(x, ink, dim, size: 16)),
+                  Builder(
+                    builder: (c) =>
+                        _c(Icons.more_vert_rounded, () => _more(c, x.song), 'More'),
+                  ),
+                ]),
+                const SizedBox(height: 6),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (_, c) => x.lyrics(
+                        shown ? Size(c.maxWidth, c.maxHeight) : Size.zero),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                wavy
+                    ? _M3Wave(prim, prim.withValues(alpha: .32))
+                    : _bar(ink, Colors.white24, h: 18, t: 6, th: _Thumb.none),
+                _times(dim, fs: 11.5),
+                const SizedBox(height: 2),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                  _ibtn(_Ic.prev, x.prev, 'Previous', size: 34, c: ink, pad: 10),
+                  _playing((s) => _Tap(
+                        onTap: _toggle,
+                        tip: s == ButtonState.playing ? 'Pause' : 'Play',
+                        child: Container(
+                          width: 62,
+                          height: 62,
+                          decoration:
+                              BoxDecoration(shape: BoxShape.circle, color: prim),
+                          child: s == ButtonState.loading
+                              ? Padding(
+                                  padding: const EdgeInsets.all(19),
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 3, color: onPrim))
+                              : Icon(
+                                  s == ButtonState.playing
+                                      ? _Ic.pause
+                                      : _Ic.play,
+                                  size: 30,
+                                  color: onPrim),
+                        ),
+                      )),
+                  _ibtn(_Ic.next, x.next, 'Next', size: 34, c: ink, pad: 10),
+                ]),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ═════════════════════════ 1 · Blur style – Liquid glass ═════════════════
 class _SimpLiquid extends StatelessWidget {
   const _SimpLiquid(this.x);
@@ -1063,8 +1304,6 @@ class _SimpLiquid extends StatelessWidget {
   /// Full-bleed artwork that fades into the blurred backdrop. Lyrics replace
   /// it (dark scrim) when the lyrics toggle is on.
   Widget _hero(BuildContext context, {double radius = 0, bool fade = true}) {
-    final on = x.hasLyrics && x.showLyrics;
-    final top = MediaQuery.paddingOf(context).top;
     return LayoutBuilder(builder: (_, c) {
       final side = math.max(c.maxWidth, c.maxHeight);
       Widget art = ClipRect(
@@ -1090,52 +1329,10 @@ class _SimpLiquid extends StatelessWidget {
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onHorizontalDragEnd: (d) => _swipeSong(x, d),
-        child: Stack(fit: StackFit.expand, children: [
-          art,
-          IgnorePointer(
-            child: AnimatedOpacity(
-              opacity: on ? 1 : 0,
-              duration: const Duration(milliseconds: 300),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: .62),
-                  borderRadius:
-                  fade ? null : BorderRadius.circular(radius),
-                ),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: HeldCrossfade(
-              on: on,
-              builder: (_, shown) => Padding(
-                padding: EdgeInsets.fromLTRB(
-                    20, fade ? top + 40 : 16, 20, fade ? 18 : 16),
-                child: LayoutBuilder(
-                  builder: (_, lc) => x.lyrics(
-                      shown ? Size(lc.maxWidth, lc.maxHeight) : Size.zero),
-                ),
-              ),
-            ),
-          ),
-        ]),
+        child: art,
       );
     });
   }
-
-  Widget _grab() => _Tap(
-    onTap: x.close,
-    tip: 'Close',
-    child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 40),
-      child: Container(
-        width: 44,
-        height: 4,
-        decoration: BoxDecoration(
-            color: Colors.white54, borderRadius: BorderRadius.circular(2)),
-      ),
-    ),
-  );
 
   Widget _top() => Row(children: [
     Expanded(child: _titles(x, _w, _dim, size: 22, w: FontWeight.w800)),
@@ -1281,7 +1478,26 @@ class _SimpLiquid extends StatelessWidget {
       type: MaterialType.transparency,
       child: Stack(fit: StackFit.expand, children: [
         _bg(t),
-        LayoutBuilder(builder: (ctx, c) {
+        _lyricsLayer(
+          x,
+          _main(),
+          (shown) => _LyricsPage(
+            x: x,
+            shown: shown,
+            ink: _w,
+            dim: _dim,
+            prim: _w,
+            onPrim: Colors.black,
+            chip: _w.withValues(alpha: .14),
+            chipInk: _w,
+            scrim: Colors.black.withValues(alpha: .34),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _main() => LayoutBuilder(builder: (ctx, c) {
           if (_isWide(c)) return _wide(ctx);
           final compact = c.maxHeight < 660;
           return Stack(children: [
@@ -1303,17 +1519,8 @@ class _SimpLiquid extends StatelessWidget {
                 ),
               ]),
             ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: SafeArea(bottom: false, child: Center(child: _grab())),
-            ),
           ]);
-        }),
-      ]),
-    );
-  }
+        });
 
   Widget _wide(BuildContext ctx) => SafeArea(
     child: Padding(
@@ -1321,7 +1528,7 @@ class _SimpLiquid extends StatelessWidget {
       child: Row(children: [
         Expanded(
           child: Column(children: [
-            _grab(),
+            const SizedBox(height: 10),
             Expanded(
               child: Center(
                 child: AspectRatio(
@@ -1436,7 +1643,7 @@ class _SimpM3 extends StatelessWidget {
 
   Widget _seek(_M3Pal p) =>
       Column(mainAxisSize: MainAxisSize.min, children: [
-        _WavyBar(p.prim, p.prim.withValues(alpha: .32)),
+        _M3Wave(p.prim, p.prim.withValues(alpha: .32)),
         _times(p.dim, fs: 12),
       ]);
 
@@ -1583,9 +1790,23 @@ class _SimpM3 extends StatelessWidget {
           duration: const Duration(milliseconds: 600),
           color: p.bg,
         ),
-        SafeArea(
-          child: LayoutBuilder(
-            builder: (_, c) => _isWide(c) ? _wide(p) : _phone(p, c),
+        _lyricsLayer(
+          x,
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (_, c) => _isWide(c) ? _wide(p) : _phone(p, c),
+            ),
+          ),
+          (shown) => _LyricsPage(
+            x: x,
+            shown: shown,
+            ink: Colors.white,
+            dim: p.dim,
+            prim: p.prim,
+            onPrim: p.onPrim,
+            chip: p.cont,
+            chipInk: p.onCont,
+            wavy: true,
           ),
         ),
       ]),
@@ -1607,7 +1828,7 @@ class _SimpM3 extends StatelessWidget {
                 scale: s == ButtonState.playing ? 1 : .94,
                 duration: const Duration(milliseconds: 420),
                 curve: Curves.easeOutCubic,
-                child: _art(x, r: 30, shadow: false),
+                child: _art(x, r: 30, shadow: false, swap: false),
               )),
             ),
             SizedBox(height: compact ? 8 : 18),
@@ -1645,11 +1866,7 @@ class _SimpM3 extends StatelessWidget {
       SizedBox(
         width: 460,
         child: Column(children: [
-          Expanded(
-            child: x.hasLyrics
-                ? _lyr(x, r: 28, bg: p.cont.withValues(alpha: .55))
-                : const SizedBox.shrink(),
-          ),
+          const Spacer(),
           const SizedBox(height: 16),
           _info(p),
           const SizedBox(height: 2),
