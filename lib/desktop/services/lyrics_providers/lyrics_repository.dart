@@ -110,6 +110,8 @@ class LyricsRepository {
     required String trackName,
     required String artistName,
   }) async {
+    // Metadata extensions may add an ISRC / album for a better match.
+    query = await ZenExtensions.enrichQuery(query);
     final sources = LyricSourcePrefs.enabledInOrder()
         .where((s) => s != LyricSourceId.lrclib) // LRCLIB keeps its own flow
         .toList();

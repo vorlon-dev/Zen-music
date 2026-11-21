@@ -57,7 +57,7 @@ class _ExtensionsPageState extends State<ExtensionsPage> {
         expand: false,
         initialChildSize: .7,
         builder: (_, ScrollController sc) => list.isEmpty
-            ? const Center(child: Text('No lyric extensions in this repository'))
+            ? const Center(child: Text('No extensions in this repository'))
             : ListView.builder(
                 controller: sc,
                 itemCount: list.length,
@@ -68,7 +68,7 @@ class _ExtensionsPageState extends State<ExtensionsPage> {
                     leading: const Icon(Icons.extension),
                     title: Text('${e.name}  v${e.version}'),
                     subtitle: Text(e.description.isEmpty
-                        ? e.hosts.join(', ')
+                        ? (e.format == 'mornye' ? 'Mornye package' : e.hosts.join(', '))
                         : e.description),
                     trailing: TextButton(
                       onPressed: () async {
@@ -85,14 +85,23 @@ class _ExtensionsPageState extends State<ExtensionsPage> {
   }
 
   Future<void> _confirmInstall(RegistryEntry e) async {
+    _toast('Downloading ${e.name}…');
+    final (p, err) = await ZenExtensions.prepare(e);
+    if (!mounted) return;
+    if (p == null) {
+      _toast(err ?? 'Install failed');
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext c) => AlertDialog(
         title: Text('Install ${e.name}?'),
         content: Text(
+          'Adds: ${p.kinds.join(' + ')} source'
+          '${e.format == 'mornye' ? ' (Mornye package)' : ''}.\n\n'
           'This extension runs code on your device. It can only contact:\n\n'
-          '${e.hosts.isEmpty ? '(no hosts declared, cannot install)' : e.hosts.join('\n')}\n\n'
-          '${e.sha256 == null ? 'Warning: the repository gave no checksum, so the script cannot be verified.' : 'The script checksum will be verified.'}\n\n'
+          '${p.hosts.join('\n')}\n\n'
+          '${p.verified ? 'The script checksum was verified.' : 'Warning: the repository gave no checksum, so the script cannot be verified.'}\n\n'
           'It cannot read your files, accounts or library.',
         ),
         actions: <Widget>[
@@ -100,15 +109,14 @@ class _ExtensionsPageState extends State<ExtensionsPage> {
               onPressed: () => Navigator.of(c).pop(false),
               child: const Text('Cancel')),
           FilledButton(
-              onPressed:
-                  e.hosts.isEmpty ? null : () => Navigator.of(c).pop(true),
+              onPressed: () => Navigator.of(c).pop(true),
               child: const Text('Install')),
         ],
       ),
     );
     if (ok != true) return;
-    final err = await ZenExtensions.install(e);
-    if (mounted) _toast(err ?? '${e.name} installed');
+    final res = await ZenExtensions.commit(p);
+    if (mounted) _toast(res ?? '${e.name} installed');
   }
 
   @override
@@ -129,8 +137,8 @@ class _ExtensionsPageState extends State<ExtensionsPage> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
                     child: Text(
-                      'Extensions add lyric sources. Only install ones from '
-                      'authors you trust.',
+                      'Extensions add lyric sources and track metadata. Mornye lyrics / '
+                      'metadata packages work too. Only install ones from authors you trust.',
                       style: TextStyle(fontSize: 12),
                     ),
                   ),
@@ -195,7 +203,7 @@ class _ExtensionsPageState extends State<ExtensionsPage> {
                                 ? Icons.verified_outlined
                                 : Icons.warning_amber_outlined),
                             title: Text('${e.name}  v${e.version}'),
-                            subtitle: Text(e.hosts.join(', ')),
+                            subtitle: Text('${e.kinds.join(' + ')} · ${e.hosts.join(', ')}'),
                             value: e.enabled,
                             onChanged: (bool on) =>
                                 ZenExtensions.setEnabled(e.id, on),

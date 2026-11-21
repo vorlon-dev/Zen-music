@@ -166,7 +166,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
         _Entry(
           icon: Icons.extension,
           title: 'Extensions',
-          subtitle: 'Install community lyric sources from a repository',
+          subtitle: 'Lyric and metadata sources, Mornye packages work too',
           keywords: const ['extensions', 'plugins', 'repository', 'lyrics'],
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const ExtensionsPage()),
