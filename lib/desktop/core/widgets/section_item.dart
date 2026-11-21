@@ -602,3 +602,145 @@ class _ItemListState extends State<ItemList> {
     return s.isEmpty ? null : s;
   }
 }
+
+
+// ─────────────────────────── skeleton placeholders ───────────────────────────
+// Grey blocks that pulse while content loads. ONE FadeTransition drives the
+// whole skeleton (compositor-only, no per-frame layout/paint of the blocks),
+// so the loading state itself never adds to the lag.
+
+class _Pulse extends StatefulWidget {
+  const _Pulse({required this.child});
+  final Widget child;
+
+  @override
+  State<_Pulse> createState() => _PulseState();
+}
+
+class _PulseState extends State<_Pulse> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 950))
+    ..repeat(reverse: true);
+  late final Animation<double> _a =
+  Tween<double>(begin: .45, end: 1).animate(
+      CurvedAnimation(parent: _c, curve: Curves.easeInOut));
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      RepaintBoundary(child: FadeTransition(opacity: _a, child: widget.child));
+}
+
+class _Bone extends StatelessWidget {
+  const _Bone({this.w, required this.h, this.r = 8});
+  final double? w;
+  final double h, r;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: w,
+    height: h,
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: .10),
+      borderRadius: BorderRadius.circular(r),
+    ),
+  );
+}
+
+/// One horizontal shelf: title bar + a row of cover cards.
+class ShelfSkeleton extends StatelessWidget {
+  const ShelfSkeleton({super.key, this.showTitle = true, this.cardSize = 150});
+  final bool showTitle;
+  final double cardSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Pulse(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (showTitle)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: _Bone(w: 170, h: 20, r: 6),
+              ),
+            SizedBox(
+              height: cardSize + 46,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: 5,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (_, __) => SizedBox(
+                  width: cardSize,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Bone(w: cardSize, h: cardSize, r: 14),
+                      const SizedBox(height: 10),
+                      _Bone(w: cardSize * .8, h: 12, r: 5),
+                      const SizedBox(height: 6),
+                      _Bone(w: cardSize * .5, h: 10, r: 5),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Whole home screen while the very first feed loads (no cache yet).
+class HomeSkeleton extends StatelessWidget {
+  const HomeSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 8),
+            _Pulse(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(children: const [
+                  _Bone(w: 84, h: 36, r: 10),
+                  SizedBox(width: 8),
+                  _Bone(w: 104, h: 36, r: 10),
+                  SizedBox(width: 8),
+                  _Bone(w: 92, h: 36, r: 10),
+                  SizedBox(width: 8),
+                  _Bone(w: 76, h: 36, r: 10),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 14),
+            const _Pulse(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: _Bone(h: 92, r: 22),
+              ),
+            ),
+            const ShelfSkeleton(),
+            const ShelfSkeleton(),
+            const ShelfSkeleton(),
+          ],
+        ),
+      ),
+    );
+  }
+}
