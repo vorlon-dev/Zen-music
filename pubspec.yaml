@@ -13,8 +13,6 @@ dependencies:
   flutter:
     sdk: flutter
   crypto: ^3.0.7
-  flutter_js: ^0.8.1
-  archive: ^4.0.0
   cupertino_icons: ^1.0.8
   just_audio:
     path: packages/just_audio

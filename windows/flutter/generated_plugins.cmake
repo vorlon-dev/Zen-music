@@ -8,7 +8,6 @@ list(APPEND FLUTTER_PLUGIN_LIST
   desktop_webview_window
   dynamic_color
   flutter_inappwebview_windows_fx
-  flutter_js
   media_kit_libs_windows_video
   media_kit_video
   permission_handler_windows
