@@ -13,6 +13,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 import 'package:zenmusic/desktop/lossless/mirror_arbiter.dart';
+import 'package:zenmusic/desktop/lossless/mirror_source.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
 class LosslessService {
@@ -155,6 +156,17 @@ class LosslessService {
             print('[lossless] $videoId: ${wanted.tierKey} unavailable, '
                 'using ${tier.tierKey}');
           }
+          // The endpoint may answer with Qobuz' 30-second SAMPLE for tracks
+          // it cannot stream in full. The mirror chain verifies every stream
+          // before serving it; do the same here, otherwise a preview plays.
+          if (!await _isFullStream(url, tier, song, tag)) {
+            print('[lossless] $videoId: ${tier.tierKey} is a preview/short '
+                'cut, rejected - using the mirror chain');
+            _streamCache.remove(videoId);
+            _failCache[videoId] = DateTime.now().add(_noMatchTtl);
+            _setServed(tag.id, null);
+            return null;
+          }
           _setServed(tag.id, tier);
           return AudioSource.uri(Uri.parse(url), tag: tag);
         }
@@ -166,6 +178,44 @@ class LosslessService {
       print('[lossless] source error: $e');
       _setServed(tag.id, null);
       return null;
+    }
+  }
+
+  /// True when [url] is verifiably the FULL track. FLAC tiers: the real
+  /// duration is read from the STREAMINFO header of the first CDN bytes and
+  /// must pass the same gate as the mirror engine. Anything unverifiable
+  /// (not FLAC, probe failed) is rejected - never serve a possible preview.
+  Future<bool> _isFullStream(String url, LosslessQuality tier,
+      Map<String, dynamic> song, MediaItem tag) async {
+    if (MirrorSource.looksLikePreviewUrl(url)) return false;
+    if (tier == LosslessQuality.mp3_320) return true; // not probe-able
+    int? expectedMs = tag.duration?.inMilliseconds;
+    final d = song['duration'];
+    if ((expectedMs == null || expectedMs <= 0) && d is Duration) {
+      expectedMs = d.inMilliseconds;
+    }
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      req.headers.set(HttpHeaders.rangeHeader, 'bytes=0-65535');
+      final res = await req.close().timeout(const Duration(seconds: 6));
+      if (res.statusCode != HttpStatus.partialContent &&
+          res.statusCode != HttpStatus.ok) {
+        return false;
+      }
+      final head = BytesBuilder();
+      await for (final chunk in res.timeout(const Duration(seconds: 6),
+          onTimeout: (sink) => sink.close())) {
+        head.add(chunk);
+        if (head.length > 65535) break;
+      }
+      final seconds = MirrorSource.flacDurationSeconds(head.toBytes());
+      return MirrorSource.isFullTrack(seconds, expectedMs);
+    } catch (e) {
+      print('[lossless] endpoint probe error: $e');
+      return false;
+    } finally {
+      client.close(force: true);
     }
   }
 
