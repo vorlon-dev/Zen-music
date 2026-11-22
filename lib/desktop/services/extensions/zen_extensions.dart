@@ -40,6 +40,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../lyrics_providers/lyric_doc.dart';
+import 'native_runtime.dart';
 
 final RegExp _idRe = RegExp(r'^[a-z0-9][a-z0-9._-]{0,63}$');
 
@@ -834,6 +835,22 @@ globalThis.__m = { cache: __CACHE__, i: 0, pending: null, store: __STORE__, done
   static Future<dynamic> _runMornye(InstalledExtension ext, String source,
       String method, List<dynamic> args) async {
     final initial = _loadStore(ext.id);
+    // Native Rust runtime (packages/zen_ext_rt) when bundled: real sync fetch.
+    if (NativeRuntime.available) {
+      final r = await NativeRuntime.run(
+        source: source,
+        method: method,
+        args: args,
+        hosts: ext.hosts,
+        store: initial,
+      );
+      if (r != null) {
+        final st = r['store'];
+        if (st is Map) await _saveStore(ext.id, st);
+        if (r['err'] != null) throw '${r['err']}';
+        return r['ok'];
+      }
+    }
     final cache = <Map<String, dynamic>>[];
     final client = http.Client();
     var nets = 0;
