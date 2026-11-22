@@ -903,7 +903,7 @@ globalThis.__m = { cache: __CACHE__, i: 0, pending: null, store: __STORE__, done
       Map<String, String> store) async {
     final rt = getJavascriptRuntime(xhr: false);
     try {
-      final pre = rt.evaluate(_mornynePrelude
+      final pre = rt.evaluate(_mornyePrelude
           // STORE first: its placeholder comes after CACHE's, so text inside
           // either payload can never be mistaken for the other placeholder.
           .replaceFirst('__STORE__', jsonEncode(store))
