@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:zenmusic/desktop/screens/library/backdrop_page.dart';
 import 'package:zenmusic/desktop/screens/library/crossfade_page.dart';
 import 'package:zenmusic/desktop/screens/settings/lyric_sources_page.dart';
+import 'package:zenmusic/desktop/screens/settings/extensions_page.dart';
 import 'package:zenmusic/desktop/screens/library/lastfm_page.dart';
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 import 'package:zenmusic/desktop/lossless/lossless_quality_page.dart';
@@ -161,6 +162,15 @@ class _SettingsBodyState extends State<_SettingsBody> {
           keywords: const ['lyrics', 'sources', 'word sync', 'syllable'],
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const LyricSourcesPage()),
+          ),
+        ),
+        _Entry(
+          icon: Icons.extension,
+          title: 'Extensions',
+          subtitle: 'Lyric and metadata sources, Mornye packages work too',
+          keywords: const ['extensions', 'plugins', 'repository', 'lyrics'],
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ExtensionsPage()),
           ),
         ),
         _Entry(
