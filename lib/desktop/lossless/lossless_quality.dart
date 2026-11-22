@@ -61,6 +61,26 @@ class LosslessPrefs {
     return LosslessQuality.values[(i < 0) ? 0 : (i >= n ? n - 1 : i)];
   }
 
+  static const String _strictKey = 'STRICT_LOSSLESS';
+
+  /// Strict lossless (default ON): while a FLAC tier is selected every song
+  /// is served lossless - the resolver retries hard and NEVER silently falls
+  /// back to a lossy JioSaavn / YouTube stream. Set false to restore the old
+  /// "best effort, then lossy" behaviour.
+  static bool get strict {
+    try {
+      return Hive.box('SETTINGS').get(_strictKey, defaultValue: true) == true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> setStrict(bool value) async {
+    try {
+      await Hive.box('SETTINGS').put(_strictKey, value);
+    } catch (_) {}
+  }
+
   static void set(LosslessQuality quality) {
     index.value = LosslessQuality.values.indexOf(quality);
     unawaited(_persist(index.value));

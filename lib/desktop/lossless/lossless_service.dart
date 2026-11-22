@@ -30,7 +30,7 @@ class LosslessService {
   /// INSTANTLY (no request is ever made) and playback goes straight to
   /// the mirror pool / JioSaavn / cache / YouTube. Flip it back to true
   /// only if a fresh, working qobuz-api instance is deployed.
-  static const bool endpointEnabled = false;
+  static const bool endpointEnabled = true; // endpoint is live again (Nov 2026)
   static bool _warnedDisabled = false;
 
   static const _connectTimeout = Duration(seconds: 8);
@@ -104,18 +104,36 @@ class LosslessService {
   /// to its normal source). Never throws.
   Future<AudioSource?> tryBuildSource(
       Map<String, dynamic> song, MediaItem tag) async {
-    if (!endpointEnabled) {
-      if (!_warnedDisabled) {
-        _warnedDisabled = true;
-        print('[lossless] qobuz endpoint disabled (dead host) — skipping');
-      }
-      // SP71: the dead qobuz endpoint used to end the upgrade attempt
-      // here — now the dual-engine mirror chain takes over instead
-      // (Dart mirror engine -> Kotlin engine -> emergency endpoint).
-      // On Windows and other non-Android platforms the arbiter is the
-      // Dart mirror engine alone, i.e. exactly the pre-SP71 behaviour.
-      return MirrorArbiter.instance.tryBuildSource(song, tag);
+    // 1) Your own endpoint first.
+    if (endpointEnabled) {
+      final direct = await _tryEndpoint(song, tag);
+      if (direct != null) return direct;
+      print('[lossless] endpoint gave no stream — trying the mirror chain');
+    } else if (!_warnedDisabled) {
+      _warnedDisabled = true;
+      print('[lossless] qobuz endpoint disabled — using mirrors only');
     }
+    // 2) Endpoint failed / has no match / is down: the dual-engine mirror
+    //    chain takes over (Dart mirrors -> Kotlin engine -> emergency).
+    return MirrorArbiter.instance.tryBuildSource(song, tag);
+  }
+
+  /// Forget cached endpoint answers for [song] (used when a stream died).
+  void forgetSong(Map<String, dynamic> song) {
+    final saavnId = song['videoId'] as String? ?? '';
+    final id = _saavnToYt[saavnId] ?? saavnId;
+    _streamCache.remove(id);
+    _failCache.remove(id);
+    _endpointDownUntil = null;
+  }
+
+  /// Endpoint trouble (timeouts, dropped sockets, HTTP 5xx) rests the
+  /// endpoint for a minute so the next songs go straight to the mirrors
+  /// instead of paying the connect timeout on every track.
+  DateTime? _endpointDownUntil;
+
+  Future<AudioSource?> _tryEndpoint(
+      Map<String, dynamic> song, MediaItem tag) async {
     try {
       final videoId = await _youtubeIdFor(song);
       if (videoId == null || videoId.isEmpty) {
@@ -156,7 +174,14 @@ class LosslessService {
   List<LosslessQuality> _ladderFrom(LosslessQuality wanted) {
     final all = LosslessQuality.values;
     final start = all.indexOf(wanted);
-    return [for (var i = start; i >= 0; i--) all[i]];
+    // Strict lossless: a FLAC request must never be answered with the MP3
+    // tier of the endpoint (that would be a silent lossy fallback).
+    final skipMp3 =
+        LosslessPrefs.strict && wanted != LosslessQuality.mp3_320;
+    return [
+      for (var i = start; i >= 0; i--)
+        if (!(skipMp3 && all[i] == LosslessQuality.mp3_320)) all[i]
+    ];
   }
 
 
@@ -209,6 +234,8 @@ class LosslessService {
   Future<Map<String, String>?> resolveStreams(String videoId) async {
     if (!endpointEnabled) return null; // dead host — never contacted
     final now = DateTime.now();
+    final down = _endpointDownUntil;
+    if (down != null && now.isBefore(down)) return null;
 
     final hit = _streamCache[videoId];
     if (hit != null && now.isBefore(hit.expiry)) return hit.streams;
@@ -231,6 +258,9 @@ class LosslessService {
 
       if (response.statusCode != 200) {
         print('[lossless] endpoint HTTP ${response.statusCode} for $videoId');
+        if (response.statusCode >= 500) {
+          _endpointDownUntil = now.add(const Duration(minutes: 1));
+        }
         _failCache[videoId] = now.add(response.statusCode == 404
             ? _noMatchTtl
             : _negativeTtl);
@@ -262,12 +292,14 @@ class LosslessService {
         return null;
       }
 
+      _endpointDownUntil = null;
       _streamCache[videoId] =
       (streams: streams, expiry: now.add(_positiveTtl));
       _evict(_streamCache);
       return streams;
     } catch (e) {
       print('[lossless] endpoint error for $videoId: $e');
+      _endpointDownUntil = now.add(const Duration(minutes: 1));
       _failCache[videoId] = now.add(_negativeTtl);
       _evict(_failCache);
       return null;

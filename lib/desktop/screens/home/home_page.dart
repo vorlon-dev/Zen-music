@@ -133,9 +133,7 @@ class _HomePageState extends State<_HomePage> {
             builder: (context, state) {
               switch (state) {
                 case HomeLoading():
-                  return Center(
-                    child: LoadingIndicatorM3E(),
-                  );
+                  return const HomeSkeleton();
                 case HomeError():
                   return Center(
                     child: Text(state.message ?? ''),

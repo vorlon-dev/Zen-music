@@ -11,6 +11,7 @@ import 'extra_lyrics_providers.dart';
 import 'kugou_lyrics.dart';
 import 'lyrics_providers/lyric_doc.dart';
 import 'lyrics_providers/lyrics_repository.dart';
+import 'zendb_service.dart';
 
 
 class LyricWord {
@@ -1044,6 +1045,19 @@ class LyricsService {
         '${clean.cleanTitle.toLowerCase()}|${album?.toLowerCase() ?? ''}';
     if (_inflight.containsKey(key)) return _inflight[key]!;
     final fut = _lookupImpl(clean, key, durationMs, album, forceRefresh, isrc, videoId)
+        .then((data) {
+      // ZenDb auto-capture: plain lyrics of every resolved song go into
+      // YOUR Firebase DB (fire-and-forget, only fills an empty field).
+      if (data != null && videoId != null && videoId.trim().isNotEmpty) {
+        final text = data.plain?.trim().isNotEmpty == true
+            ? data.plain!
+            : data.synced?.map((l) => l.text).join('\n') ?? '';
+        if (text.trim().isNotEmpty) {
+          ZenDbService.instance.captureLyrics(videoId, text);
+        }
+      }
+      return data;
+    })
         .whenComplete(() {
       _inflight.remove(key);
     });

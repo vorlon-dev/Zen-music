@@ -26,7 +26,7 @@ packages:
     source: hosted
     version: "2.0.1"
   archive:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: archive
       sha256: f773153144ce0456ae77d96bd247f2efd58efe4f3e5ad42616d0385c031aea11
@@ -510,14 +510,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.0"
-  flutter_discord_rpc:
-    dependency: "direct main"
-    description:
-      name: flutter_discord_rpc
-      sha256: "7ee12a3ff928e85e5e0a60c7c23417a2f1f4e604e4983fc0789ff6562fb15f2b"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.1.0"
   flutter_file_dialog:
     dependency: "direct main"
     description:
@@ -589,6 +581,14 @@ packages:
       relative: true
     source: path
     version: "1.0.1"
+  flutter_js:
+    dependency: "direct main"
+    description:
+      name: flutter_js
+      sha256: "046428059ac7bef71e305dc35fc24be933b684684a43e83eab7ebd0dc407ad85"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.8.7"
   flutter_launcher_icons:
     dependency: "direct dev"
     description:
@@ -1559,6 +1559,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.1"
+  sync_http:
+    dependency: transitive
+    description:
+      name: sync_http
+      sha256: "7f0cd72eca000d2e026bcd6f990b81d0ca06022ef4e32fb257b30d3d1014a961"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.1"
   synchronized:
     dependency: transitive
     description:

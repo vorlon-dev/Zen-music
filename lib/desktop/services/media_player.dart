@@ -12,6 +12,7 @@ import 'package:rxdart/rxdart.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../lossless/lossless_service.dart';
 import '../lossless/mirror_source.dart';
+import '../lossless/strict_lossless.dart';
 import 'native_equalizer.dart';
 import '../utils/add_history.dart';
 import '../utils/enhanced_image.dart';
@@ -716,7 +717,13 @@ class MediaPlayer extends ChangeNotifier {
     // single-player fade-out/fade-in, which only ever dipped to silence.
     _xf = CrossfadeEngine(
       player: _player,
-      buildSource: _getAudioSource,
+      buildSource: (song) async {
+        try {
+          return await _getAudioSource(song);
+        } on LosslessUnavailable {
+          return null;
+        }
+      },
       songAt: _songMapAt,
       nextSong: _nextSongMap,
       advance: skipNext,
@@ -957,6 +964,7 @@ class MediaPlayer extends ChangeNotifier {
   void _listenToChangesInSong() {
     _player.currentIndexStream.listen((index) {
       if (_engineOwnsPlayback) return;
+      unawaited(_topUpQueue());
       if (_songList.isNotEmpty && _currentIndex.value != index) {
         _currentIndex.value = index;
         _currentSongNotifier.value =
@@ -1004,7 +1012,7 @@ class MediaPlayer extends ChangeNotifier {
   }
 
   Future<AudioSource> _getAudioSource(Map<String, dynamic> song,
-      {bool skipMirror = false}) async {
+      {bool skipMirror = false, bool background = false}) async {
     MediaItem tag = MediaItem(
       id: song['videoId'],
       title: song['title'] ?? 'Title',
@@ -1023,6 +1031,15 @@ class MediaPlayer extends ChangeNotifier {
     if (isDownloaded) {
       return AudioSource.file(song['path'], tag: tag);
     } else {
+      // Strict lossless: with a FLAC tier selected every song is lossless or
+      // it fails - never a silent lossy fallback. skipMirror (retry after a
+      // dead stream) becomes a fresh resolve with all blocks cleared.
+      if (StrictLossless.appliesTo(song)) {
+        final strictSource = await StrictLossless.resolve(song, tag,
+            fresh: skipMirror, background: background);
+        if (strictSource != null) return strictSource;
+        throw LosslessUnavailable('${song['title'] ?? song['videoId']}');
+      }
       final spotifyUri = song['spotifyUri'] as String?;
       if (spotifyUri != null && spotifyUri.isNotEmpty) {
         if (Platform.isAndroid) {
@@ -1182,6 +1199,7 @@ class MediaPlayer extends ChangeNotifier {
     }
 
     bool played = false;
+    bool strictDead = false;
     try {
       final source = await _getAudioSource(song);
       if (_lastPlayRequestId != requestId) return;
@@ -1191,6 +1209,7 @@ class MediaPlayer extends ChangeNotifier {
       _saveCurrentState();
       played = true;
     } catch (e) {
+      if (e is LosslessUnavailable) strictDead = true;
       if (_lastPlayRequestId == requestId) {
         print('[zen-play] first source attempt failed: $e');
       }
@@ -1198,7 +1217,7 @@ class MediaPlayer extends ChangeNotifier {
     // A dead or slow lossless mirror must never leave the song stuck on
     // "loading": retry once with the mirror pool bypassed so the chain
     // goes straight to JioSaavn / cache / YouTube.
-    if (!played && _lastPlayRequestId == requestId) {
+    if (!played && !strictDead && _lastPlayRequestId == requestId) {
       try {
         await _player.stop();
         await _player.clearAudioSources();
@@ -1255,6 +1274,11 @@ class MediaPlayer extends ChangeNotifier {
       _saveCurrentState();
     } catch (e) {
       print('playFromSection error: $e');
+      if (e is LosslessUnavailable) {
+        _buttonState.value = ButtonState.paused;
+        notifyListeners();
+        return;
+      }
       // One retry with the lossless mirror pool bypassed.
       try {
         await _player.stop();
@@ -1361,6 +1385,11 @@ class MediaPlayer extends ChangeNotifier {
       _saveCurrentState();
     } catch (e) {
       print('Error in playAll: $e');
+      if (e is LosslessUnavailable) {
+        _buttonState.value = ButtonState.paused;
+        notifyListeners();
+        return;
+      }
       // One retry with the lossless mirror pool bypassed.
       try {
         final retrySong = Map<String, dynamic>.from(songs[index]);
@@ -1390,9 +1419,62 @@ class MediaPlayer extends ChangeNotifier {
     Future(() => _addRemainingToPlaylist(songs, playedIndex, epoch));
   }
 
+  bool _preloading = false;
+  bool _topUpBusy = false;
+
+  /// Rolling queue top-up: keeps the next songs of the queue loaded as songs
+  /// advance. Before this, only the first song + 3 preloaded ones were ever
+  /// loaded, so playback ran dry after ~4 songs.
+  Future<void> _topUpQueue() async {
+    if (_topUpBusy || _preloading || _engineOwnsPlayback) return;
+    _topUpBusy = true;
+    final stamp = _queueEpoch;
+    try {
+      const keepAhead = 2;
+      for (var guard = 0; guard < 4; guard++) {
+        if (stamp != _queueEpoch) return;
+        final seq = _player.sequence;
+        if (seq.isEmpty) return;
+        final cur = _player.currentIndex ?? 0;
+        if (seq.length - cur - 1 >= keepAhead) return;
+        final lastTag = seq.last.tag;
+        final lastId = lastTag is MediaItem ? lastTag.id : null;
+        if (lastId == null) return;
+        final snapshot = queueSnapshot.value;
+        final idx = snapshot.lastIndexWhere((s) => s['videoId'] == lastId);
+        if (idx < 0 || idx + 1 >= snapshot.length) return;
+
+        var added = false;
+        for (var j = idx + 1; j < snapshot.length && j <= idx + 3; j++) {
+          try {
+            final src = await _getAudioSource(
+                Map<String, dynamic>.from(snapshot[j]),
+                background: true);
+            if (stamp != _queueEpoch) return;
+            final nowLast = _player.sequence.isEmpty
+                ? null
+                : _player.sequence.last.tag;
+            if (nowLast is! MediaItem || nowLast.id != lastId) return;
+            await _player.addAudioSource(src);
+            added = true;
+            break;
+          } catch (e) {
+            print('[queue] top-up skipped "${snapshot[j]['title']}": $e');
+          }
+        }
+        if (!added) return;
+      }
+    } catch (e) {
+      print('[queue] top-up error: $e');
+    } finally {
+      _topUpBusy = false;
+    }
+  }
+
   Future<void> _addRemainingToPlaylist(List songs, int playedIndex,
       [int? epoch]) async {
     final stamp = epoch ?? _queueEpoch;
+    _preloading = true;
     try {
       final int maxPreload = 3;
       int added = 0;
@@ -1402,8 +1484,9 @@ class MediaPlayer extends ChangeNotifier {
       i++) {
         if (stamp != _queueEpoch) return;
         try {
-          final source =
-          await _getAudioSource(Map<String, dynamic>.from(songs[i]));
+          final source = await _getAudioSource(
+              Map<String, dynamic>.from(songs[i]),
+              background: true);
           if (stamp != _queueEpoch) return;
           await _player.addAudioSource(source);
           added++;
@@ -1413,6 +1496,8 @@ class MediaPlayer extends ChangeNotifier {
       }
     } catch (e) {
       print('Error adding remaining songs: $e');
+    } finally {
+      _preloading = false;
     }
   }
 
@@ -1602,37 +1687,70 @@ class MediaPlayer extends ChangeNotifier {
       // nothing sane to walk to; leave playback exactly as it is.
       return;
     }
-    final song = Map<String, dynamic>.from(snapshot[target]);
     // Invalidate any lazy preloader still resolving the OLD sequence so
     // it cannot land stale tracks behind the new playhead.
     _queueEpoch++;
     _buttonState.value = ButtonState.loading;
     notifyListeners();
-    try {
-      await _player.stop();
-      await _player.clearAudioSources();
-      final src = await _getAudioSource(song);
-      await _player.setAudioSource(src);
-      _player.play();
-      // Refill the preloaded window ahead of the new playhead.
-      if (target + 1 < snapshot.length) {
-        _queueAddRemaining(snapshot, target);
+    final step = forward ? 1 : -1;
+    // Strict lossless: a song with no lossless version is skipped and the
+    // walk continues in the same direction (before, playback stopped there
+    // and every further tap retried the same dead song).
+    var cursor = target;
+    for (var attempt = 0;
+        attempt < 6 && cursor >= 0 && cursor < snapshot.length;
+        attempt++, cursor += step) {
+      final song = Map<String, dynamic>.from(snapshot[cursor]);
+      try {
+        await _player.stop();
+        await _player.clearAudioSources();
+        final src = await _getAudioSource(song);
+        await _player.setAudioSource(src);
+        _player.play();
+        // Refill the preloaded window ahead of the new playhead.
+        if (cursor + 1 < snapshot.length) {
+          _queueAddRemaining(snapshot, cursor);
+        }
+        _saveCurrentState();
+        return;
+      } on LosslessUnavailable catch (e) {
+        print('[skip] $e - trying the next song');
+        continue;
+      } catch (e) {
+        print('[skip] snapshot walk error: $e');
+        break;
       }
-      _saveCurrentState();
-    } catch (e) {
-      print('[skip] snapshot walk error: $e');
-      _buttonState.value = ButtonState.paused;
-      notifyListeners();
     }
+    _buttonState.value = ButtonState.paused;
+    notifyListeners();
   }
 
   Future<void> _addSongListToQueue(List songs, {bool isNext = false}) async {
     if (songs.isEmpty) return;
 
-    final newSources = await Future.wait(songs.map((song) async {
-      final mapSong = Map<String, dynamic>.from(song);
-      return await _getAudioSource(mapSong);
-    }));
+    // Resolve a few songs at a time (a whole playlist at once flooded the
+    // lossless endpoint + mirrors) and skip songs that fail (e.g. no lossless
+    // version in strict mode) instead of failing the whole add.
+    final results = List<AudioSource?>.filled(songs.length, null);
+    var nextIndex = 0;
+    Future<void> worker() async {
+      while (true) {
+        final i = nextIndex++;
+        if (i >= songs.length) return;
+        try {
+          results[i] = await _getAudioSource(
+              Map<String, dynamic>.from(songs[i]),
+              background: true);
+        } catch (e) {
+          print('[queue] skipped "${songs[i]['title']}": $e');
+        }
+      }
+    }
+
+    await Future.wait(
+        List.generate(songs.length < 3 ? songs.length : 3, (_) => worker()));
+    final newSources = results.whereType<AudioSource>().toList();
+    if (newSources.isEmpty) return;
 
     final queueLength = _player.sequence.length;
 

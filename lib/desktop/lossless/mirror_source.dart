@@ -170,6 +170,21 @@ class MirrorSource {
     _openUntil = null;
   }
 
+  /// Strict lossless: forget everything that would make the next attempt
+  /// skip the pool (open breaker, 10-min fail cache, cached manifests that
+  /// may hold an expired URL) so a retry really talks to the mirrors again.
+  void clearBlocksFor(Map<String, dynamic> song) {
+    _netFailStreak = 0;
+    _openUntil = null;
+    final id = _identityFrom(song);
+    if (id != null) {
+      _failCache.remove('${id.title}|${id.artist}'.toLowerCase().trim());
+    }
+    _tidalManifestCache.clear();
+    _dzManifestCache.clear();
+    _dzTotalCache.clear();
+  }
+
   static bool _isNetError(Object e) =>
       e is TimeoutException || e is SocketException || e is HttpException;
 
@@ -952,7 +967,10 @@ class MirrorSource {
   /// play wait forever behind other resolutions. False on timeout.
   /// 3 s — after that the track falls through to the regular chain.
   Future<bool> _acquireSlot() async {
-    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    // Strict lossless waits longer for a free slot instead of dropping to a
+    // lossy stream while a background preload holds the resolver.
+    final deadline = DateTime.now()
+        .add(Duration(seconds: LosslessPrefs.strict ? 20 : 3));
     while (true) {
       if (_inFlight < _maxConcurrent) {
         _inFlight++;

@@ -60,7 +60,17 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
   static const Curve _ease = Cubic(0.41, 0.0, 0.12, 0.99);
   static const double _focusY = 0.22; // active row sits at 22 % of viewport
   static const double _baseSize = 26;
-  static const int _trailMs = 1200;
+  static const int _trailMs = 1800;
+
+  // Metrolist-style distance scale (re-implemented): lines shrink the further
+  // they are from the active one.
+  static const List<double> _distScale = [1, 0.97, 0.93, 0.93, 0.90, 0.85];
+  // FLIP stagger: list jumps, rows spring from the old position with a delay
+  // growing 10 % of the scroll time per row (max 12 steps).
+  static const int _staggerBaseMs = 450;
+  static const int _staggerMaxSteps = 12;
+  double _flip = 0;
+  bool _ripple = false;
 
   final ScrollController _scroll = ScrollController();
   final GlobalKey _listKey = GlobalKey();
@@ -226,9 +236,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
       if (changed) {
         _onset.forward(from: 0);
         // Ripple only for natural advances, not for seeks.
-        if (_everFollowed && idx > 0 && (idx - prev).abs() <= 2) {
-          _trail.forward(from: 0);
-        }
+        _ripple = _everFollowed && idx > 0 && (idx - prev).abs() <= 2;
       }
       _follow(instant: !_everFollowed);
       _syncTicker();
@@ -274,6 +282,14 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
       return;
     }
     final spec = _spec;
+    if (_ripple && spec.trailMul > 0) {
+      // FLIP: jump now, rows spring from where they were (see _trailDy).
+      _ripple = false;
+      _flip = target - pos.pixels;
+      _scroll.jumpTo(target);
+      _trail.forward(from: 0);
+      return;
+    }
     final ms = spec.scrollMs ??
         (350 + delta.abs() * 0.35).clamp(350.0, 500.0).round();
     _scroll.animateTo(
@@ -457,7 +473,11 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
     final k = math.min(dist, _fallAlpha.length - 1);
 
     final target = _Fx(
-      scale: isActive ? 1.0 : _spec.inactiveScale,
+      scale: isActive
+          ? 1.0
+          : 1 -
+              (1 - _distScale[math.min(dist, _distScale.length - 1)]) *
+                  ((1 - _spec.inactiveScale) / 0.02).clamp(0.0, 6.0),
       alpha: isActive ? _fallAlpha[k] : _fallAlpha[k] * _spec.alphaMul,
       blur: (!_depthOfField || isActive || _dragging || _active < 0)
           ? 0
@@ -640,29 +660,19 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
     );
   }
 
-  /// Spring response (damping .72, stiffness 180) of the trail offset.
+  /// Row offset while it springs from its pre-scroll position to rest.
   double _trailDy(int i) {
-    if (_active < 0 || _spec.trailMul == 0) return 0;
-    final rel = i - _active;
-    double start;
-    double delayMs;
-    if (rel >= 0 && rel <= 6) {
-      start = 7.0 + rel * 3.0;
-      delayMs = rel * 38.0;
-    } else if (rel < 0 && rel >= -3) {
-      start = 3.0; // upper lines move a little too
-      delayMs = -rel * 38.0;
-    } else {
-      return 0;
-    }
+    if (_active < 0 || _spec.trailMul == 0 || _flip == 0) return 0;
+    final steps = math.min((i - _active).abs(), _staggerMaxSteps);
+    final delayMs = steps * 0.1 * _staggerBaseMs;
     final t = (_trail.value * _trailMs - delayMs) / 1000.0;
-    return start * _spec.trailMul * _spring(t);
+    return _flip * _spring(t);
   }
 
   static double _spring(double t) {
     if (t <= 0) return 1;
-    const w = 13.4164; // sqrt(180)
-    const z = 0.72;
+    const w = 15.0;
+    const z = 0.78; // Metrolist default zeta
     final wd = w * math.sqrt(1 - z * z);
     return math.exp(-z * w * t) *
         (math.cos(wd * t) + (z * w / wd) * math.sin(wd * t));

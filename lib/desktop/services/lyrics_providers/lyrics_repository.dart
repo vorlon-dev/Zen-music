@@ -11,6 +11,7 @@ import 'package:hive/hive.dart';
 
 import '../better_lyrics.dart';
 import '../kugou_lyrics.dart';
+import '../extensions/zen_extensions.dart';
 import '../lyrics_service.dart';
 import 'bini_lyrics.dart';
 import 'genius.dart';
@@ -109,6 +110,8 @@ class LyricsRepository {
     required String trackName,
     required String artistName,
   }) async {
+    // Metadata extensions may add an ISRC / album for a better match.
+    query = await ZenExtensions.enrichQuery(query);
     final sources = LyricSourcePrefs.enabledInOrder()
         .where((s) => s != LyricSourceId.lrclib) // LRCLIB keeps its own flow
         .toList();
@@ -118,15 +121,22 @@ class LyricsRepository {
       for (final s in sources) s: _ask(s, query),
     };
 
+    // Installed extensions are asked too, read after the built-in sources.
+    final entries = <(String, Future<LyricDoc?>)>[
+      for (final s in sources) (s.label, futures[s]!),
+      ...ZenExtensions.lyricFutures(query),
+    ];
+
     LyricsData? line;
     LyricsData? plain;
-    for (final s in sources) {
-      final doc = await futures[s];
+    for (final entry in entries) {
+      final label = entry.$1;
+      final doc = await entry.$2;
       if (doc == null || doc.payload.trim().isEmpty) continue;
       final data = _toData(doc, trackName, artistName, query.durationMs);
       if (data == null) continue;
       if (data.hasWordTimings) {
-        print('[lyrics] ${s.label}: word-synced');
+        print('[lyrics] $label: word-synced');
         return RepoResult(wordSynced: data, lineSynced: line, plain: plain);
       }
       if (data.hasSynced) {

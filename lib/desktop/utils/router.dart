@@ -54,9 +54,9 @@ final router = GoRouter(
         StatefulShellRoute(
           branches: branches,
           builder: (context, state, navigationShell) =>
-              ZenMobileShell.applies()
-                  ? ZenMobileShell(navigationShell: navigationShell)
-                  : AppShell(navigationShell: navigationShell),
+          ZenMobileShell.applies()
+              ? ZenMobileShell(navigationShell: navigationShell)
+              : AppShell(navigationShell: navigationShell),
           navigatorContainerBuilder: (context, navigationShell, children) =>
               MyPageView(
                 currentIndex: navigationShell.currentIndex,
@@ -108,7 +108,7 @@ final router = GoRouter(
                     curve: const Interval(0.0, 0.45, curve: Curves.easeOut),
                     // Reverse: hold opaque until late in the pop, then fade.
                     reverseCurve:
-                        const Interval(0.0, 0.45, curve: Curves.easeIn),
+                    const Interval(0.0, 0.45, curve: Curves.easeIn),
                   );
                   return SlideTransition(
                     position: curved.drive(slideTween),
@@ -389,12 +389,12 @@ class MyPageView extends StatefulWidget {
 
   MyPageView(
       {super.key,
-      required this.currentIndex,
-      required this.children,
-      this.onPageSettled,
-      bool? swipeable})
+        required this.currentIndex,
+        required this.children,
+        this.onPageSettled,
+        bool? swipeable})
       : swipeable =
-            swipeable ?? (Platform.isAndroid || Platform.isIOS);
+      swipeable ?? (Platform.isAndroid || Platform.isIOS);
 
   @override
   MyPageViewViewState createState() => MyPageViewViewState();

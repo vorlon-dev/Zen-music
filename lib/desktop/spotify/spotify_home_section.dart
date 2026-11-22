@@ -2,6 +2,7 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:zenmusic/desktop/core/widgets/section_item.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -70,66 +71,9 @@ class SpotifyHomeSectionState extends State<SpotifyHomeSection> {
       child: ValueListenableBuilder<bool>(
         valueListenable: SpotifyAuth.instance.loggedIn,
         builder: (BuildContext context, bool loggedIn, Widget? _) {
-          if (!loggedIn) return const _ConnectBanner();
+          if (!loggedIn) return const SizedBox.shrink();
           return _SpotifyContent(tick: _reloadTick);
         },
-      ),
-    );
-  }
-}
-
-
-class _ConnectBanner extends StatelessWidget {
-  const _ConnectBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-      child: AdaptiveInkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => context.push('/spotify-login'),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.withValues(alpha: 0.25)),
-          ),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: Icon(Icons.library_music,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.onPrimary),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Connect your Spotify account',
-                        style: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w700)),
-                    Text(
-                        'Your Spotify home — recents, shelves and charts '
-                            '— will show up here.',
-                        style: TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ),
-              Text('Connect',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Theme.of(context).colorScheme.primary)),
-              const SizedBox(width: 2),
-              Icon(Icons.chevron_right,
-                  size: 20, color: Theme.of(context).colorScheme.primary),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -202,14 +146,7 @@ class _SpotifyContentState extends State<_SpotifyContent> {
     return BlocBuilder<SpotifyLibraryCubit, SpotifyLibraryState>(
       builder: (BuildContext context, SpotifyLibraryState state) {
         if (state is SpotifyLibraryLoading) {
-          return const _SlimRow(
-            label: 'Spotify…',
-            leading: SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          );
+          return const ShelfSkeleton();
         }
         if (state is SpotifyLibraryError) {
           return _SlimRow(
@@ -1012,14 +949,7 @@ class _TrendingSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _ShelfTitle('Trending on Spotify'),
-          _SlimRow(
-            label: 'Loading Spotify trending…',
-            leading: SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ),
+          ShelfSkeleton(showTitle: false),
         ],
       );
     }

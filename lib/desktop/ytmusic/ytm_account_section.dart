@@ -143,18 +143,9 @@ class YtmAccountSectionState extends State<YtmAccountSection> {
     return ValueListenableBuilder<bool>(
       valueListenable: YtmAuth.instance.loggedIn,
       builder: (BuildContext context, bool loggedIn, Widget? _) {
-        if (!loggedIn) return const _YtmConnectBanner();
+        if (!loggedIn) return const SizedBox.shrink();
         if (_loading && !_fetchedOnce) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 18),
-            child: Center(
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2.2),
-              ),
-            ),
-          );
+          return const ShelfSkeleton();
         }
         if (_shelves.isEmpty) {
           return const Padding(
@@ -179,57 +170,3 @@ class YtmAccountSectionState extends State<YtmAccountSection> {
 }
 
 
-class _YtmConnectBanner extends StatelessWidget {
-  const _YtmConnectBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-      child: AdaptiveInkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => context.push('/ytm-login'),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.withValues(alpha: 0.25)),
-          ),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: Icon(Icons.account_circle_rounded,
-                    size: 18, color: Theme.of(context).colorScheme.onPrimary),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Connect YouTube Music',
-                        style: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w700)),
-                    Text(
-                        'Your last listening, liked music and playlists will '
-                        'show up here.',
-                        style: TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ),
-              Text('Connect',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Theme.of(context).colorScheme.primary)),
-              const SizedBox(width: 2),
-              Icon(Icons.chevron_right,
-                  size: 20, color: Theme.of(context).colorScheme.primary),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

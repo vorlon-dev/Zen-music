@@ -98,6 +98,16 @@ class MirrorArbiter {
   /// probe must never repeat or it stalls the loopback and kills playback.
   final Map<String, (int, DateTime)> _kzTotalCache = {};
 
+  /// Strict lossless retries: wake the Kotlin engine and the emergency path
+  /// immediately instead of waiting out their cooldowns.
+  void resetCooldowns() {
+    final epoch = DateTime.fromMillisecondsSinceEpoch(0);
+    _kotlinDownUntil = epoch;
+    _kotlinStandbyUntil = epoch;
+    _emergencyDownUntil = epoch;
+    _dartFailStreak = 0;
+  }
+
   // ------------------------------------------------------------- entry
 
   /// Lossless AudioSource for [song] — Dart engine first, then the Kotlin
