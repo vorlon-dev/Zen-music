@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
@@ -20,6 +21,8 @@ class SpotifyAuth {
   static const _kTokenExpiry = 'SPOTIFY_TOKEN_EXPIRY';
   static const _kTotpSecret = 'SPOTIFY_TOTP_SECRET';
   static const _kTotpVer = 'SPOTIFY_TOTP_VER';
+  static const _kMintedToken = 'SPOTIFY_MINTED_TOKEN';
+  static const _kMintedExpiry = 'SPOTIFY_MINTED_EXPIRY';
 
   final ValueNotifier<bool> loggedIn = ValueNotifier<bool>(false);
 
@@ -83,6 +86,8 @@ class SpotifyAuth {
     _box.delete(_kTokenCache);
     _box.delete(_kTokenOnly);
     _box.delete(_kTokenExpiry);
+    _box.delete(_kMintedToken);
+    _box.delete(_kMintedExpiry);
     _accessToken = null;
     _clientToken = null;
     _tokenExpiryMs = 0;
@@ -140,13 +145,44 @@ class SpotifyAuth {
     return true;
   }
 
+  /// Cold start must NOT wait for the network. A saved sp_dc cookie means
+  /// "signed in" right away, the last minted token is reused while it is
+  /// still valid, and a fresh one is minted quietly in the background
+  /// (callers that need a token share that same in-flight mint).
   Future<void> load() async {
     if (hasSession) {
-      final err = await _mintAccessToken();
-      loggedIn.value = err == null;
+      _restoreMinted();
+      loggedIn.value = true;
+      unawaited(_warmToken());
       return;
     }
     loggedIn.value = _restoreTokenOnly();
+  }
+
+  Future<void> _warmToken() async {
+    final t = await getAccessToken();
+    if (t == null) {
+      final e = lastError ?? '';
+      // Only a real rejection signs the user out; offline / slow network
+      // keeps the saved session.
+      if (e.contains('rejected') ||
+          e.contains('HTTP 401') ||
+          e.contains('HTTP 403')) {
+        loggedIn.value = false;
+      }
+    }
+  }
+
+  bool _restoreMinted() {
+    final t = _box.get(_kMintedToken);
+    final e = _box.get(_kMintedExpiry);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (t is String && t.isNotEmpty && e is int && now < e - 60000) {
+      _accessToken = t;
+      _tokenExpiryMs = e;
+      return true;
+    }
+    return false;
   }
 
   void invalidateAccessToken() {
@@ -276,15 +312,25 @@ class SpotifyAuth {
     return SpotifyConfig.clientToken;
   }
 
-  /// TOTP secret + version: gist first, Hive cache as fallback.
-  Future<(String, int)?> _totpSecret() async {
+  /// TOTP secret + version. [preferCache] (cold start / normal mint) uses the
+  /// saved secret at once and refreshes it from the gist in the background;
+  /// otherwise the gist is asked first with the saved copy as fallback.
+  Future<(String, int)?> _totpSecret({bool preferCache = false}) async {
+    if (preferCache) {
+      final cs0 = _box.get(_kTotpSecret);
+      final cv0 = _box.get(_kTotpVer);
+      if (cs0 is String && cs0.isNotEmpty && cv0 is int) {
+        unawaited(_totpSecret());
+        return (cs0, cv0);
+      }
+    }
     String? secret;
     int? ver;
     try {
       final resp = await http.get(
         Uri.parse(SpotifyConfig.totpGistUrl),
         headers: {'User-Agent': SpotifyConfig.userAgent},
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(seconds: 4));
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         final gist = jsonDecode(resp.body) as Map;
         final files = gist['files'] as Map?;
@@ -324,12 +370,12 @@ class SpotifyAuth {
 
   /// TOTP -> token endpoint. Returns an error string, or null on success
   /// (token stored in _accessToken).
-  Future<String?> _mintAccessToken() async {
+  Future<String?> _mintAccessToken({bool freshSecret = false}) async {
     final spDc = SpotifyConfig.extractSpDc(cookieHeader) ?? '';
     if (spDc.isEmpty) return _fail('No sp_dc session cookie.');
 
     // 1. TOTP secret.
-    final sec = await _totpSecret();
+    final sec = await _totpSecret(preferCache: !freshSecret);
     if (sec == null) {
       return _fail('TOTP secret unavailable (gist fetch failed, no cache).');
     }
@@ -341,7 +387,7 @@ class SpotifyAuth {
       final resp = await http.get(
         Uri.parse(SpotifyConfig.serverTimeUrl),
         headers: {'User-Agent': SpotifyConfig.userAgent},
-      ).timeout(const Duration(seconds: 6));
+      ).timeout(const Duration(seconds: 2));
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         serverSec =
             ((jsonDecode(resp.body) as Map)['serverTime'] as num).toInt();
@@ -367,6 +413,8 @@ class SpotifyAuth {
         'Cookie': cookie,
       }).timeout(const Duration(seconds: 10));
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        // A cached TOTP secret may be outdated — retry once with a fresh one.
+        if (!freshSecret) return _mintAccessToken(freshSecret: true);
         return _fail(
             'Token endpoint HTTP ${resp.statusCode}: ${_short(resp.body)}');
       }
@@ -374,6 +422,7 @@ class SpotifyAuth {
       final token = body['accessToken']?.toString() ?? '';
       final anonymous = body['isAnonymous'] == true;
       if (token.isEmpty || anonymous) {
+        if (!freshSecret) return _mintAccessToken(freshSecret: true);
         return _fail('Session rejected (anonymous). Check that sp_dc is '
             'fresh, and that the TOTP secret/version is current.');
       }
@@ -383,6 +432,9 @@ class SpotifyAuth {
               DateTime.now().millisecondsSinceEpoch + 3600000;
       lastError = null;
       _log('access token minted');
+      // Reused on the next cold start (no network wait at launch).
+      unawaited(_box.put(_kMintedToken, token));
+      unawaited(_box.put(_kMintedExpiry, _tokenExpiryMs));
       return null;
     } catch (e) {
       return _fail('Token fetch failed: $e');

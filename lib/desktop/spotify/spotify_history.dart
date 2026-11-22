@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:zenmusic/desktop/core/utils/bg_json.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_config.dart';
 
@@ -75,7 +76,7 @@ class SpotifyHistory {
           'Spotify recents HTTP ${resp.statusCode}: ${_short(resp.body)}');
     }
 
-    final root = jsonDecode(resp.body) as Map<String, dynamic>;
+    final root = await decodeJsonBg(resp.body) as Map<String, dynamic>;
     final lists = root['data']?['lists'] as List?;
     if (lists == null || lists.isEmpty) return [];
     final firstList = lists.first;

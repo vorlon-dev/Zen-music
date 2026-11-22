@@ -59,7 +59,12 @@ class _HomePageState extends State<_HomePage> {
 
   void _onYtmAuthChanged() {
     if (!mounted) return;
-    context.read<HomeCubit>().fetch();
+    // Let the login screen finish closing (WebView teardown + route
+    // transition) before the feed rebuilds, otherwise both fight for frames.
+    final cubit = context.read<HomeCubit>();
+    Future<void>.delayed(const Duration(milliseconds: 450), () {
+      if (mounted) cubit.fetch();
+    });
   }
 
   @override
@@ -133,9 +138,7 @@ class _HomePageState extends State<_HomePage> {
             builder: (context, state) {
               switch (state) {
                 case HomeLoading():
-                  return Center(
-                    child: LoadingIndicatorM3E(),
-                  );
+                  return const HomeSkeleton();
                 case HomeError():
                   return Center(
                     child: Text(state.message ?? ''),

@@ -28,6 +28,7 @@ import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/ytmusic/ytm_auth.dart';
 import 'package:zenmusic/desktop/themes/text_styles.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/adaptive_widgets.dart';
+import 'package:zenmusic/desktop/screens/settings/services/network_storage_page.dart';
 import 'package:zenmusic/desktop/utils/zen_icons.dart';
 import 'package:zenmusic/desktop/utils/zen_settings_kit.dart';
 import 'package:zenmusic/desktop/utils/zen_slider.dart';
@@ -334,6 +335,15 @@ class _SettingsBodyState extends State<_SettingsBody> {
           subtitle: 'Back up, restore and manage space'.tr,
           keywords: const ['export', 'import', 'cache', 'downloads'],
           onTap: () => context.go('/settings/backup_storage'),
+        ),
+        _Entry(
+          icon: Icons.dns_outlined,
+          title: 'Network storage'.tr,
+          subtitle: 'Subsonic and WebDAV servers'.tr,
+          keywords: const ['subsonic', 'navidrome', 'webdav', 'nas', 'server'],
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const NetworkStoragePage()),
+          ),
         ),
         _Entry(
           icon: ZenIcons.privacy,

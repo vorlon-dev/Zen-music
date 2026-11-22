@@ -27,7 +27,7 @@ class PlaylistDetailsPage extends StatelessWidget {
         builder: (context, state) {
           return switch (state) {
             PlaylistDetailsLoading() => const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
+              body: SafeArea(child: ListSkeleton(header: true)),
             ),
             PlaylistDetailsError() => Scaffold(
               body: Center(child: Text('Not available'.tr)),

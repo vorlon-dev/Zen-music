@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/core/widgets/section_item.dart';
 import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async';
 import 'dart:io';
@@ -129,7 +130,7 @@ class _SearchPageState extends State<_SearchPage> {
                 builder: (context, state) {
                   switch (state) {
                     case SearchLoading():
-                      return const Center(child: ExpressiveLoadingIndicator());
+                      return const ListSkeleton();
                     case SearchError():
                       return _Notice(
                         icon: FluentIcons.error_circle_24_regular,

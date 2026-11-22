@@ -1,10 +1,10 @@
 // ZenMusic · vorlon-dev
 
+import 'package:zenmusic/desktop/core/widgets/section_item.dart';
 import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 
-import 'package:zenmusic/desktop/core/widgets/section_item.dart' show SongTile;
 import 'package:zenmusic/desktop/services/chart_model.dart';
 import 'package:zenmusic/desktop/services/charts_service.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
@@ -70,7 +70,7 @@ class _ChartDetailsPageState extends State<ChartDetailsPage> {
         centerTitle: true,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const ListSkeleton()
           : _error != null
           ? Center(
         child: Padding(

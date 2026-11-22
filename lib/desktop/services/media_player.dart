@@ -1016,6 +1016,13 @@ class MediaPlayer extends ChangeNotifier {
       extras: song,
     );
 
+    // Network storage (Subsonic / WebDAV): stream straight from the server.
+    final netUrl = song['netUrl'] as String?;
+    if (netUrl != null && netUrl.isNotEmpty) {
+      final h = (song['netHeaders'] as Map?)?.cast<String, String>();
+      return AudioSource.uri(Uri.parse(netUrl), tag: tag, headers: h);
+    }
+
     final bool isDownloaded = song['status'] == 'DOWNLOADED' &&
         song['path'] != null &&
         (await File(song['path']).exists());
