@@ -175,39 +175,39 @@ class ZenDesktopApp extends StatelessWidget {
         theme: switch (settings.uiTheme) {
           'm3' => ZenM3Theme.light(primary: settings.accentColor),
           'liquid' =>
-            ZenLiquidTheme.light(primary: settings.accentColor),
+              ZenLiquidTheme.light(primary: settings.accentColor),
           _ => AppTheme.light(primary: Colors.black),
         },
         darkTheme: switch (settings.uiTheme) {
           'm3' => ZenM3Theme.dark(primary: settings.accentColor),
           'liquid' =>
-            ZenLiquidTheme.dark(primary: settings.accentColor),
+              ZenLiquidTheme.dark(primary: settings.accentColor),
           _ => AppTheme.dark(primary: Colors.white),
         },
         builder: (context, child) {
           return Directionality(
-            textDirection: L10n.isRtl ? TextDirection.rtl : TextDirection.ltr,
-            child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (liquid)
-                LiquidBackdrop(
-                  dark: dark,
-                  accent: settings.accentColor,
-                  child: const SizedBox.expand(),
-                )
-              else
-                ColoredBox(
-                  color: settings.uiTheme == 'm3'
-                      ? (Theme.of(context).brightness == Brightness.dark
+              textDirection: L10n.isRtl ? TextDirection.rtl : TextDirection.ltr,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (liquid)
+                    LiquidBackdrop(
+                      dark: dark,
+                      accent: settings.accentColor,
+                      child: const SizedBox.expand(),
+                    )
+                  else
+                    ColoredBox(
+                      color: settings.uiTheme == 'm3'
+                          ? (Theme.of(context).brightness == Brightness.dark
                           ? ZenM3Palette.darkBackground
                           : ZenM3Palette.lightBackground)
-                      : Theme.of(context).colorScheme.surfaceContainerLowest,
-                  child: const SizedBox.expand(),
-                ),
-              if (child != null) child!,
-            ],
-          ));
+                          : Theme.of(context).colorScheme.surfaceContainerLowest,
+                      child: const SizedBox.expand(),
+                    ),
+                  if (child != null) child!,
+                ],
+              ));
         },
       ),
     );

@@ -23,6 +23,8 @@ plugins {
     id("com.android.application") version "9.1.1" apply false
     id("org.jetbrains.kotlin.android") version "2.4.0" apply false
     id("org.jetbrains.kotlin.plugin.serialization") version "2.4.0" apply false
+    // SP72: Compose compiler plugin — same Kotlin 2.4.0 KGP artifact.
+    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false
     // JVM library plugin for the :dsp-core module. Same kotlin-gradle-plugin
     // artifact/version as kotlin.android above — one JAR, two plugin ids.
     id("org.jetbrains.kotlin.jvm") version "2.4.0" apply false

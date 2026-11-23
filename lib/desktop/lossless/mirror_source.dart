@@ -75,6 +75,11 @@ class MirrorSource {
       final identity = _identityFrom(song);
       if (identity == null) return null;
 
+      // Self-healing: if the startup manifest refresh never completed (no
+      // network at launch, app restored from cache, ...), do it now. The
+      // cadence guard makes this a no-op when the data is already fresh.
+      unawaited(MirrorConfig.refreshFromManifest());
+
       final now = DateTime.now();
       // Circuit breaker: when the mirror pool is unreachable it is skipped
       // outright for a while so playback falls through instantly instead
@@ -156,6 +161,22 @@ class MirrorSource {
   /// regularly instead of locking FLAC out for 5.
   int _netFailStreak = 0;
   DateTime? _openUntil;
+
+  /// FIX (Nov 2026): the Antra pool RETIRED its old shared API key and every
+  /// mirror answered HTTP 403 "This key has been retired". A 401/403 is a
+  /// POOL problem, not a per-track miss — so it must trigger an immediate
+  /// manifest re-fetch (fresh key/hosts) instead of just poisoning the
+  /// 10-minute per-track fail cache. Returns true when [status] is an auth
+  /// rejection; the refresh is awaited (bounded ~6 s) so the next attempt
+  /// in strict-lossless round 2 already carries the new key.
+  Future<bool> _refreshIfAuthRejected(int status) async {
+    if (status != HttpStatus.unauthorized && status != HttpStatus.forbidden) {
+      return false;
+    }
+    print('[mirror] auth rejected (HTTP $status) — refreshing Antra manifest');
+    await MirrorConfig.refreshFromManifest(force: true);
+    return true;
+  }
 
   void _noteNetFail() {
     _netFailStreak++;
@@ -278,6 +299,7 @@ class MirrorSource {
                   .replace(queryParameters: {'s': query}),
               headers: MirrorConfig.jsonHeaders)
           .timeout(_searchTimeout);
+      if (await _refreshIfAuthRejected(res.statusCode)) return null;
       if (res.statusCode != 200) return null;
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       final items =
@@ -360,6 +382,7 @@ class MirrorSource {
           .get(Uri.parse('${MirrorConfig.tidal}/api/track/$trackId?$param'),
               headers: MirrorConfig.jsonHeaders)
           .timeout(MirrorConfig.manifestTimeout);
+      if (await _refreshIfAuthRejected(res.statusCode)) return null;
       if (res.statusCode != 200) {
         print('[mirror] tidal manifest $trackId ($param): HTTP ${res.statusCode}');
         return null;
@@ -413,6 +436,7 @@ class MirrorSource {
                   }),
               headers: MirrorConfig.jsonHeaders)
           .timeout(_searchTimeout);
+      if (await _refreshIfAuthRejected(res.statusCode)) return null;
       if (res.statusCode != 200) return null;
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       final results = data is Map ? data['results'] : null;
@@ -473,6 +497,7 @@ class MirrorSource {
           .get(Uri.parse('${MirrorConfig.deezer}/api/track/$id'),
               headers: MirrorConfig.jsonHeaders)
           .timeout(MirrorConfig.manifestTimeout);
+      if (await _refreshIfAuthRejected(res.statusCode)) return null;
       if (res.statusCode != 200) return null;
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       if (data is! Map) return null;

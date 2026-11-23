@@ -151,7 +151,7 @@ class MirrorArbiter {
           desc = await _kotlinCall('resolve', identity, left);
           if (desc != null && desc['status'] == 'ok') {
             final source =
-                await _buildSourceFromDescriptor(desc, tag, identity.durationMs);
+            await _buildSourceFromDescriptor(desc, tag, identity.durationMs);
             if (source != null) {
               _dartFailStreak = 0;
               print('[arbiter] kotlin engine served "${identity.title}"');
@@ -250,12 +250,12 @@ class MirrorArbiter {
           LosslessPrefs.current == LosslessQuality.flacHiResMax;
       final reply = await _channel
           .invokeMethod(method, {
-            'title': id.title,
-            'artist': id.artist,
-            'durationMs': id.durationMs,
-            'wantsHiRes': wantsHiRes,
-            'budgetMs': remaining.inMilliseconds,
-          })
+        'title': id.title,
+        'artist': id.artist,
+        'durationMs': id.durationMs,
+        'wantsHiRes': wantsHiRes,
+        'budgetMs': remaining.inMilliseconds,
+      })
           .timeout(remaining, onTimeout: () => null);
       if (reply == null) {
         // Native side did not answer inside the budget — rest it briefly.
@@ -428,7 +428,7 @@ class MirrorArbiter {
       HttpClientResponse upstream;
       try {
         upstream =
-            await req.close().timeout(MirrorConfig.streamConnectTimeout);
+        await req.close().timeout(MirrorConfig.streamConnectTimeout);
       } catch (_) {
         response.statusCode = HttpStatus.gatewayTimeout;
         await response.close();
@@ -473,7 +473,7 @@ class MirrorArbiter {
         }
       }
       response.statusCode =
-          partial ? HttpStatus.partialContent : HttpStatus.ok;
+      partial ? HttpStatus.partialContent : HttpStatus.ok;
       response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
       if (partial) {
         response.headers
@@ -571,7 +571,7 @@ class MirrorArbiter {
       }
       if (total != null) {
         _kzTotalCache[upstreamUrl] =
-            (total, now0.add(const Duration(minutes: 4)));
+        (total, now0.add(const Duration(minutes: 4)));
       }
       try {
         await headRes.drain<void>().timeout(const Duration(seconds: 5),
@@ -611,7 +611,7 @@ class MirrorArbiter {
       HttpClientResponse upstream;
       try {
         upstream =
-            await req.close().timeout(MirrorConfig.streamConnectTimeout);
+        await req.close().timeout(MirrorConfig.streamConnectTimeout);
       } catch (_) {
         response.statusCode = HttpStatus.gatewayTimeout;
         await response.close();
@@ -625,7 +625,7 @@ class MirrorArbiter {
       }
 
       response.statusCode =
-          partial ? HttpStatus.partialContent : HttpStatus.ok;
+      partial ? HttpStatus.partialContent : HttpStatus.ok;
       response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
       if (partial) {
         response.headers
@@ -652,7 +652,7 @@ class MirrorArbiter {
         }
         if (buf.isEmpty) return null;
         final take =
-            buf.length < _kDzBlockSize ? buf.length : _kDzBlockSize;
+        buf.length < _kDzBlockSize ? buf.length : _kDzBlockSize;
         final out = Uint8List.fromList(buf.sublist(0, take));
         buf.removeRange(0, take);
         return out;

@@ -11,7 +11,6 @@
 #include <desktop_webview_window/desktop_webview_window_plugin.h>
 #include <dynamic_color/dynamic_color_plugin_c_api.h>
 #include <flutter_inappwebview_windows_fx/flutter_inappwebview_windows_fx_plugin.h>
-#include <flutter_js/flutter_js_plugin.h>
 #include <media_kit_libs_windows_video/media_kit_libs_windows_video_plugin_c_api.h>
 #include <media_kit_video/media_kit_video_plugin_c_api.h>
 #include <permission_handler_windows/permission_handler_windows_plugin.h>
@@ -30,8 +29,6 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("DynamicColorPluginCApi"));
   FlutterInappwebviewWindowsFxPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FlutterInappwebviewWindowsFxPlugin"));
-  FlutterJsPluginRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("FlutterJsPlugin"));
   MediaKitLibsWindowsVideoPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("MediaKitLibsWindowsVideoPluginCApi"));
   MediaKitVideoPluginCApiRegisterWithRegistrar(

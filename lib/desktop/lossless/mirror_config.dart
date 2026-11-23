@@ -30,7 +30,14 @@ class MirrorConfig {
   static String deezerHost = 'https://deezer.anandserver.cfd';
 
   /// Shared API key for the mirror pool (public Antra endpoint manifest).
-  static String apiKey = 'ak_8e3f1a7c2b5d9e4f0a6c3b8d1e5f2a9c7b4d0e6f';
+  ///
+  /// FIX (Nov 2026): the previous bundled key (ak_8e3f...0e6f) was RETIRED by
+  /// the pool — every search returned HTTP 403 "This key has been retired",
+  /// which silently killed the whole Dart mirror engine. This value is the
+  /// key the live manifest gist publishes today; refreshFromManifest() keeps
+  /// it current from runtime onwards (wired into main.dart and the mirror
+  /// engine itself), so the next rotation can never strand the app again.
+  static String apiKey = 'ak_4430c4405da2e71d0f5180380dbd497295a0360e';
 
   // Legacy aliases (older code paths referenced `tidal` / `deezer`).
   static String get tidal => tidalHost;
@@ -99,11 +106,34 @@ class MirrorConfig {
   /// Cadence-guarded (at most one real fetch per [_refreshInterval]),
   /// never throws, never blocks long (6 s worst case) — callers fire and
   /// forget it. Bundled constants stay untouched on any failure.
-  static Future<void> refreshFromManifest() async {
+  ///
+  /// [force] bypasses the cadence guard: the mirror engine passes true when
+  /// a host answers 401/403 (retired key) so the very next resolve attempt
+  /// already carries the fresh key instead of failing for up to 15 minutes.
+  static Future<void> refreshFromManifest({bool force = false}) async {
     final now = DateTime.now();
     final last = _lastRefreshAttempt;
-    if (last != null && now.isBefore(last.add(_refreshInterval))) return;
+    if (!force && last != null && now.isBefore(last.add(_refreshInterval))) {
+      return;
+    }
     _lastRefreshAttempt = now;
+
+    // A concurrent forced refresh must not double-fetch: serialize on the
+    // same future so overlapping callers await one network round-trip.
+    _refreshing ??= _refreshNow();
+    try {
+      await _refreshing;
+    } finally {
+      // Allow later refreshes once the in-flight one settles. A forced call
+      // always leaves the cadence stamp updated above, so cadence still
+      // applies to non-forced callers that arrive after it completes.
+      _refreshing = null;
+    }
+  }
+
+  static Future<void>? _refreshing;
+
+  static Future<void> _refreshNow() async {
     HttpClient? client;
     try {
       client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
