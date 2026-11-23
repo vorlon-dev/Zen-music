@@ -27,6 +27,7 @@ import 'package:zenmusic/desktop/liquid/glass_panel.dart';
 import 'package:zenmusic/desktop/screens/player/player_page.dart';
 import 'package:zenmusic/desktop/services/settings_manager.dart';
 import 'package:zenmusic/desktop/screens/shell/widgets/bottom_player.dart';
+import 'package:zenmusic/desktop/screens/shell/widgets/echo_bottom_player.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
 
@@ -316,9 +317,9 @@ class _Chrome extends StatelessWidget {
                       radius: 20,
                       margin: const EdgeInsets.fromLTRB(
                           _kDockSideGap, 0, _kDockSideGap, 6),
-                      child: BottomPlayer(onOpen: onOpenPlayer),
+                      child: EchoBottomPlayer(onOpen: onOpenPlayer),
                     )
-                  : BottomPlayer(onOpen: onOpenPlayer),
+                  : EchoBottomPlayer(onOpen: onOpenPlayer),
             ),
             _ZenDock(currentIndex: currentIndex, onSelect: onSelect),
           ],

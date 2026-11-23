@@ -4,7 +4,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -12,7 +11,10 @@ import 'package:palette_generator/palette_generator.dart';
 import 'package:text_scroll/text_scroll.dart';
 
 import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/material3/m3_tokens.dart';
+import 'package:zenmusic/desktop/material3/m3_wavy_slider.dart';
 import 'package:zenmusic/desktop/services/settings_manager.dart';
+import 'package:zenmusic/desktop/utils/adaptive_widgets/buttons.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/progress_ring.dart';
 import 'package:zenmusic/desktop/utils/song_thumbnail.dart';
 
@@ -56,7 +58,7 @@ class _BottomPlayerState extends State<BottomPlayer> {
           return const SizedBox();
         }
         return ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 380),
+          constraints: const BoxConstraints(maxWidth: 500),
           child: Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: _MiniBody(
@@ -92,20 +94,12 @@ class _MiniBody extends StatefulWidget {
 }
 
 class _MiniBodyState extends State<_MiniBody>
-    with TickerProviderStateMixin {
-  // Echo Music pill: 64 dp tall, fully rounded, 40 dp round art inside a
-  // 48 dp progress ring, 32 dp skip buttons around a 48 dp cookie play button.
-  static const double _height = 64;
-  static const double _ring = 48;
-  static const double _art = 40;
+    with SingleTickerProviderStateMixin {
+  static const double _height = 72;
+  static const double _radius = 20;
+  static const double _artSize = 52;
+  static const double _artRadius = 14;
   static const double _dragThreshold = 10;
-
-  late final AnimationController _spin; // cookie rotation (8 s / turn)
-  late final AnimationController _indent; // cookie bloom (300 ms)
-  late final AnimationController _drag; // swipe offset, spring back
-  double _dx = 0;
-  double _dragDist = 0;
-  DateTime _dragStart = DateTime.now();
 
   late final AnimationController _press;
   late final Animation<double> _scale;
@@ -126,14 +120,6 @@ class _MiniBodyState extends State<_MiniBody>
       duration: const Duration(milliseconds: 100),
       vsync: this,
     );
-    _spin = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 8000));
-    _indent = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 300));
-    _drag = AnimationController.unbounded(vsync: this)
-      ..addListener(() => setState(() => _dx = _drag.value));
-    _applyPlaying(_mp.buttonState.value == ButtonState.playing);
-    _mp.buttonState.addListener(_onButton);
     _scale = Tween<double>(begin: 1, end: 0.98).animate(
       CurvedAnimation(parent: _press, curve: Curves.easeInOut),
     );
@@ -141,50 +127,8 @@ class _MiniBodyState extends State<_MiniBody>
 
   @override
   void dispose() {
-    _mp.buttonState.removeListener(_onButton);
-    _spin.dispose();
-    _indent.dispose();
-    _drag.dispose();
     _press.dispose();
     super.dispose();
-  }
-
-  void _onButton() =>
-      _applyPlaying(_mp.buttonState.value == ButtonState.playing);
-
-  void _applyPlaying(bool playing) {
-    if (playing) {
-      _indent.forward();
-      if (!_spin.isAnimating) _spin.repeat();
-    } else {
-      _indent.reverse();
-      _spin.stop();
-    }
-  }
-
-  void _springBack([double velocity = 0]) {
-    _drag.value = _dx;
-    _drag.animateWith(SpringSimulation(
-      const SpringDescription(mass: 1, stiffness: 200, damping: 28),
-      _dx,
-      0,
-      velocity,
-    ));
-  }
-
-  void _dragEnd(DragEndDetails d) {
-    final ms = DateTime.now().difference(_dragStart).inMilliseconds;
-    final v = ms > 0 ? _dragDist / ms : 0.0; // px per ms, like Echo
-    final far = _dx.abs() > 50 && v > 0.9;
-    final farther = _dx.abs() > 150;
-    if (far || farther) {
-      if (_dx < 0 && _mp.player.hasNext) {
-        _next();
-      } else if (_dx > 0 && _mp.player.hasPrevious) {
-        _previous();
-      }
-    }
-    _springBack(d.primaryVelocity ?? 0);
   }
 
   void _noteSlideIntent(bool forward) {
@@ -279,20 +223,12 @@ class _MiniBodyState extends State<_MiniBody>
     final base = widget.color ?? const Color(0xFF202020);
     final dark = Color.lerp(base, Colors.black, 0.45)!;
     final subtitle = '${song.artist ?? song.extras?['subtitle'] ?? ''}';
-    // Echo: surfaceContainerHigh pill with a 1 dp outline at 30 %.
-    final themed = m3;
-    final fg = themed ? cs.onSurface : Colors.white;
-    final fg2 = fg.withValues(alpha: 0.7);
-    final outline =
-        (themed ? cs.outline : Colors.white).withValues(alpha: 0.3);
-    final shape = BorderRadius.circular(_height / 2);
 
     return ListenableBuilder(
       listenable: _scale,
       builder: (context, _) => Transform.scale(
         scale: _scale.value,
         child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
           onTapDown: (_) => _press.forward(),
           onTapUp: (_) => _press.reverse(),
           onTapCancel: () => _press.reverse(),
@@ -300,64 +236,72 @@ class _MiniBodyState extends State<_MiniBody>
           onVerticalDragUpdate: (d) {
             if ((d.primaryDelta ?? 0) < -_dragThreshold) _open();
           },
-          onHorizontalDragStart: (_) {
-            _drag.stop();
-            _dragStart = DateTime.now();
-            _dragDist = 0;
+          onHorizontalDragEnd: (d) {
+            final v = d.primaryVelocity ?? 0;
+            if (v < -300) {
+              _next();
+            } else if (v > 300) {
+              _previous();
+            }
           },
-          onHorizontalDragUpdate: (d) {
-            final dx = d.primaryDelta ?? 0;
-            final hasNext = _mp.player.hasNext;
-            final hasPrev = _mp.player.hasPrevious;
-            final ok = (dx < 0 && hasNext) ||
-                (dx > 0 && hasPrev) ||
-                (dx > 0 && _dx < 0) ||
-                (dx < 0 && _dx > 0);
-            if (!ok) return;
-            _dragDist += dx.abs();
-            setState(() => _dx += dx);
-          },
-          onHorizontalDragCancel: () => _springBack(),
-          onHorizontalDragEnd: _dragEnd,
-          child: Transform.translate(
-            offset: Offset(_dx, 0),
-            child: Container(
-              height: _height,
-              decoration: BoxDecoration(
-                color: themed
-                    ? cs.surfaceContainerHigh
-                    : liquid
-                        ? Colors.white.withValues(alpha: 0.05)
-                        : null,
-                gradient: (liquid || themed)
-                    ? null
-                    : LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [base, dark],
+          child: Container(
+            height: _height,
+            decoration: BoxDecoration(
+              color: m3
+                  ? cs.surfaceContainerHigh
+                  : liquid
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : null,
+              gradient: (liquid || m3)
+                  ? null
+                  : LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [base, dark],
+                    ),
+              borderRadius: BorderRadius.circular(
+                  m3 ? ZenM3MiniPlayer.radius : _radius),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(
+                      alpha: m3 ? 0.14 : (liquid ? 0.18 : 0.3)),
+                  blurRadius: m3 ? 10 : (liquid ? 18 : 20),
+                  spreadRadius: 0,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(
+                  m3 ? ZenM3MiniPlayer.radius : _radius),
+              child: Stack(
+                children: [
+                  Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Row(
+                  children: [
+                    _slideOnChange(
+                      slideKey: song.id,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(_artRadius),
+                          child: SongThumbnail(
+                            song: song.extras!,
+                            dp: MediaQuery.of(context).devicePixelRatio,
+                            height: _artSize,
+                            width: _artSize,
+                            fit: BoxFit.cover,
+                            onImageReady: widget.onImageReady,
+                          ),
+                        ),
                       ),
-                borderRadius: shape,
-                border: Border.all(color: outline, width: 1),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black
-                        .withValues(alpha: themed ? 0.14 : (liquid ? 0.18 : 0.3)),
-                    blurRadius: themed ? 10 : (liquid ? 18 : 20),
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: shape,
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Row(
-                    children: [
-                      _thumb(song, themed ? cs.primary : Colors.white, outline),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _slideOnChange(
-                          slideKey: 'meta-${song.id}',
+                    ),
+                    Expanded(
+                      child: _slideOnChange(
+                        slideKey: 'meta-${song.id}',
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8),
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,237 +311,297 @@ class _MiniBodyState extends State<_MiniBody>
                                 mode: TextScrollMode.bouncing,
                                 velocity: const Velocity(
                                     pixelsPerSecond: Offset(30, 0)),
-                                delayBefore: const Duration(seconds: 3),
+                                delayBefore: const Duration(seconds: 2),
                                 pauseBetween: const Duration(seconds: 2),
                                 style: TextStyle(
-                                  color: fg,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
+                                  color: m3
+                                      ? cs.onSurface
+                                      : Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.1,
                                 ),
                               ),
-                              if (subtitle.isNotEmpty)
+                              if (subtitle.isNotEmpty) ...[
+                                const SizedBox(height: 2),
                                 Text(
                                   subtitle,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: fg2,
-                                    fontSize: 12,
+                                    color: m3
+                                        ? cs.onSurfaceVariant
+                                        : Colors.white.withValues(alpha: 0.75),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w400,
                                   ),
                                 ),
+                              ],
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      _buildControls(fg, themed ? cs.primary : Colors.white,
-                          themed ? cs.surface : Colors.black),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 40 dp round art inside a 48 dp, 3 dp round-capped progress ring.
-  Widget _thumb(MediaItem song, Color ring, Color outline) {
-    return SizedBox(
-      width: _ring,
-      height: _ring,
-      child: ValueListenableBuilder<ProgressBarState>(
-        valueListenable: _mp.progressBarState,
-        builder: (context, value, child) {
-          final total = value.total.inMilliseconds;
-          final p = total <= 0
-              ? 0.0
-              : (value.current.inMilliseconds / total).clamp(0.0, 1.0);
-          return CustomPaint(
-            foregroundPainter: _ThumbRingPainter(
-              progress: p,
-              color: ring,
-              track: outline.withValues(alpha: 0.2),
-            ),
-            child: child,
-          );
-        },
-        child: Center(
-          child: Container(
-            width: _art,
-            height: _art,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: outline, width: 1),
-            ),
-            child: ClipOval(
-              child: _slideOnChange(
-                slideKey: song.id,
-                child: SongThumbnail(
-                  song: song.extras!,
-                  dp: MediaQuery.of(context).devicePixelRatio,
-                  height: _art,
-                  width: _art,
-                  fit: BoxFit.cover,
-                  onImageReady: widget.onImageReady,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildControls(Color fg, Color playBg, Color playFg) {
-    final mp = _mp;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        StreamBuilder(
-          stream: mp.player.sequenceStateStream,
-          builder: (context, _) => _skipBtn(
-            Icons.skip_previous_rounded,
-            fg,
-            mp.player.hasPrevious ? _previous : null,
-          ),
-        ),
-        const SizedBox(width: 12),
-        ValueListenableBuilder<ButtonState>(
-          valueListenable: mp.buttonState,
-          builder: (context, state, _) {
-            final loading = state == ButtonState.loading;
-            final playing = state == ButtonState.playing;
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: loading ? null : () => mp.togglePlayPause(),
-              child: SizedBox(
-                width: 48,
-                height: 48,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    AnimatedBuilder(
-                      animation: Listenable.merge([_spin, _indent]),
-                      builder: (context, _) => Transform.rotate(
-                        angle: _spin.value * 2 * math.pi,
-                        child: CustomPaint(
-                          size: const Size(48, 48),
-                          painter: _CookiePainter(
-                            color: playBg,
-                            indent: 0.08 * _indent.value,
-                          ),
-                        ),
-                      ),
                     ),
-                    if (loading)
-                      SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: AdaptiveProgressRing(),
-                      )
-                    else
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        child: Icon(
-                          playing
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                          key: ValueKey(playing),
-                          color: playFg,
-                          size: 24,
-                        ),
-                      ),
+                    _buildControls(),
                   ],
                 ),
               ),
-            );
-          },
+                  if (m3)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: ValueListenableBuilder<ProgressBarState>(
+                        valueListenable: _mp.progressBarState,
+                        builder: (context, value, _) {
+                          final total = value.total.inMilliseconds;
+                          final frac = total <= 0
+                              ? 0.0
+                              : (value.current.inMilliseconds / total)
+                                  .clamp(0.0, 1.0);
+                          final playing =
+                              _mp.buttonState.value == ButtonState.playing;
+                          return ExcludeSemantics(
+                            child: ZenM3WavySlider(
+                              value: frac,
+                              playing: playing,
+                              compact: true,
+                              height: ZenM3MiniPlayer.progressLineHeight + 5,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
         ),
-        const SizedBox(width: 12),
+      ),
+    );
+  }
+
+  Widget _buildControls() {
+    final mp = _mp;
+    final m3 = GetIt.I<SettingsManager>().isMaterial3;
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ValueListenableBuilder<ButtonState>(
+          valueListenable: mp.buttonState,
+          builder: (context, state, _) => _CircularPlayButton(state: state),
+        ),
         StreamBuilder(
           stream: mp.player.sequenceStateStream,
-          builder: (context, _) => _skipBtn(
-            Icons.skip_next_rounded,
-            fg,
-            mp.player.hasNext ? _next : null,
-          ),
+          builder: (context, _) => mp.player.hasNext
+              ? Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: AdaptiveIconButton(
+              onPressed: _next,
+              icon: Icon(
+                Icons.skip_next_rounded,
+                size: 26,
+                color: m3
+                    ? cs.onSurfaceVariant
+                    : Colors.white.withValues(alpha: 0.85),
+              ),
+            ),
+          )
+              : const SizedBox.shrink(),
         ),
       ],
     );
   }
+}
 
-  Widget _skipBtn(IconData icon, Color fg, VoidCallback? onTap) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: SizedBox(
-        width: 32,
-        height: 32,
-        child: Icon(
-          icon,
-          size: 24,
-          color: onTap == null ? fg.withValues(alpha: 0.35) : fg,
-        ),
+
+class _CircularPlayButton extends StatefulWidget {
+  const _CircularPlayButton({required this.state});
+
+  final ButtonState state;
+
+  @override
+  State<_CircularPlayButton> createState() => _CircularPlayButtonState();
+}
+
+class _CircularPlayButtonState extends State<_CircularPlayButton>
+    with TickerProviderStateMixin {
+  late final AnimationController _phase = AnimationController(
+    duration: const Duration(milliseconds: 2000),
+    vsync: this,
+  );
+  late final AnimationController _amp = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 350),
+    value: 0,
+  );
+
+  bool _playing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _playing = widget.state == ButtonState.playing;
+    if (_playing) {
+      _phase.repeat();
+      _amp.value = 1;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _CircularPlayButton old) {
+    super.didUpdateWidget(old);
+    final playing = widget.state == ButtonState.playing;
+    if (playing != _playing) {
+      _playing = playing;
+      if (playing) {
+        _phase.repeat();
+        _amp.forward();
+      } else {
+        _amp.reverse();
+        _phase.stop();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _phase.dispose();
+    _amp.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mp = GetIt.I<MediaPlayer>();
+    final isLoading = widget.state == ButtonState.loading;
+    final isPlaying = widget.state == ButtonState.playing;
+    final m3 = GetIt.I<SettingsManager>().isMaterial3;
+    final cs = Theme.of(context).colorScheme;
+    final ringColor = m3 ? cs.primary : Colors.white;
+    final ringTrack = m3
+        ? cs.primary.withValues(alpha: 0.22)
+        : Colors.white.withValues(alpha: 0.18);
+
+    return SizedBox(
+      width: 48,
+      height: 48,
+      child: ValueListenableBuilder<ProgressBarState>(
+        valueListenable: mp.progressBarState,
+        builder: (context, value, _) {
+          final total = value.total.inMilliseconds;
+          final progress = total <= 0
+              ? 0.0
+              : (value.current.inMilliseconds / total).clamp(0.0, 1.0);
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              ListenableBuilder(
+                listenable: Listenable.merge([_phase, _amp]),
+                builder: (context, _) => CustomPaint(
+                  size: const Size(48, 48),
+                  painter: _WaveRingPainter(
+                    phase: _phase.value * 2 * math.pi,
+                    sweepAngle: 2 * math.pi * progress,
+                    color: ringColor,
+                    trackColor: ringTrack,
+                    strokeWidth: 3,
+                    amplitude: 1.6 * _amp.value,
+                  ),
+                ),
+              ),
+              if (isLoading)
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: AdaptiveProgressRing(),
+                )
+              else
+                IconButton(
+                  // SP-5b: MediaPlayer.togglePlayPause
+                  onPressed: () => mp.togglePlayPause(),
+                  splashColor: Colors.transparent,
+                  highlightColor: Colors.transparent,
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    isPlaying
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-class _ThumbRingPainter extends CustomPainter {
-  _ThumbRingPainter(
-      {required this.progress, required this.color, required this.track});
-  final double progress;
+class _WaveRingPainter extends CustomPainter {
+  _WaveRingPainter({
+    required this.phase,
+    required this.sweepAngle,
+    required this.color,
+    required this.trackColor,
+    required this.strokeWidth,
+    required this.amplitude,
+  });
+
+  final double phase;
+  final double sweepAngle;
   final Color color;
-  final Color track;
+  final Color trackColor;
+  final double strokeWidth;
+  final double amplitude;
+
+  static const _waves = 8; // humps around the full circle
+  static const _start = -math.pi / 2; // 12 o'clock
 
   @override
   void paint(Canvas canvas, Size size) {
-    const w = 3.0;
-    final rect = Offset.zero & size;
-    final r = rect.deflate(w / 2);
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = w
-      ..strokeCap = StrokeCap.round
-      ..isAntiAlias = true;
-    canvas.drawArc(r, 0, 2 * math.pi, false, paint..color = track);
-    if (progress > 0) {
-      canvas.drawArc(
-          r, -math.pi / 2, 2 * math.pi * progress, false, paint..color = color);
-    }
-  }
+    final center = size.center(Offset.zero);
+    final radius = size.width / 2 - 5;
 
-  @override
-  bool shouldRepaint(_ThumbRingPainter o) =>
-      o.progress != progress || o.color != color || o.track != track;
-}
+    // faint full track
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth - 1
+        ..color = trackColor,
+    );
 
-/// 9-lobed cookie; [indent] 0 is a circle, 0.08 matches Echo's playing state.
-class _CookiePainter extends CustomPainter {
-  _CookiePainter({required this.color, required this.indent});
-  final Color color;
-  final double indent;
+    if (sweepAngle < 0.02) return;
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = size.center(Offset.zero);
-    final R = size.width / 2;
+    final steps = math.max(12, (sweepAngle * radius / 1.5).ceil());
     final path = Path();
-    const n = 180;
-    for (var i = 0; i <= n; i++) {
-      final a = 2 * math.pi * i / n;
-      final r = R * (1 - indent * 1.8 * (0.5 + 0.5 * math.cos(9 * a)));
-      final p = Offset(c.dx + r * math.cos(a), c.dy + r * math.sin(a));
+    for (var i = 0; i <= steps; i++) {
+      final a = _start + sweepAngle * (i / steps);
+      final r = radius + amplitude * math.sin(a * _waves + phase);
+      final p = Offset(center.dx + r * math.cos(a), center.dy + r * math.sin(a));
       i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
     }
-    path.close();
-    canvas.drawPath(path, Paint()..color = color..isAntiAlias = true);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..isAntiAlias = true
+        ..color = color,
+    );
   }
 
   @override
-  bool shouldRepaint(_CookiePainter o) =>
-      o.color != color || o.indent != indent;
+  bool shouldRepaint(_WaveRingPainter old) =>
+      old.phase != phase ||
+          old.sweepAngle != sweepAngle ||
+          old.amplitude != amplitude ||
+          old.color != color ||
+          old.trackColor != trackColor;
 }
