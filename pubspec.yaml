@@ -97,6 +97,7 @@ flutter:
   assets:
     - assets/logos/
     - assets/icon/
+    - assets/brands/
 
   fonts:
     - family: Retro Blendy

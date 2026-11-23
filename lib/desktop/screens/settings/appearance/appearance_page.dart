@@ -23,6 +23,8 @@ import 'package:zenmusic/desktop/utils/modals_extra.dart';
 import 'package:zenmusic/desktop/utils/zen_icons.dart';
 import 'package:zenmusic/desktop/utils/zen_settings_kit.dart';
 import 'package:zenmusic/desktop/utils/zen_slider.dart';
+import 'package:get_it/get_it.dart';
+import 'package:zenmusic/desktop/services/settings_manager.dart';
 
 String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
@@ -37,7 +39,7 @@ class AppearancePage extends StatelessWidget {
         appBar: AppBar(title: Text('Appearance'.tr)),
         body: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
+            constraints: const BoxConstraints(maxWidth: 720),
             child: BlocBuilder<AppearanceCubit, AppearanceState>(
               builder: (context, state) {
                 final s = state as AppearanceLoaded;
@@ -46,39 +48,73 @@ class AppearancePage extends StatelessWidget {
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
                   children: [
-                    ZenSection(title: 'Theme'.tr, children: [
-                      ZenRow(
-                        icon: ZenIcons.themeMode,
-                        title: 'Theme mode'.tr,
-                        trailing: AdaptiveDropdownButton<ThemeMode>(
+                    _ThemePreview(accent: s.accentColor),
+                    const SizedBox(height: 16),
+                    ZenSection(
+                      title: 'Theme'.tr,
+                      tint: const Color(0xFFB65CF0),
+                      children: [
+                      ZenCard(
+                        padding: const EdgeInsets.all(12),
+                        child: ZenSegmented<ThemeMode>(
                           value: s.themeMode,
-                          items: [
-                            for (final m in ThemeMode.values)
-                              AdaptiveDropdownMenuItem(
-                                value: m,
-                                child: Text(_cap(m.name)),
-                              ),
+                          options: [
+                            (ThemeMode.system, 'System'.tr, Icons.brightness_auto_rounded),
+                            (ThemeMode.light, 'Light'.tr, Icons.light_mode_rounded),
+                            (ThemeMode.dark, 'Dark'.tr, Icons.dark_mode_rounded),
                           ],
-                          onChanged: (v) {
-                            if (v == null) return;
-                            context.read<AppearanceCubit>().setThemeMode(v);
-                          },
+                          onChanged: (v) =>
+                              context.read<AppearanceCubit>().setThemeMode(v),
                         ),
                       ),
-                      ZenRow(
-                        icon: ZenIcons.accent,
-                        title: 'Accent color'.tr,
-                        chevron: true,
-                        trailing: Container(
-                          width: 22,
-                          height: 22,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: s.accentColor ?? cs.primary,
-                            border: Border.all(color: cs.outlineVariant),
-                          ),
+                      ZenCard(
+                        padding: const EdgeInsets.all(12),
+                        child: ZenSegmented<String>(
+                          value: s.uiTheme,
+                          options: [
+                            ('classic', 'Classic'.tr, null),
+                            ('liquid', 'Liquid Glass'.tr, null),
+                            ('m3', 'Material 3'.tr, null),
+                          ],
+                          onChanged: (v) =>
+                              context.read<AppearanceCubit>().setUiTheme(v),
                         ),
-                        onTap: () => AccentModals.showAccentSelector(context),
+                      ),
+                      ZenCard(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              Expanded(
+                                child: Text('Accent color'.tr,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyLarge
+                                        ?.copyWith(fontWeight: FontWeight.w500)),
+                              ),
+                              TextButton(
+                                onPressed: () =>
+                                    AccentModals.showAccentSelector(context),
+                                child: Text('More'.tr),
+                              ),
+                            ]),
+                            const SizedBox(height: 8),
+                            Wrap(spacing: 10, runSpacing: 10, children: [
+                              _Swatch(
+                                color: null,
+                                selected: s.accentColor == null,
+                                label: 'Auto',
+                              ),
+                              for (final c in _kAccents)
+                                _Swatch(
+                                  color: c,
+                                  selected:
+                                      s.accentColor?.toARGB32() == c.toARGB32(),
+                                ),
+                            ]),
+                          ],
+                        ),
                       ),
                       ZenSwitchRow(
                         icon: ZenIcons.amoled,
@@ -97,29 +133,12 @@ class AppearancePage extends StatelessWidget {
                             .read<AppearanceCubit>()
                             .setDynamicColors(v),
                       ),
-                      ZenRow(
-                        icon: ZenIcons.themeMode,
-                        title: 'UI theme'.tr,
-                        trailing: AdaptiveDropdownButton<String>(
-                          value: s.uiTheme,
-                          items: [
-                            AdaptiveDropdownMenuItem(
-                                value: 'classic', child: Text('Classic'.tr)),
-                            AdaptiveDropdownMenuItem(
-                                value: 'liquid',
-                                child: Text('Liquid Glass'.tr)),
-                            AdaptiveDropdownMenuItem(
-                                value: 'm3', child: Text('Material 3'.tr)),
-                          ],
-                          onChanged: (v) {
-                            if (v == null) return;
-                            context.read<AppearanceCubit>().setUiTheme(v);
-                          },
-                        ),
-                      ),
                     ]),
 
-                    ZenSection(title: 'Player'.tr, children: [
+                    ZenSection(
+                      tint: const Color(0xFF5B8DEF),
+                      title: 'Player'.tr,
+                      children: [
                       ValueListenableBuilder<String>(
                         valueListenable: PlayerSkinPrefs.skin,
                         builder: (context, name, _) {
@@ -207,7 +226,10 @@ class AppearancePage extends StatelessWidget {
                     ]),
 
                     if (Platform.isWindows)
-                      ZenSection(title: 'Desktop'.tr, children: [
+                      ZenSection(
+                      tint: const Color(0xFF2BB3A3),
+                      title: 'Desktop'.tr,
+                      children: [
                         ZenRow(
                           icon: Icons.picture_in_picture_alt,
                           title: 'Mini player'.tr,
@@ -226,7 +248,10 @@ class AppearancePage extends StatelessWidget {
                         ),
                       ]),
 
-                    ZenSection(title: 'Lyrics'.tr, children: [
+                    ZenSection(
+                      tint: const Color(0xFFE8604C),
+                      title: 'Lyrics'.tr,
+                      children: [
                       ValueListenableBuilder<LyricStyle>(
                         valueListenable: LyricStylePrefs.style,
                         builder: (context, st, _) => ZenRow(
@@ -364,7 +389,10 @@ class AppearancePage extends StatelessWidget {
                       ),
                     ]),
 
-                    ZenSection(title: 'Feedback'.tr, children: [
+                    ZenSection(
+                      tint: const Color(0xFFE5A100),
+                      title: 'Feedback'.tr,
+                      children: [
                       ValueListenableBuilder<bool>(
                         valueListenable: AppearancePrefs.haptics,
                         builder: (context, on, _) => ZenSwitchRow(
@@ -382,6 +410,147 @@ class AppearancePage extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+const _kAccents = <Color>[
+  Color(0xFF5B8DEF),
+  Color(0xFF7C4DFF),
+  Color(0xFFE91E63),
+  Color(0xFFE8604C),
+  Color(0xFFFF9800),
+  Color(0xFFFFC107),
+  Color(0xFF3FA66A),
+  Color(0xFF00BFA5),
+  Color(0xFF00B8D4),
+];
+
+class _Swatch extends StatelessWidget {
+  const _Swatch({required this.color, required this.selected, this.label});
+  final Color? color;
+  final bool selected;
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: () => GetIt.I<SettingsManager>().accentColor = color,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color ?? cs.surfaceContainerHighest,
+          border: Border.all(
+            color: selected ? cs.onSurface : Colors.transparent,
+            width: 2.5,
+          ),
+        ),
+        child: selected
+            ? Icon(Icons.check_rounded,
+                size: 20,
+                color: color == null
+                    ? cs.onSurface
+                    : (ThemeData.estimateBrightnessForColor(color!) ==
+                            Brightness.dark
+                        ? Colors.white
+                        : Colors.black))
+            : (color == null
+                ? Icon(Icons.auto_awesome_rounded,
+                    size: 18, color: cs.onSurfaceVariant)
+                : null),
+      ),
+    );
+  }
+}
+
+/// Live preview: a mock mini player drawn with the current theme.
+class _ThemePreview extends StatelessWidget {
+  const _ThemePreview({required this.accent});
+  final Color? accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            cs.primaryContainer,
+            Color.lerp(cs.primaryContainer, cs.surface, 0.55)!,
+          ],
+        ),
+      ),
+      child: Column(children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Preview'.tr,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: cs.onPrimaryContainer.withValues(alpha: 0.8),
+                  fontWeight: FontWeight.w600)),
+        ),
+        const SizedBox(height: 14),
+        Container(
+          height: 64,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(32),
+            border: Border.all(color: cs.outline.withValues(alpha: 0.3)),
+          ),
+          child: Row(children: [
+            SizedBox(
+              width: 48,
+              height: 48,
+              child: Stack(alignment: Alignment.center, children: [
+                CircularProgressIndicator(
+                  value: 0.62,
+                  strokeWidth: 3,
+                  strokeCap: StrokeCap.round,
+                  backgroundColor: cs.outline.withValues(alpha: 0.2),
+                ),
+                CircleAvatar(
+                    radius: 20, backgroundColor: cs.tertiaryContainer),
+              ]),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Your song',
+                      style: TextStyle(
+                          color: cs.onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500)),
+                  Text('Artist',
+                      style: TextStyle(
+                          color: cs.onSurface.withValues(alpha: 0.7),
+                          fontSize: 12)),
+                ],
+              ),
+            ),
+            Icon(Icons.skip_previous_rounded, color: cs.onSurface),
+            const SizedBox(width: 6),
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: cs.primary,
+              child: Icon(Icons.pause_rounded, color: cs.onPrimary),
+            ),
+            const SizedBox(width: 6),
+            Icon(Icons.skip_next_rounded, color: cs.onSurface),
+          ]),
+        ),
+      ]),
     );
   }
 }

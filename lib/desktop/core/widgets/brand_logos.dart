@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:ui' show Path;
 
 import 'package:flutter/material.dart';
@@ -195,7 +196,7 @@ class SpotifyLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox.square(
       dimension: size,
-      child: CustomPaint(painter: const _SpotifyPainter()),
+      child: SvgPicture.asset('assets/brands/spotify.svg'),
     );
   }
 }
@@ -234,7 +235,7 @@ class YouTubeMusicLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox.square(
       dimension: size,
-      child: CustomPaint(painter: const _YouTubeMusicPainter()),
+      child: SvgPicture.asset('assets/brands/ytmusic.svg'),
     );
   }
 }
