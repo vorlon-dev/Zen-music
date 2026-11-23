@@ -57,8 +57,8 @@ class _LosslessQualityPageState extends State<LosslessQualityPage> {
                         'YouTube videos and downloaded songs keep their '
                             'original audio. When a song is not available in '
                             'the selected tier, the next best tier plays '
-                            'automatically — and songs with no lossless match '
-                            'fall back to the regular stream.',
+                            'automatically. Songs that have no lossless '
+                            'version anywhere follow the switch below.',
                         style: TextStyle(
                             fontSize: 12.5,
                             color: scheme.onSurfaceVariant),
@@ -87,6 +87,25 @@ class _LosslessQualityPageState extends State<LosslessQualityPage> {
                         onTap: () => LosslessPrefs.set(tier),
                       ),
                   ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: SwitchListTile(
+                  title: const Text(
+                    'Lossless only',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(LosslessPrefs.strict
+                      ? 'Songs with no lossless version are skipped - '
+                          'nothing is ever played at normal quality.'
+                      : 'Songs with no lossless version play at normal '
+                          'quality instead of being skipped.'),
+                  value: LosslessPrefs.strict,
+                  onChanged: (v) async {
+                    await LosslessPrefs.setStrict(v);
+                    if (mounted) setState(() {});
+                  },
                 ),
               ),
               const SizedBox(height: 8),

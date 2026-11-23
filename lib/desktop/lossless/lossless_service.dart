@@ -13,6 +13,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 
 import 'package:zenmusic/desktop/lossless/lossless_quality.dart';
 import 'package:zenmusic/desktop/lossless/mirror_arbiter.dart';
+import 'package:zenmusic/desktop/lossless/mirror_source.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 
 class LosslessService {
@@ -34,7 +35,11 @@ class LosslessService {
   static bool _warnedDisabled = false;
 
   static const _connectTimeout = Duration(seconds: 8);
-  static const _ioTimeout = Duration(seconds: 12);
+  // The endpoint is serverless: the first request after idle can take
+  // 15-25 s (cold start). Strict lossless waits for it instead of giving up
+  // at 12 s and playing nothing.
+  static Duration get _ioTimeout =>
+      LosslessPrefs.strict ? const Duration(seconds: 30) : const Duration(seconds: 12);
   static const _positiveTtl = Duration(minutes: 8);
   static const _negativeTtl = Duration(minutes: 5);
 
@@ -122,9 +127,82 @@ class LosslessService {
   void forgetSong(Map<String, dynamic> song) {
     final saavnId = song['videoId'] as String? ?? '';
     final id = _saavnToYt[saavnId] ?? saavnId;
-    _streamCache.remove(id);
-    _failCache.remove(id);
+    for (final k in [id, _altIds[id] ?? '']) {
+      _streamCache.remove(k);
+      _failCache.remove(k);
+      _notFound.remove(k);
+    }
+    _altIds.remove(id);
     _endpointDownUntil = null;
+  }
+
+  /// Wakes the serverless endpoint (fire and forget) so the first real
+  /// request does not hit a cold start.
+  Future<void> warmUp() async {
+    if (!endpointEnabled) return;
+    HttpClient? c;
+    try {
+      c = HttpClient()..connectionTimeout = _connectTimeout;
+      final req = await c.getUrl(Uri.parse(endpoint))
+          .timeout(const Duration(seconds: 30));
+      final res = await req.close().timeout(const Duration(seconds: 30));
+      await res.drain<void>();
+      print('[lossless] endpoint warm-up HTTP ${res.statusCode}');
+    } catch (e) {
+      print('[lossless] endpoint warm-up failed: $e');
+    } finally {
+      c?.close(force: true);
+    }
+  }
+
+  /// videoId -> duration (s) of the Qobuz track the endpoint matched.
+  final Map<String, int> _matchedSeconds = {};
+
+  /// Ids the endpoint answered with HTTP 404 (could not resolve the id).
+  final Set<String> _notFound = {};
+
+  /// original YouTube id -> official YouTube Music song id ('' = none).
+  final Map<String, String> _altIds = {};
+
+  String _labelOf(Map<String, dynamic> song) {
+    final artists = song['artists'];
+    var artist = '';
+    if (artists is List && artists.isNotEmpty) {
+      artist = ((artists[0] as Map?)?['name'] ?? '').toString();
+    }
+    if (artist.isEmpty) artist = '${song['artist'] ?? ''}';
+    return '"${song['title'] ?? '?'}" by $artist';
+  }
+
+  Future<String?> _altYoutubeId(
+      Map<String, dynamic> song, String originalId) async {
+    final cached = _altIds[originalId];
+    if (cached != null) return cached.isEmpty ? null : cached;
+    final query = _labelOf(song).replaceAll('"', '').replaceAll(' by ', ' ');
+    String? found;
+    try {
+      final result = await GetIt.I<YTMusic>().search(query, filter: 'songs');
+      final sections = result['sections'] as List?;
+      final contents = (sections != null && sections.isNotEmpty)
+          ? sections[0]['contents'] as List?
+          : null;
+      if (contents != null) {
+        for (final c in contents.take(3)) {
+          final id = (c as Map)['videoId'] as String?;
+          if (id != null && id.length == 11 && id != originalId) {
+            found = id;
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      print('[lossless] song-id lookup failed: $e');
+    }
+    _altIds[originalId] = found ?? '';
+    while (_altIds.length > _maxCacheEntries) {
+      _altIds.remove(_altIds.keys.first);
+    }
+    return found;
   }
 
   /// Endpoint trouble (timeouts, dropped sockets, HTTP 5xx) rests the
@@ -135,22 +213,50 @@ class LosslessService {
   Future<AudioSource?> _tryEndpoint(
       Map<String, dynamic> song, MediaItem tag) async {
     try {
-      final videoId = await _youtubeIdFor(song);
-      if (videoId == null || videoId.isEmpty) {
+      final firstId = await _youtubeIdFor(song);
+      if (firstId == null || firstId.isEmpty) {
         _setServed(tag.id, null);
         return null;
       }
+      var videoId = firstId;
+      final label = _labelOf(song);
 
-      final streams = await resolveStreams(videoId);
+      var streams = await resolveStreams(videoId, label: label);
+      // HTTP 404 from the endpoint = it could not resolve THIS YouTube id
+      // (video / MV / re-upload ids are not YouTube Music "song" ids). Retry
+      // once with the official song id found by a YTM song search.
+      if (streams == null && _notFound.contains(videoId)) {
+        final alt = await _altYoutubeId(song, videoId);
+        if (alt != null) {
+          print('[lossless] $label: $videoId unknown to the endpoint, '
+              'retrying with song id $alt');
+          streams = await resolveStreams(alt, label: label);
+          if (streams != null) videoId = alt;
+        }
+      }
       if (streams == null) {
         _setServed(tag.id, null);
         return null;
       }
 
       final wanted = LosslessPrefs.current;
+      final matchedSec = _matchedSeconds[videoId];
+      final expectedMs = matchedSec != null
+          ? matchedSec * 1000
+          : MirrorSource.instance.expectedDurationMs(song);
       for (final tier in _ladderFrom(wanted)) {
         final url = streams[tier.tierKey];
         if (url != null && url.isNotEmpty) {
+          // Qobuz hands out 30-second SAMPLES for tracks it won't stream in
+          // full: never serve an endpoint stream that isn't verified full.
+          final full = await MirrorSource.instance.verifyFullStream(
+              url, expectedMs,
+              flac: tier != LosslessQuality.mp3_320, tier: tier.tierKey);
+          if (!full) {
+            print('[lossless] $videoId: ${tier.tierKey} is a preview/short '
+                'cut — skipping');
+            continue;
+          }
           if (tier != wanted) {
             print('[lossless] $videoId: ${wanted.tierKey} unavailable, '
                 'using ${tier.tierKey}');
@@ -159,7 +265,9 @@ class LosslessService {
           return AudioSource.uri(Uri.parse(url), tag: tag);
         }
       }
-      print('[lossless] $videoId: matched but no stream URLs, falling back');
+      print('[lossless] $videoId: no verified full-length stream, falling back');
+      _streamCache.remove(videoId);
+      _failCache[videoId] = DateTime.now().add(_noMatchTtl);
       _setServed(tag.id, null);
       return null;
     } catch (e) {
@@ -231,7 +339,8 @@ class LosslessService {
   /// GET /?id=<videoId> -> {tierKey -> stream url}, with caching.
   /// Returns null on ANY failure (HTTP error, error status, timeout,
   /// no streams) — negative results are remembered for [_negativeTtl].
-  Future<Map<String, String>?> resolveStreams(String videoId) async {
+  Future<Map<String, String>?> resolveStreams(String videoId,
+      {String? label}) async {
     if (!endpointEnabled) return null; // dead host — never contacted
     final now = DateTime.now();
     final down = _endpointDownUntil;
@@ -257,9 +366,16 @@ class LosslessService {
       final body = await response.transform(utf8.decoder).join();
 
       if (response.statusCode != 200) {
-        print('[lossless] endpoint HTTP ${response.statusCode} for $videoId');
+        final snippet = body.length > 160 ? body.substring(0, 160) : body;
+        print('[lossless] endpoint HTTP ${response.statusCode} for $videoId'
+            '${label == null ? '' : ' ($label)'} -> '
+            '${snippet.replaceAll('\n', ' ')}');
+        if (response.statusCode == 404) {
+          _notFound.add(videoId);
+          if (_notFound.length > 256) _notFound.remove(_notFound.first);
+        }
         if (response.statusCode >= 500) {
-          _endpointDownUntil = now.add(const Duration(minutes: 1));
+          _endpointDownUntil = now.add(const Duration(seconds: 20));
         }
         _failCache[videoId] = now.add(response.statusCode == 404
             ? _noMatchTtl
@@ -274,6 +390,22 @@ class LosslessService {
         _failCache[videoId] = now.add(_noMatchTtl);
         _evict(_failCache);
         return null;
+      }
+
+      // The endpoint tells us the length of the Qobuz track it matched - the
+      // best reference to tell a full stream from a 30 s sample.
+      num? matched;
+      final mt = data['matched_track'];
+      final yt = data['ytmusic'];
+      if (mt is Map && mt['duration'] is num) matched = mt['duration'] as num;
+      if (matched == null && yt is Map && yt['duration'] is num) {
+        matched = yt['duration'] as num;
+      }
+      if (matched != null && matched > 0) {
+        _matchedSeconds[videoId] = matched.round();
+        while (_matchedSeconds.length > 256) {
+          _matchedSeconds.remove(_matchedSeconds.keys.first);
+        }
       }
 
       final streams = <String, String>{};
@@ -299,9 +431,10 @@ class LosslessService {
       return streams;
     } catch (e) {
       print('[lossless] endpoint error for $videoId: $e');
-      _endpointDownUntil = now.add(const Duration(minutes: 1));
-      _failCache[videoId] = now.add(_negativeTtl);
-      _evict(_failCache);
+      // Timeouts / network errors are transient: rest the endpoint briefly
+      // but do NOT remember a miss for this song (the old 5-minute negative
+      // cache made one cold-start timeout block the song for 5 minutes).
+      _endpointDownUntil = now.add(const Duration(seconds: 15));
       return null;
     } finally {
       if (held) _releaseSlot();

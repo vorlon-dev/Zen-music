@@ -97,7 +97,9 @@ class StrictLossless {
       final started = DateTime.now();
       var cleanMiss = false;
       for (var round = 0; round < rounds; round++) {
-        if (fresh && round == 0) LosslessService.instance.forgetSong(song);
+        // Retry rounds must really talk to the endpoint again (it may have
+        // just timed out on a cold start), not hit its cached/rested state.
+        if (round > 0 || fresh) LosslessService.instance.forgetSong(song);
         if (round > 0 || fresh) {
           MirrorSource.instance.clearBlocksFor(song);
           MirrorArbiter.instance.resetCooldowns();

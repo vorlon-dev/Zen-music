@@ -389,6 +389,8 @@ class MediaPlayer extends ChangeNotifier {
     _listenToBufferedPosition();
     _listenToTotalDuration();
     _listenToChangesInSong();
+    // Wake the serverless lossless endpoint so the first song doesn't hit a cold start.
+    unawaited(LosslessService.instance.warmUp());
     _listenToShuffle();
     _listenToAutofetch();
     _listenToPlayerErrors();

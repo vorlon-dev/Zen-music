@@ -4,10 +4,11 @@ import 'package:zenmusic/desktop/services/l10n.dart';
 import 'dart:async' show StreamSubscription;
 import 'package:audio_session/audio_session.dart'
     show AudioDevice, AudioSession;
-import 'dart:io' show File, Platform;
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'package:zenmusic/desktop/screens/player/widgets/apple_mesh.dart';
 import 'dart:ui' show FontFeature, ImageFilter;
+import 'package:flutter/physics.dart' show SpringDescription, SpringSimulation;
 
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
@@ -15,7 +16,6 @@ import 'package:flutter/services.dart'
     show EventChannel, HapticFeedback, MethodChannel;
 import 'package:get_it/get_it.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:just_audio/just_audio.dart' show LoopMode;
 import 'package:just_audio_background/just_audio_background.dart'
     show MediaItem;
 
@@ -28,14 +28,14 @@ import 'package:zenmusic/desktop/utils/zen_settings_kit.dart';
 
 enum PlayerSkin {
   classic('Classic', 'The standard Zen layout', Icons.music_note_outlined),
-  appleMusicMesh('Apple Music · Mesh',
-      'Artwork-colour mesh, live lyric line, full-screen lyrics tab',
+  appleMusicMesh('Apple Music',
+      'Full-bleed artwork or canvas, round buttons, bare transport, volume',
       Icons.gradient),
   simpLiquid('SimpMusic · Liquid glass',
       'Full-bleed artwork, blurred backdrop, live lyric line',
       Icons.blur_on),
-  simpM3('SimpMusic · Material 3 Expressive',
-      'Artwork-tinted palette, wavy seek bar, connected buttons',
+  simpM3('Material 3',
+      'Connected buttons, squircle transport, rotating cookie play button',
       Icons.palette_outlined);
 
   const PlayerSkin(this.label, this.desc, this.icon);
@@ -114,9 +114,9 @@ class PlayerSkinView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (skin) {
-    PlayerSkin.appleMusicMesh => _AppleMesh(ctx),
+    PlayerSkin.appleMusicMesh => _EchoSkin(ctx, material: false),
     PlayerSkin.simpLiquid => _SimpLiquid(ctx),
-    PlayerSkin.simpM3 => _SimpM3(ctx),
+    PlayerSkin.simpM3 => _EchoSkin(ctx, material: true),
     PlayerSkin.classic => const SizedBox.shrink(),
   };
 }
@@ -134,28 +134,8 @@ class _Ic {
       _a ? CupertinoIcons.forward_end_fill : Icons.skip_next_rounded;
   static IconData get prev =>
       _a ? CupertinoIcons.backward_end_fill : Icons.skip_previous_rounded;
-  static IconData get shuffle =>
-      _a ? CupertinoIcons.shuffle : Icons.shuffle_rounded;
-  static IconData get repeat =>
-      _a ? CupertinoIcons.repeat : Icons.repeat_rounded;
-  static IconData get repeatOne =>
-      _a ? CupertinoIcons.repeat_1 : Icons.repeat_one_rounded;
-  static IconData get heart =>
-      _a ? CupertinoIcons.heart : Icons.favorite_border_rounded;
-  static IconData get heartFill =>
-      _a ? CupertinoIcons.heart_fill : Icons.favorite_rounded;
-  static IconData get queue =>
-      _a ? CupertinoIcons.music_note_list : Icons.queue_music_rounded;
-  static IconData get lyrics =>
-      _a ? CupertinoIcons.text_quote : Icons.lyrics_outlined;
-  static IconData get more =>
-      _a ? CupertinoIcons.ellipsis : Icons.more_horiz_rounded;
-  static IconData get down =>
-      _a ? CupertinoIcons.chevron_down : Icons.keyboard_arrow_down_rounded;
   static IconData get volume =>
       _a ? CupertinoIcons.speaker_1 : Icons.volume_up_outlined;
-  static IconData get quality =>
-      _a ? CupertinoIcons.waveform : Icons.graphic_eq_rounded;
 }
 
 MediaPlayer get _mp => GetIt.I<MediaPlayer>();
@@ -190,25 +170,6 @@ Widget _playing(Widget Function(ButtonState) b) =>
     ValueListenableBuilder<ButtonState>(
       valueListenable: _mp.buttonState,
       builder: (_, s, __) => b(s),
-    );
-
-Widget _shuffle(Widget Function(bool on, VoidCallback tap) b) =>
-    StreamBuilder<bool>(
-      stream: _mp.player.shuffleModeEnabledStream,
-      initialData: false,
-      builder: (_, snap) {
-        final on = snap.data ?? false;
-        return b(on, () async {
-          await _mp.player.setShuffleModeEnabled(!on);
-          if (!on) await _mp.player.shuffle();
-        });
-      },
-    );
-
-Widget _repeat(Widget Function(LoopMode m, VoidCallback tap) b) =>
-    ValueListenableBuilder<LoopMode>(
-      valueListenable: _mp.loopMode,
-      builder: (_, m, __) => b(m, () => _mp.changeLoopMode()),
     );
 
 Widget _fav(MediaItem song, Widget Function(bool liked, VoidCallback tap) b) {
@@ -262,44 +223,11 @@ Widget _progress(
       },
     );
 
-/// Artwork slot that swaps to lyrics. The lyrics box stays mounted so lyrics
-/// keep being discovered, and is only measured when visible.
-Widget _media(PlayerCtx x, Size size,
-    {required Widget art, Color bg = Colors.black, double radius = 0}) {
-  final on = x.hasLyrics && x.showLyrics;
-  return SizedBox.fromSize(
-    size: size,
-    child: Stack(children: [
-      Positioned.fill(child: Offstage(offstage: on, child: art)),
-      Positioned.fill(
-        child: Offstage(
-          offstage: !on,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(radius),
-            child: ColoredBox(
-              color: bg,
-              child: x.lyrics(on ? size : Size.zero),
-            ),
-          ),
-        ),
-      ),
-    ]),
-  );
-}
-
-
 bool _isWide(BoxConstraints c) =>
     c.maxWidth >= 820 && c.maxWidth > c.maxHeight * 1.15;
 
 Color _t(PlayerCtx x, [Color d = const Color(0xFF3A4A6B)]) => x.tint ?? d;
 Color _dark(Color c, double k) => Color.lerp(const Color(0xFF0B0B0D), c, k)!;
-
-List<BoxShadow> _shadow(double blur, double dy, double a) => [
-  BoxShadow(
-      color: Colors.black.withValues(alpha: a),
-      blurRadius: blur,
-      offset: Offset(0, dy)),
-];
 
 Widget _grad(List<Color> cs, [List<double>? st]) => DecoratedBox(
   decoration: BoxDecoration(
@@ -311,41 +239,6 @@ Widget _grad(List<Color> cs, [List<double>? st]) => DecoratedBox(
     ),
   ),
 );
-
-Widget _shell(Widget bg, Widget child) => Material(
-  type: MaterialType.transparency,
-  child: Stack(fit: StackFit.expand, children: [
-    bg,
-    SafeArea(child: child),
-  ]),
-);
-
-/// Square artwork that fills the free space of its parent.
-/// [swap] lets the lyrics button swap the artwork for lyrics (phones).
-Widget _art(PlayerCtx x,
-    {double r = 8,
-      bool swap = true,
-      bool shadow = true,
-      Color lbg = Colors.black54,
-      Alignment al = Alignment.center}) =>
-    LayoutBuilder(builder: (_, c) {
-      final s = math.max(60.0, math.min(c.maxWidth, c.maxHeight));
-      final img = ClipRRect(
-          borderRadius: BorderRadius.circular(r), child: x.swipeArt);
-      Widget a = swap
-          ? _media(x, Size.square(s), radius: r, bg: lbg, art: img)
-          : SizedBox.square(dimension: s, child: img);
-      if (shadow) {
-        a = DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(r),
-            boxShadow: _shadow(30, 14, .45),
-          ),
-          child: a,
-        );
-      }
-      return Align(alignment: al, child: a);
-    });
 
 Widget _mini(PlayerCtx x, double size, double r) => SizedBox(
   width: size,
@@ -452,49 +345,6 @@ Widget _ibtn(IconData i, VoidCallback? t, String tip,
   );
 }
 
-Widget _shufBtn(Color c, {Color? onC, double size = 22}) =>
-    _shuffle((on, t) => _ibtn(
-        _Ic.shuffle, t, on ? 'Shuffle: on' : 'Shuffle: off',
-        size: size, c: on ? (onC ?? c) : c, on: on, mark: on));
-
-Widget _repBtn(Color c, {Color? onC, double size = 22}) =>
-    _repeat((m, t) => _ibtn(
-        m == LoopMode.one ? _Ic.repeatOne : _Ic.repeat,
-        t,
-        m == LoopMode.off
-            ? 'Repeat: off'
-            : m == LoopMode.one
-            ? 'Repeat: one'
-            : 'Repeat: all',
-        size: size,
-        c: m != LoopMode.off ? (onC ?? c) : c,
-        on: m != LoopMode.off,
-        mark: m != LoopMode.off));
-
-Widget _lyrBtn(PlayerCtx x, Color c, {Color? onC, double size = 22}) {
-  final on = x.showLyrics && x.hasLyrics;
-  return _ibtn(_Ic.lyrics, x.hasLyrics ? x.toggleLyrics : null,
-      on ? 'Hide lyrics' : 'Show lyrics',
-      size: size, c: on ? (onC ?? c) : c, on: on, mark: on);
-}
-
-/// Play/pause drawn as a bare icon (Apple Music).
-Widget _bare(Color ink, double size) => _playing((s) => _Tap(
-  onTap: _toggle,
-  tip: s == ButtonState.playing ? 'Pause' : 'Play',
-  child: SizedBox(
-    width: size + 12,
-    height: size + 12,
-    child: s == ButtonState.loading
-        ? Padding(
-      padding: EdgeInsets.all(size * 0.3),
-      child: CircularProgressIndicator(strokeWidth: 3, color: ink),
-    )
-        : Icon(s == ButtonState.playing ? _Ic.pause : _Ic.play,
-        size: size, color: ink),
-  ),
-));
-
 class _Seeker extends StatefulWidget {
   const _Seeker({
     required this.f,
@@ -599,284 +449,6 @@ Widget _bar(Color a, Color i,
       height: h,
       paint: (v) => _LinePainter(v, a, i, t, th),
     ));
-
-Widget _vol(Color a, Color i) => _SysVol(a: a, i: i, t: 4, both: false);
-
-
-class _WavyPainter extends CustomPainter {
-  _WavyPainter(this.f, this.on, this.off, this.anim) : super(repaint: anim);
-  final double f;
-  final Color on, off;
-  final Animation<double>? anim;
-
-  @override
-  void paint(Canvas c, Size s) {
-    final y = s.height / 2, x = f * s.width;
-    final ph = anim == null ? 0.0 : anim!.value * 2 * math.pi;
-    const a = 4.2; // wave amplitude
-
-    Path wave(double from, double to) {
-      final path = Path()..moveTo(from, y + a * math.sin(from / 7 + ph));
-      for (double i = from + 2; i <= to; i += 2) {
-        path.lineTo(i, y + a * math.sin(i / 7 + ph));
-      }
-      return path;
-    }
-
-    // Unplayed rest of the track — the same wave, faded.
-    c.drawPath(
-        wave(x, s.width),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4
-          ..strokeCap = StrokeCap.round
-          ..color = off);
-
-    // Played part — bright wave all the way to the playhead.
-    c.drawPath(
-        wave(0, x),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 5
-          ..strokeCap = StrokeCap.round
-          ..color = on);
-
-    // Round playhead riding the wave crest.
-    c.drawRRect(
-        RRect.fromRectAndRadius(
-            Rect.fromCenter(
-                center: Offset(x, y + a * math.sin(x / 7 + ph)),
-                width: 5,
-                height: 24),
-            const Radius.circular(3)),
-        Paint()..color = on);
-  }
-
-  @override
-  bool shouldRepaint(_WavyPainter o) => f != o.f || on != o.on || off != o.off;
-}
-
-class _WavyBar extends StatefulWidget {
-  const _WavyBar(this.on, this.off);
-  final Color on, off;
-
-  @override
-  State<_WavyBar> createState() => _WavyBarState();
-}
-
-class _WavyBarState extends State<_WavyBar>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 1600))
-    ..repeat();
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => _progress(
-        (f, pos, tot, pl, seek) => _Seeker(
-          f: f,
-          onSeek: seek,
-          height: 32,
-          paint: (v) => _WavyPainter(v, widget.on, widget.off, _c),
-        ),
-      );
-}
-
-class _Pal {
-  const _Pal(this.prim, this.onPrim, this.surf, this.tonal);
-  factory _Pal.of(Color t) {
-    final h = HSLColor.fromColor(t);
-    final prim = h.withLightness(.8).withSaturation(.55).toColor();
-    final surf = Color.lerp(const Color(0xFF121316), t, .18)!;
-    return _Pal(prim, _dark(t, .25), surf, Color.lerp(surf, prim, .22)!);
-  }
-  final Color prim, onPrim, surf, tonal;
-}
-
-
-/// Apple Music · Mesh. Based on SimpMusic's Apple Music player: a colour mesh
-/// from the artwork, the sung line above the bar, and a lyrics tab that
-/// replaces the artwork (the lyrics box stays mounted so lyrics keep loading).
-class _AppleMesh extends StatelessWidget {
-  const _AppleMesh(this.x);
-  final PlayerCtx x;
-
-  static const _w = Colors.white;
-  static final Color _dim = Colors.white.withValues(alpha: .6);
-
-  ImageProvider? _provider() {
-    final u = x.song.artUri;
-    if (u == null) return null;
-    if (u.scheme == 'file') return FileImage(File(u.toFilePath()));
-    return NetworkImage(u.toString());
-  }
-
-  Widget _rb(Widget child, VoidCallback? t, String tip) => _Tap(
-        onTap: t,
-        tip: tip,
-        child: Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-              shape: BoxShape.circle, color: Colors.white.withValues(alpha: .18)),
-          child: child,
-        ),
-      );
-
-  Widget _heart() => _fav(
-        x.song,
-        (l, t) => _rb(Icon(l ? _Ic.heartFill : _Ic.heart, size: 17, color: _w), t,
-            'Favourite'),
-      );
-
-  Widget _moreB() => Builder(
-        builder: (c) =>
-            _rb(Icon(_Ic.more, size: 17, color: _w), () => _more(c, x.song), 'More'),
-      );
-
-  Widget _dock() => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: .12),
-          borderRadius: BorderRadius.circular(30),
-        ),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          _shufBtn(_w),
-          _lyrBtn(x, _w),
-          _ibtn(_Ic.queue, x.openQueue, 'Queue', c: _w),
-          _repBtn(_w),
-        ]),
-      );
-
-  Widget _transport(double play, double skip) =>
-      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-        _ibtn(_Ic.prev, x.prev, 'Previous', size: skip, c: _w),
-        _bare(_w, play),
-        _ibtn(_Ic.next, x.next, 'Next', size: skip, c: _w),
-      ]);
-
-  Widget _mainLayer() => Padding(
-        padding: const EdgeInsets.fromLTRB(28, 0, 28, 14),
-        child: Column(children: [
-          const SizedBox(height: 10),
-          Expanded(
-            child: _playing((s) => AnimatedScale(
-                  scale: s == ButtonState.playing ? 1 : 0.86,
-                  duration: const Duration(milliseconds: 380),
-                  curve: Curves.easeOutCubic,
-                  child: _art(x, r: 16, swap: false),
-                )),
-          ),
-          const SizedBox(height: 16),
-          Row(children: [
-            Expanded(child: _titles(x, _w, _dim, size: 22, w: FontWeight.w700)),
-            _heart(),
-            const SizedBox(width: 10),
-            _moreB(),
-          ]),
-          const SizedBox(height: 6),
-          AppleLyricStrip(onTap: x.hasLyrics ? x.toggleLyrics : null),
-          const SizedBox(height: 6),
-          _bar(_w, Colors.white24, h: 18, t: 7, th: _Thumb.none),
-          _times(
-            _dim,
-            rem: true,
-            mid: _Tap(
-              onTap: x.openQuality,
-              tip: 'Audio quality',
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                    border: Border.all(color: Colors.white38),
-                    borderRadius: BorderRadius.circular(4)),
-                child: Text(x.quality, style: _s(10, _dim, w: FontWeight.w700, ls: .5)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          _transport(70, 46),
-          const SizedBox(height: 4),
-          _vol(_w, Colors.white24),
-          const SizedBox(height: 10),
-          _dock(),
-        ]),
-      );
-
-  Widget _lyricsLayer(bool shown) => Padding(
-        padding: const EdgeInsets.fromLTRB(22, 0, 22, 14),
-        child: Column(children: [
-          const SizedBox(height: 10),
-          Row(children: [
-            _mini(x, 52, 10),
-            const SizedBox(width: 12),
-            Expanded(child: _titles(x, _w, _dim, size: 17, w: FontWeight.w700)),
-            _heart(),
-            const SizedBox(width: 10),
-            _moreB(),
-          ]),
-          const SizedBox(height: 6),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (_, c) =>
-                  x.lyrics(shown ? Size(c.maxWidth, c.maxHeight) : Size.zero),
-            ),
-          ),
-          const SizedBox(height: 6),
-          _bar(_w, Colors.white24, h: 18, t: 5, th: _Thumb.none),
-          _times(_dim, rem: true),
-          const SizedBox(height: 2),
-          _transport(56, 38),
-          const SizedBox(height: 8),
-          _dock(),
-        ]),
-      );
-
-  Widget _body() {
-    final on = x.hasLyrics && x.showLyrics;
-    return Stack(children: [
-      Positioned.fill(
-        child: IgnorePointer(
-          ignoring: on,
-          child: AnimatedOpacity(
-            opacity: on ? 0 : 1,
-            duration: const Duration(milliseconds: 300),
-            child: _mainLayer(),
-          ),
-        ),
-      ),
-      Positioned.fill(
-        child: HeldCrossfade(on: on, builder: (_, shown) => _lyricsLayer(shown)),
-      ),
-    ]);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _shell(
-      AppleMeshBackdrop(
-        artKey: x.song.id,
-        provider: _provider(),
-        fallback: _t(x),
-      ),
-      LayoutBuilder(
-        builder: (_, c) => _isWide(c)
-            ? Center(
-                child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 480), child: _body()))
-            : _body(),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-//  SimpMusic skins (Blur/Liquid glass + Material 3 Expressive)
-// ─────────────────────────────────────────────────────────────────────────
 
 void _openEq(BuildContext c) => Navigator.of(c, rootNavigator: true)
     .push(MaterialPageRoute(builder: (_) => const EqualizerPage()));
@@ -1072,88 +644,6 @@ class _OutputNameState extends State<_OutputName> {
   }
 }
 
-/// SimpMusic Material 3 progress bar: wavy played part, straight thin
-/// remainder with an end dot, round thumb.
-class _M3Wave extends StatefulWidget {
-  const _M3Wave(this.on, this.off);
-  final Color on, off;
-
-  @override
-  State<_M3Wave> createState() => _M3WaveState();
-}
-
-class _M3WaveState extends State<_M3Wave> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 1600))
-    ..repeat();
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => _progress(
-        (f, pos, tot, pl, seek) => _Seeker(
-          f: f,
-          onSeek: seek,
-          height: 30,
-          paint: (v) => _M3WavePainter(v, widget.on, widget.off, _c, pl),
-        ),
-      );
-}
-
-class _M3WavePainter extends CustomPainter {
-  _M3WavePainter(this.f, this.on, this.off, this.anim, this.playing)
-      : super(repaint: anim);
-  final double f;
-  final Color on, off;
-  final Animation<double> anim;
-  final bool playing;
-
-  @override
-  void paint(Canvas c, Size s) {
-    final y = s.height / 2;
-    final x = (f * s.width).clamp(0.0, s.width).toDouble();
-    final ph = playing ? anim.value * 2 * math.pi : 0.0;
-    const amp = 3.4, k = 2 * math.pi / 22;
-
-    // unplayed: straight thin line + end dot
-    c.drawLine(
-        Offset(x, y),
-        Offset(math.max(x, s.width - 5), y),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.5
-          ..strokeCap = StrokeCap.round
-          ..color = off);
-    c.drawCircle(Offset(s.width - 3, y), 2.6, Paint()..color = on);
-
-    // played: wave
-    final path = Path()..moveTo(0, y + amp * math.sin(-ph));
-    for (double i = 2; i <= x; i += 2) {
-      path.lineTo(i, y + amp * math.sin(k * i - ph));
-    }
-    c.drawPath(
-        path,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4.5
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round
-          ..color = on);
-
-    // thumb
-    c.drawCircle(Offset(x, y + amp * math.sin(k * x - ph)), 7.5,
-        Paint()..color = on);
-  }
-
-  @override
-  bool shouldRepaint(_M3WavePainter o) =>
-      f != o.f || on != o.on || off != o.off || playing != o.playing;
-}
-
 /// Player ⇄ full-screen lyrics page (SimpMusic). The page replaces the whole
 /// player while lyrics are on.
 Widget _lyricsLayer(
@@ -1184,11 +674,10 @@ class _LyricsPage extends StatelessWidget {
     required this.onPrim,
     required this.chip,
     required this.chipInk,
-    this.wavy = false,
     this.scrim,
   });
   final PlayerCtx x;
-  final bool shown, wavy;
+  final bool shown;
   final Color ink, dim, prim, onPrim, chip, chipInk;
   final Color? scrim;
 
@@ -1237,9 +726,7 @@ class _LyricsPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                wavy
-                    ? _M3Wave(prim, prim.withValues(alpha: .32))
-                    : _bar(ink, Colors.white24, h: 18, t: 6, th: _Thumb.none),
+                _bar(ink, Colors.white24, h: 18, t: 6, th: _Thumb.none),
                 _times(dim, fs: 11.5),
                 const SizedBox(height: 2),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
@@ -1572,336 +1059,800 @@ class _SimpLiquid extends StatelessWidget {
   );
 }
 
-// ═════════════════════════ 2 · Material 3 Expressive ═════════════════════
-class _M3Pal {
-  const _M3Pal(this.bg, this.prim, this.onPrim, this.cont, this.onCont,
-      this.dim);
-  factory _M3Pal.of(Color t) {
-    final h = HSLColor.fromColor(t);
-    final s = h.saturation.clamp(.28, .85).toDouble();
-    Color c(double sat, double l) =>
-        HSLColor.fromAHSL(1, h.hue, sat.clamp(0.0, 1.0).toDouble(), l)
-            .toColor();
-    return _M3Pal(
-      c(s * .55, .07), // page
-      c(s, .82), // primary (play, wave, thumb)
-      c(s, .14), // on primary
-      c(s * .45, .27), // tonal container
-      c(s, .90), // on container
-      c(s * .30, .76), // secondary text
-    );
-  }
-  final Color bg, prim, onPrim, cont, onCont, dim;
+// ═════════════════════ Echo-style players (Apple · Material 3) ═══════════════
+//
+// Both follow the Echo Music player layout: full-bleed artwork (or the Spotify
+// canvas) on top fading into a tinted gradient, a Song / Lyrics / Queue pill,
+// title row with action buttons, thick seek bar with the quality chip, and the
+// transport row. `material: false` is the Apple look (round translucent
+// buttons, bare transport glyphs, volume row); `material: true` is the
+// Material 3 look (connected white buttons, squircle transport, a rotating
+// scalloped play button, bottom action group).
+
+/// Press feedback with a small overshoot, like Echo's spring(0.6, 500).
+class _Press extends StatefulWidget {
+  const _Press({required this.child, required this.onTap, this.tip});
+  final Widget child;
+  final VoidCallback? onTap;
+  final String? tip;
+
+  @override
+  State<_Press> createState() => _PressState();
 }
 
-class _SimpM3 extends StatelessWidget {
-  const _SimpM3(this.x);
-  final PlayerCtx x;
+class _PressState extends State<_Press> {
+  bool _d = false;
 
-  Widget _btn(_M3Pal p, IconData i, VoidCallback? t, String tip,
-      {double s = 44, double r = 22, bool on = false}) =>
-      Opacity(
-        opacity: t == null ? .4 : 1,
-        child: _Tap(
-          onTap: t,
-          tip: tip,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            width: s,
-            height: s,
-            decoration: BoxDecoration(
-              color: on ? p.prim : p.cont,
-              borderRadius: BorderRadius.circular(r),
-            ),
-            child: Icon(i, size: s * .5, color: on ? p.onPrim : p.onCont),
-          ),
+  @override
+  Widget build(BuildContext context) {
+    final w = MouseRegion(
+      cursor: widget.onTap == null
+          ? MouseCursor.defer
+          : SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => setState(() => _d = true),
+        onTapUp: (_) => setState(() => _d = false),
+        onTapCancel: () => setState(() => _d = false),
+        onTap: widget.onTap == null
+            ? null
+            : () {
+                HapticFeedback.selectionClick();
+                widget.onTap!();
+              },
+        child: AnimatedScale(
+          scale: _d ? 0.9 : 1,
+          duration: Duration(milliseconds: _d ? 90 : 320),
+          curve: _d ? Curves.easeOut : Curves.easeOutBack,
+          child: widget.child,
         ),
-      );
-
-  Widget _head(_M3Pal p) => Row(children: [
-    _btn(p, Icons.keyboard_arrow_down_rounded, x.close, 'Close'),
-    Expanded(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('NOW PLAYING', style: _s(10.5, p.dim, ls: 1.2)),
-        const SizedBox(height: 2),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(
-            x.song.album?.isNotEmpty == true
-                ? x.song.album!
-                : '${x.index} of ${x.total}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: _s(15, Colors.white, w: FontWeight.w700),
-          ),
-        ),
-      ]),
-    ),
-    Builder(
-      builder: (c) => _btn(p, Icons.more_vert_rounded,
-              () => _more(c, x.song), 'More', r: 16),
-    ),
-  ]);
-
-  Widget _info(_M3Pal p) => Row(children: [
-    Expanded(
-      child: _titles(x, Colors.white, p.dim, size: 22, w: FontWeight.w800),
-    ),
-    const SizedBox(width: 10),
-    Builder(
-      builder: (c) => _btn(p, Icons.add_circle_outline_rounded,
-              () => _addToPlaylist(c, x.song), 'Add to playlist'),
-    ),
-    const SizedBox(width: 8),
-    _fav(
-      x.song,
-          (l, t) => _btn(p, l ? _Ic.heartFill : _Ic.heart, t,
-          l ? 'Remove from favourites' : 'Add to favourites',
-          on: l),
-    ),
-  ]);
-
-  Widget _seek(_M3Pal p) =>
-      Column(mainAxisSize: MainAxisSize.min, children: [
-        _M3Wave(p.prim, p.prim.withValues(alpha: .32)),
-        _times(p.dim, fs: 12),
-      ]);
-
-  Widget _slot(_M3Pal p, Widget child, VoidCallback? t, String tip,
-      BorderRadius r, double h,
-      {Color? bg}) =>
-      Opacity(
-        opacity: t == null ? .4 : 1,
-        child: _Tap(
-          onTap: t,
-          tip: tip,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 240),
-            curve: Curves.easeOutCubic,
-            height: h,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(color: bg ?? p.cont, borderRadius: r),
-            child: child,
-          ),
-        ),
-      );
-
-  /// [ ⏮ ]  [ ━━ ⏸ ━━ ]  [ ⏭ ]
-  Widget _transport(_M3Pal p, double h) => Row(children: [
-    Expanded(
-      flex: 10,
-      child: _slot(p, Icon(_Ic.prev, size: 30, color: p.onCont), x.prev,
-          'Previous', BorderRadius.circular(h * .4), h),
-    ),
-    const SizedBox(width: 8),
-    Expanded(
-      flex: 22,
-      child: _playing((s) => _slot(
-        p,
-        s == ButtonState.loading
-            ? SizedBox(
-            width: 26,
-            height: 26,
-            child: CircularProgressIndicator(
-                strokeWidth: 3, color: p.onPrim))
-            : Icon(s == ButtonState.playing ? _Ic.pause : _Ic.play,
-            size: 36, color: p.onPrim),
-        _toggle,
-        s == ButtonState.playing ? 'Pause' : 'Play',
-        // morph: squarer while playing, full pill when paused
-        BorderRadius.circular(s == ButtonState.playing ? h * .38 : h / 2),
-        h,
-        bg: p.prim,
-      )),
-    ),
-    const SizedBox(width: 8),
-    Expanded(
-      flex: 10,
-      child: _slot(p, Icon(_Ic.next, size: 30, color: p.onCont), x.next,
-          'Next', BorderRadius.circular(h * .4), h),
-    ),
-  ]);
-
-  /// Connected tonal group: info · EQ · shuffle · repeat · timer · queue · lyrics
-  Widget _actions(_M3Pal p) {
-    const h = 52.0;
-    const cap = Radius.circular(26);
-    const inner = Radius.circular(8);
-    BorderRadius r(bool first, bool last) => BorderRadius.only(
-      topLeft: first ? cap : inner,
-      bottomLeft: first ? cap : inner,
-      topRight: last ? cap : inner,
-      bottomRight: last ? cap : inner,
+      ),
     );
-    Widget ic(IconData i, Color c) => Icon(i, size: 22, color: c);
+    return widget.tip == null ? w : Tooltip(message: widget.tip!, child: w);
+  }
+}
 
-    return Builder(
-      builder: (ctx) => Row(children: [
-        Expanded(
-          child: _slot(p, ic(Icons.info_outline_rounded, p.onCont),
-              x.openQuality, 'Audio quality', r(true, false), h),
-        ),
-        const SizedBox(width: 3),
-        Expanded(
-          child: _slot(p, ic(Icons.headphones_rounded, p.onCont),
-                  () => _openEq(ctx), 'Equalizer', r(false, false), h),
-        ),
-        const SizedBox(width: 3),
-        Expanded(
-          child: _shuffle((on, t) => _slot(
-              p,
-              ic(_Ic.shuffle, on ? p.onPrim : p.onCont),
-              t,
-              on ? 'Shuffle: on' : 'Shuffle: off',
-              r(false, false),
-              h,
-              bg: on ? p.prim : null)),
-        ),
-        const SizedBox(width: 3),
-        Expanded(
-          child: _repeat((m, t) => _slot(
-              p,
-              ic(m == LoopMode.one ? _Ic.repeatOne : _Ic.repeat,
-                  m != LoopMode.off ? p.onPrim : p.onCont),
-              t,
-              m == LoopMode.off
-                  ? 'Repeat: off'
-                  : m == LoopMode.one
-                  ? 'Repeat: one'
-                  : 'Repeat: all',
-              r(false, false),
-              h,
-              bg: m != LoopMode.off ? p.prim : null)),
-        ),
-        const SizedBox(width: 3),
-        Expanded(
-          child: _slot(p, ic(Icons.timer_outlined, p.onCont),
-                  () => Modals.showTimerModal(ctx), 'Sleep timer',
-              r(false, false), h),
-        ),
-        const SizedBox(width: 3),
-        Expanded(
-          child: _slot(p, ic(Icons.queue_music_rounded, p.onCont),
-              x.openQueue, 'Queue', r(false, false), h),
-        ),
-        const SizedBox(width: 3),
-        Expanded(
-          child: _slot(
-              p,
-              ic(Icons.chat_bubble_outline_rounded,
-                  x.showLyrics && x.hasLyrics ? p.onPrim : p.onCont),
-              x.hasLyrics ? x.toggleLyrics : null,
-              x.showLyrics ? 'Hide lyrics' : 'Show lyrics',
-              r(false, true),
-              h,
-              bg: x.showLyrics && x.hasLyrics ? p.prim : null),
-        ),
-      ]),
-    );
+/// Heart that pops and throws a ring of sparks when it becomes liked.
+class _HeartBurst extends StatefulWidget {
+  const _HeartBurst(
+      {required this.liked, required this.color, this.size = 24});
+  final bool liked;
+  final Color color;
+  final double size;
+
+  @override
+  State<_HeartBurst> createState() => _HeartBurstState();
+}
+
+class _HeartBurstState extends State<_HeartBurst>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 620));
+
+  @override
+  void didUpdateWidget(_HeartBurst o) {
+    super.didUpdateWidget(o);
+    if (widget.liked && !o.liked) _c.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final p = _M3Pal.of(_t(x));
+    final s = widget.size;
+    return SizedBox(
+      width: s,
+      height: s,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          final t = _c.value;
+          final pop = t == 0 || t == 1
+              ? 1.0
+              : 1 + .38 * math.sin(math.pi * Curves.easeOut.transform(t));
+          return Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
+            if (t > 0 && t < 1)
+              Positioned.fill(
+                child: CustomPaint(
+                    painter: _SparkPainter(t, widget.color.withValues(alpha: 1))),
+              ),
+            Transform.scale(
+              scale: pop,
+              child: Icon(
+                widget.liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                size: s,
+                color: widget.liked ? const Color(0xFFFF5C7A) : widget.color,
+              ),
+            ),
+          ]);
+        },
+      ),
+    );
+  }
+}
+
+class _SparkPainter extends CustomPainter {
+  const _SparkPainter(this.t, this.color);
+  final double t;
+  final Color color;
+
+  @override
+  void paint(Canvas c, Size s) {
+    final mid = s.center(Offset.zero);
+    final e = Curves.easeOutCubic.transform(t);
+    final p = Paint()
+      ..color = const Color(0xFFFF5C7A).withValues(alpha: (1 - t).clamp(0, 1))
+      ..style = PaintingStyle.fill;
+    for (var i = 0; i < 8; i++) {
+      final a = i * math.pi / 4;
+      final r = s.width * (.55 + .55 * e);
+      c.drawCircle(
+          mid + Offset(math.cos(a), math.sin(a)) * r, 2.2 * (1 - t) + .4, p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SparkPainter o) => o.t != t;
+}
+
+/// Seek bar like Echo's slim slider: 10 px track that (Apple look) swells to
+/// 16 px with a bouncy spring while you drag.
+class _EchoBar extends StatefulWidget {
+  const _EchoBar({required this.active, required this.inactive, this.swell = false});
+  final Color active, inactive;
+  final bool swell;
+
+  @override
+  State<_EchoBar> createState() => _EchoBarState();
+}
+
+class _EchoBarState extends State<_EchoBar> with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+  AnimationController.unbounded(vsync: this, value: 10);
+  double? _d;
+  bool _drag = false;
+
+  void _to(double target) {
+    if (!widget.swell) return;
+    _c.animateWith(SpringSimulation(
+        SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: .5),
+        _c.value,
+        target,
+        _c.velocity));
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _progress((f, p, tot, pl, seek) => LayoutBuilder(builder: (_, b) {
+      double at(Offset o) => (o.dx / b.maxWidth).clamp(0.0, 1.0).toDouble();
+      void commit(double v) {
+        seek(v);
+        Future.delayed(const Duration(milliseconds: 450), () {
+          if (mounted && !_drag) setState(() => _d = null);
+        });
+      }
+
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (d) {
+          final v = at(d.localPosition);
+          setState(() => _d = v);
+          commit(v);
+        },
+        onHorizontalDragStart: (d) {
+          _drag = true;
+          _to(16);
+          setState(() => _d = at(d.localPosition));
+        },
+        onHorizontalDragUpdate: (d) => setState(() => _d = at(d.localPosition)),
+        onHorizontalDragEnd: (_) {
+          _drag = false;
+          _to(10);
+          final v = _d;
+          if (v != null) commit(v);
+        },
+        onHorizontalDragCancel: () {
+          _drag = false;
+          _to(10);
+          setState(() => _d = null);
+        },
+        child: SizedBox(
+          height: 28,
+          width: double.infinity,
+          child: AnimatedBuilder(
+            animation: _c,
+            builder: (_, __) => CustomPaint(
+              painter: _LinePainter(_d ?? f, widget.active, widget.inactive,
+                  _c.value.clamp(6.0, 22.0).toDouble(), _Thumb.none),
+            ),
+          ),
+        ),
+      );
+    }));
+  }
+}
+
+/// Echo's play/pause shape: a rounded square while paused that blooms into a
+/// 9-lobed cookie (indent 0.08) while playing; the lobes rotate every 8 s.
+class _CookieClipper extends CustomClipper<Path> {
+  const _CookieClipper(this.k, this.rot, this.corner);
+  final double k; // 0 = squircle … 1 = cookie
+  final double rot; // radians
+  final double corner; // squircle corner radius as a fraction of half-size
+
+  static const int _n = 120;
+  static final Map<double, List<double>> _sq = {};
+
+  /// Polar radius (0..√2) of a rounded square of half-size 1.
+  static List<double> _squircle(double r) => _sq.putIfAbsent(r, () {
+    final out = List<double>.filled(_n + 1, 1);
+    final inner = 1 - r;
+    double sd(double x, double y) {
+      final qx = x.abs() - inner, qy = y.abs() - inner;
+      final ox = math.max(qx, 0.0), oy = math.max(qy, 0.0);
+      return math.sqrt(ox * ox + oy * oy) +
+          math.min(math.max(qx, qy), 0.0) -
+          r;
+    }
+
+    for (var i = 0; i <= _n; i++) {
+      final a = i * 2 * math.pi / _n;
+      final cx = math.cos(a), cy = math.sin(a);
+      var lo = 0.0, hi = 1.5;
+      for (var j = 0; j < 22; j++) {
+        final m = (lo + hi) / 2;
+        if (sd(cx * m, cy * m) > 0) {
+          hi = m;
+        } else {
+          lo = m;
+        }
+      }
+      out[i] = (lo + hi) / 2;
+    }
+    return out;
+  });
+
+  @override
+  Path getClip(Size s) {
+    final path = Path();
+    final sq = _squircle(corner);
+    final ind = .08 * k;
+    final cx = s.width / 2, cy = s.height / 2;
+    for (var i = 0; i <= _n; i++) {
+      final a = i * 2 * math.pi / _n;
+      final cookie = 1 - ind + ind * math.cos(9 * (a - rot));
+      final r = sq[i] * (1 - k) + cookie * k;
+      final x = cx + cx * r * math.cos(a), y = cy + cy * r * math.sin(a);
+      i == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
+    }
+    return path..close();
+  }
+
+  @override
+  bool shouldReclip(_CookieClipper o) =>
+      o.k != k || o.rot != rot || o.corner != corner;
+}
+
+class _CookiePlay extends StatefulWidget {
+  const _CookiePlay({required this.size, required this.playing, required this.child});
+  final double size;
+  final bool playing;
+  final Widget child;
+
+  @override
+  State<_CookiePlay> createState() => _CookiePlayState();
+}
+
+class _CookiePlayState extends State<_CookiePlay> with TickerProviderStateMixin {
+  late final AnimationController _bloom = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+      value: widget.playing ? 1 : 0);
+  late final AnimationController _spin =
+  AnimationController(vsync: this, duration: const Duration(seconds: 8));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.playing) _spin.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_CookiePlay o) {
+    super.didUpdateWidget(o);
+    if (widget.playing == o.playing) return;
+    if (widget.playing) {
+      _bloom.forward();
+      _spin.repeat();
+    } else {
+      _bloom.reverse().whenComplete(() {
+        if (mounted && !widget.playing) _spin.stop();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _bloom.dispose();
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: widget.size,
+    height: widget.size,
+    child: AnimatedBuilder(
+      animation: Listenable.merge([_bloom, _spin]),
+      builder: (_, child) => ClipPath(
+        clipper: _CookieClipper(_bloom.value, _spin.value * 2 * math.pi, 26 / 44),
+        child: ColoredBox(color: Colors.white, child: child),
+      ),
+      child: Center(child: widget.child),
+    ),
+  );
+}
+
+class _EchoSkin extends StatelessWidget {
+  const _EchoSkin(this.x, {required this.material});
+  final PlayerCtx x;
+  final bool material;
+
+  static const _w = Colors.white;
+  static final Color _dim = Colors.white.withValues(alpha: .78);
+  static const double _pad = 28;
+
+  // ── backdrop (blurred artwork + tinted gradient) ─────────────────────────
+  Widget _bg(Color t) => Stack(fit: StackFit.expand, children: [
+    RepaintBoundary(
+      child: ClipRect(
+        child: ImageFiltered(
+          imageFilter: ImageFilter.blur(
+              sigmaX: 44, sigmaY: 44, tileMode: TileMode.decal),
+          child: Transform.scale(
+              scale: 1.7, child: SizedBox.expand(child: x.art(0))),
+        ),
+      ),
+    ),
+    _grad([
+      _dark(t, .34).withValues(alpha: .55),
+      _dark(t, .22).withValues(alpha: .86),
+      _dark(t, .10),
+    ]),
+  ]);
+
+  // ── artwork / canvas hero (canvas replaces the artwork when it plays) ────
+  Widget _hero({double radius = 0, bool fade = true}) =>
+      LayoutBuilder(builder: (_, c) {
+        final side = math.max(c.maxWidth, c.maxHeight);
+        final art = ClipRect(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox.square(dimension: side, child: x.art(0)),
+          ),
+        );
+        Widget media = Stack(fit: StackFit.expand, children: [
+          AnimatedOpacity(
+            opacity: x.canvasOn ? 0 : 1,
+            duration: const Duration(milliseconds: 320),
+            child: art,
+          ),
+          IgnorePointer(
+            child: AnimatedOpacity(
+              opacity: x.canvasOn ? 1 : 0,
+              duration: const Duration(milliseconds: 320),
+              child: ClipRect(child: x.canvas),
+            ),
+          ),
+        ]);
+        if (fade) {
+          media = ShaderMask(
+            blendMode: BlendMode.dstIn,
+            shaderCallback: (r) => const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.white, Colors.white, Colors.transparent],
+              stops: [0, .8, 1],
+            ).createShader(r),
+            child: media,
+          );
+        } else {
+          media = ClipRRect(
+              borderRadius: BorderRadius.circular(radius), child: media);
+        }
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragEnd: (d) => _swipeSong(x, d),
+          child: media,
+        );
+      });
+
+  // ── Song · Lyrics · Queue pill ───────────────────────────────────────────
+  Widget _tab(IconData i, String label, bool sel, VoidCallback? t) => Opacity(
+    opacity: t == null ? .45 : 1,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: t == null
+          ? null
+          : () {
+        HapticFeedback.selectionClick();
+        t();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+        decoration: BoxDecoration(
+          color: sel ? Colors.white.withValues(alpha: .22) : Colors.transparent,
+          borderRadius: BorderRadius.circular(40),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(i, size: 15, color: sel ? _w : Colors.white.withValues(alpha: .72)),
+          const SizedBox(width: 5),
+          Text(label,
+              style: _s(12, sel ? _w : Colors.white.withValues(alpha: .72),
+                  w: sel ? FontWeight.w700 : FontWeight.w600, ls: .2)),
+        ]),
+      ),
+    ),
+  );
+
+  Widget _pill() {
+    final lyr = x.hasLyrics && x.showLyrics;
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .34),
+        borderRadius: BorderRadius.circular(40),
+        border: Border.all(color: Colors.white.withValues(alpha: .18)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        _tab(Icons.music_note_rounded, 'Song', !lyr, lyr ? x.toggleLyrics : null),
+        _tab(Icons.lyrics_outlined, 'Lyrics', lyr,
+            x.hasLyrics && !lyr ? x.toggleLyrics : null),
+        _tab(Icons.queue_music_rounded, 'Queue', false, x.openQueue),
+      ]),
+    );
+  }
+
+  // ── title row + action buttons ───────────────────────────────────────────
+  static BorderRadius _grp(int i, int n) {
+    const o = Radius.circular(50), s = Radius.circular(3);
+    return BorderRadius.horizontal(
+      left: i == 0 ? o : s,
+      right: i == n - 1 ? o : s,
+    );
+  }
+
+  /// M3: connected 42 dp filled buttons (outer corners round, inner 3 dp).
+  Widget _filled(Widget icon, VoidCallback? t, String tip, int i, int n,
+      {Color bg = _w}) =>
+      _Press(
+        onTap: t,
+        tip: tip,
+        child: Container(
+          width: 42,
+          height: 42,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: bg, borderRadius: _grp(i, n)),
+          child: icon,
+        ),
+      );
+
+  /// Apple: 40 dp circle, 20 % white.
+  Widget _round(Widget icon, VoidCallback? t, String tip) => _Press(
+    onTap: t,
+    tip: tip,
+    child: Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+          shape: BoxShape.circle, color: Colors.white.withValues(alpha: .2)),
+      child: icon,
+    ),
+  );
+
+  Widget _actions() => Builder(builder: (c) {
+    final Color ink = material ? Colors.black : _w;
+    Widget heart(bool l) => _HeartBurst(liked: l, color: ink, size: 24);
+    if (material) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        _filled(Icon(Icons.playlist_add_rounded, size: 24, color: ink),
+                () => _addToPlaylist(c, x.song), 'Add to playlist', 0, 3),
+        const SizedBox(width: 6),
+        _filled(Icon(Icons.more_horiz_rounded, size: 24, color: ink),
+                () => _more(c, x.song), 'More', 1, 3),
+        const SizedBox(width: 6),
+        _fav(x.song,
+                (l, t) => _filled(heart(l), t,
+                l ? 'Remove from favourites' : 'Add to favourites', 2, 3)),
+      ]);
+    }
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      _round(Icon(Icons.more_vert_rounded, size: 24, color: _w),
+              () => _more(c, x.song), 'More'),
+      const SizedBox(width: 10),
+      _round(Icon(Icons.playlist_add_rounded, size: 24, color: _w),
+              () => _addToPlaylist(c, x.song), 'Add to playlist'),
+      const SizedBox(width: 10),
+      _fav(x.song,
+              (l, t) => _round(heart(l), t,
+              l ? 'Remove from favourites' : 'Add to favourites')),
+    ]);
+  });
+
+  Widget _titleRow() => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: _pad),
+    child: Row(children: [
+      Expanded(child: _titles(x, _w, _dim, size: 26, w: FontWeight.w700)),
+      const SizedBox(width: 12),
+      _actions(),
+    ]),
+  );
+
+  // ── bar + times (quality chip in the middle) ─────────────────────────────
+  Widget _chip() => _Press(
+    onTap: x.openQuality,
+    tip: 'Audio quality',
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.white.withValues(alpha: .32)),
+      ),
+      child: Text(x.quality.replaceAll(', ', ' • '),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: _s(11, Colors.white.withValues(alpha: .8),
+              w: FontWeight.w600, ls: .8)),
+    ),
+  );
+
+  Widget _barRow() => Column(mainAxisSize: MainAxisSize.min, children: [
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: _pad),
+      child: _EchoBar(
+        active: material ? _w : _w.withValues(alpha: .7),
+        inactive: _w.withValues(alpha: material ? .3 : .2),
+        swell: !material,
+      ),
+    ),
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: _pad + 4),
+      child: _times(_w, fs: 12.5, mid: Flexible(child: _chip())),
+    ),
+  ]);
+
+  // ── transport ────────────────────────────────────────────────────────────
+  Widget _playGlyph(ButtonState s, double size, Color ink) {
+    if (s == ButtonState.loading) {
+      return Padding(
+        padding: EdgeInsets.all(size * .24),
+        child: CircularProgressIndicator(strokeWidth: 3.2, color: ink),
+      );
+    }
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      transitionBuilder: (c, a) => ScaleTransition(
+          scale: a, child: FadeTransition(opacity: a, child: c)),
+      child: Icon(
+          s == ButtonState.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          key: ValueKey(s == ButtonState.playing),
+          size: size,
+          color: ink),
+    );
+  }
+
+  Widget _transportApple() => Row(children: [
+    Expanded(
+      child: Center(
+        child: _Press(
+          onTap: x.prev,
+          tip: 'Previous',
+          child: const Icon(Icons.fast_rewind_rounded, size: 48, color: _w),
+        ),
+      ),
+    ),
+    _playing((s) => _Press(
+      onTap: _toggle,
+      tip: s == ButtonState.playing ? 'Pause' : 'Play',
+      child: SizedBox(
+          width: 84, height: 84, child: Center(child: _playGlyph(s, 72, _w))),
+    )),
+    Expanded(
+      child: Center(
+        child: _Press(
+          onTap: x.next,
+          tip: 'Next',
+          child: const Icon(Icons.fast_forward_rounded, size: 48, color: _w),
+        ),
+      ),
+    ),
+  ]);
+
+  Widget _squircle(IconData i, VoidCallback? t, String tip, double size) =>
+      Opacity(
+        opacity: t == null ? .4 : 1,
+        child: _Press(
+          onTap: t,
+          tip: tip,
+          child: Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: .2),
+              borderRadius: BorderRadius.circular(size * 26 / 88),
+            ),
+            child: Icon(i, size: size * 36 / 88, color: _w),
+          ),
+        ),
+      );
+
+  Widget _transportM3(double size) => Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      _squircle(Icons.skip_previous_rounded, x.prev, 'Previous', size),
+      const SizedBox(width: 16),
+      _playing((s) => _Press(
+        onTap: _toggle,
+        tip: s == ButtonState.playing ? 'Pause' : 'Play',
+        child: _CookiePlay(
+          size: size,
+          playing: s == ButtonState.playing,
+          child: _playGlyph(s, size * 36 / 88, Colors.black),
+        ),
+      )),
+      const SizedBox(width: 16),
+      _squircle(Icons.skip_next_rounded, x.next, 'Next', size),
+    ],
+  );
+
+  // ── bottom: M3 action group · Apple volume ───────────────────────────────
+  Widget _dockM3() => Builder(builder: (c) {
+    Widget b(IconData i, String tip, VoidCallback? t, int idx, {bool on = false}) =>
+        Opacity(
+          opacity: t == null ? .4 : 1,
+          child: _filled(Icon(i, size: 22, color: _w), t, tip, idx, 4,
+              bg: Colors.white.withValues(alpha: on ? .34 : .2)),
+        );
+    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      b(Icons.lyrics_outlined, x.showLyrics ? 'Hide lyrics' : 'Show lyrics',
+          x.hasLyrics ? x.toggleLyrics : null, 0, on: x.showLyrics && x.hasLyrics),
+      const SizedBox(width: 6),
+      b(Icons.timer_outlined, 'Sleep timer', () => Modals.showTimerModal(c), 1),
+      const SizedBox(width: 6),
+      b(Icons.equalizer_rounded, 'Equalizer', () => _openEq(c), 2),
+      const SizedBox(width: 6),
+      b(Icons.queue_music_rounded, 'Queue', x.openQueue, 3),
+    ]);
+  });
+
+  Widget _volApple() => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: _pad),
+    child: _volBoth(_w, Colors.white.withValues(alpha: .18), t: 10),
+  );
+
+  Widget _controls({required bool compact}) {
+    final gap = compact ? 14.0 : 24.0;
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      _titleRow(),
+      SizedBox(height: gap - 4),
+      _barRow(),
+      SizedBox(height: gap - 6),
+      if (material) ...[
+        _transportM3(compact ? 72 : 88),
+        SizedBox(height: compact ? 14 : 22),
+        _dockM3(),
+      ] else ...[
+        _transportApple(),
+        SizedBox(height: compact ? 4 : 10),
+        _volApple(),
+        const _OutputName(),
+      ],
+    ]);
+  }
+
+  // ── layouts ──────────────────────────────────────────────────────────────
+  Widget _main() => LayoutBuilder(builder: (ctx, c) {
+    if (_isWide(c)) return _wide();
+    final compact = c.maxHeight < 700;
+    return Stack(children: [
+      Positioned.fill(
+        child: Column(children: [
+          Expanded(child: _hero()),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: _controls(compact: compact),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      ),
+      SafeArea(
+        bottom: false,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Padding(
+              padding: const EdgeInsets.only(top: 10), child: _pill()),
+        ),
+      ),
+    ]);
+  });
+
+  Widget _wide() => SafeArea(
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(36, 12, 36, 20),
+      child: Row(children: [
+        Expanded(
+          child: Center(
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: _hero(radius: 30, fade: false),
+            ),
+          ),
+        ),
+        const SizedBox(width: 40),
+        SizedBox(
+          width: 460,
+          child: Center(
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                _pill(),
+                const SizedBox(height: 22),
+                _controls(compact: false),
+              ]),
+            ),
+          ),
+        ),
+      ]),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _t(x);
     return Material(
       type: MaterialType.transparency,
       child: Stack(fit: StackFit.expand, children: [
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 600),
-          color: p.bg,
-        ),
+        _bg(t),
         _lyricsLayer(
           x,
-          SafeArea(
-            child: LayoutBuilder(
-              builder: (_, c) => _isWide(c) ? _wide(p) : _phone(p, c),
-            ),
-          ),
-          (shown) => _LyricsPage(
+          _main(),
+              (shown) => _LyricsPage(
             x: x,
             shown: shown,
-            ink: Colors.white,
-            dim: p.dim,
-            prim: p.prim,
-            onPrim: p.onPrim,
-            chip: p.cont,
-            chipInk: p.onCont,
-            wavy: true,
+            ink: _w,
+            dim: _dim,
+            prim: _w,
+            onPrim: Colors.black,
+            chip: _w.withValues(alpha: .14),
+            chipInk: _w,
+            scrim: Colors.black.withValues(alpha: .34),
           ),
         ),
       ]),
     );
   }
-
-  Widget _phone(_M3Pal p, BoxConstraints c) {
-    final compact = c.maxHeight < 640;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(24, 10, 24, compact ? 8 : 16),
-          child: Column(children: [
-            _head(p),
-            SizedBox(height: compact ? 8 : 18),
-            Expanded(
-              child: _playing((s) => AnimatedScale(
-                scale: s == ButtonState.playing ? 1 : .94,
-                duration: const Duration(milliseconds: 420),
-                curve: Curves.easeOutCubic,
-                child: _art(x, r: 30, shadow: false, swap: false),
-              )),
-            ),
-            SizedBox(height: compact ? 8 : 18),
-            _info(p),
-            const SizedBox(height: 2),
-            _seek(p),
-            SizedBox(height: compact ? 4 : 10),
-            _transport(p, compact ? 60 : 72),
-            SizedBox(height: compact ? 8 : 12),
-            _actions(p),
-          ]),
-        ),
-      ),
-    );
-  }
-
-  Widget _wide(_M3Pal p) => Padding(
-    padding: const EdgeInsets.fromLTRB(32, 12, 32, 22),
-    child: Row(children: [
-      Expanded(
-        child: Column(children: [
-          _head(p),
-          const SizedBox(height: 16),
-          Expanded(
-            child: _playing((s) => AnimatedScale(
-              scale: s == ButtonState.playing ? 1 : .95,
-              duration: const Duration(milliseconds: 420),
-              curve: Curves.easeOutCubic,
-              child: _art(x, r: 32, swap: false, shadow: false),
-            )),
-          ),
-        ]),
-      ),
-      const SizedBox(width: 40),
-      SizedBox(
-        width: 460,
-        child: Column(children: [
-          const Spacer(),
-          const SizedBox(height: 16),
-          _info(p),
-          const SizedBox(height: 2),
-          _seek(p),
-          const SizedBox(height: 10),
-          _transport(p, 72),
-          const SizedBox(height: 12),
-          _actions(p),
-        ]),
-      ),
-    ]),
-  );
 }
-
 
 class PlayerSkinPage extends StatelessWidget {
   const PlayerSkinPage({super.key});

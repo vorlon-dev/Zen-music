@@ -274,8 +274,32 @@ class MirrorSource {
     return 2 * inter / (a.length + b.length);
   }
 
+  /// Version markers: a title carrying one of these is a different recording
+  /// (remix, slowed, live...) and must be matched as written.
+  static final RegExp _versionMarker = RegExp(
+      r'slowed|reverb|remix|lo-?fi|sped|mashup|cover|live|acoustic|'
+      r'instrumental|karaoke|8d|bass|extended|version|edit|bgm|theme|'
+      r'unplugged|reprise|flip|rework',
+      caseSensitive: false);
+
+  /// "Veera Veera (From "O.M: Operation Mole - Telugu") [Hindi]" ->
+  /// "Veera Veera". Film / language / feat. decorations differ between
+  /// catalogs and used to push correct matches under the score threshold.
+  static String coreTitle(String t) {
+    if (_versionMarker.hasMatch(t)) return t;
+    var s = t.replaceAll(RegExp(r'\s*[\(\[][^\)\]]*[\)\]]'), '');
+    s = s.replaceAll(RegExp(r'\s+-\s+.*$'), '');
+    s = s.replaceAll(RegExp(r'\s*\|.*$'), '');
+    s = s.trim();
+    return s.isEmpty ? t : s;
+  }
+
   double _score(_Identity q, String title, String artist, int? durationMs) {
-    var s = 0.65 * _dice(_tokens(q.title), _tokens(title)) +
+    final fullDice = _dice(_tokens(q.title), _tokens(title));
+    final coreDice =
+        _dice(_tokens(coreTitle(q.title)), _tokens(coreTitle(title)));
+    final titleDice = coreDice > fullDice ? coreDice : fullDice;
+    var s = 0.65 * titleDice +
         0.35 * _dice(_tokens(q.artist), _tokens(artist));
     if (q.durationMs != null && durationMs != null && durationMs > 0) {
       final delta = (q.durationMs! - durationMs).abs() / 1000;
@@ -292,7 +316,7 @@ class MirrorSource {
 
   Future<_TidalMatch?> _resolveTidal(_Identity id) async {
     try {
-      final query = '${id.title} ${id.artist}'.trim();
+      final query = '${coreTitle(id.title)} ${id.artist}'.trim();
       final res = await _http
           .get(
               Uri.parse('${MirrorConfig.tidal}/search/')
@@ -430,7 +454,7 @@ class MirrorSource {
           .get(
               Uri.parse('${MirrorConfig.deezer}/api/search').replace(
                   queryParameters: {
-                    'title': id.title,
+                    'title': coreTitle(id.title),
                     'artist': id.artist,
                     'limit': '5',
                   }),
@@ -885,17 +909,140 @@ class MirrorSource {
   static bool isFullTrack(int? seconds, int? expectedMs) {
     if (seconds == null) return false;
     final expected = (expectedMs ?? 0) ~/ 1000;
-    if (expected >= 100 && seconds * 1000 < expectedMs! * 0.6) return false;
-    if (seconds < 45 && expected >= 100) return false;
+    // A 30-second preview of a 45-99 s track used to slip through (the old
+    // thresholds only looked at tracks >= 100 s). Any track that should be
+    // 45 s or longer must verify at >= 60% of its expected length.
+    if (expected >= 45 && seconds * 1000 < expectedMs! * 0.6) return false;
+    if (seconds < 45 && expected >= 45) return false;
     if (seconds < 45 && expectedMs == null) return false;
     return true;
+  }
+
+  /// Expected track length from the song map (null = unknown).
+  int? expectedDurationMs(Map<String, dynamic> song) =>
+      _identityFrom(song)?.durationMs;
+
+  /// Verifies that a stream URL handed out by the endpoint is the FULL
+  /// track (not a 30-second Qobuz sample).
+  ///
+  /// Qobuz streaming FLAC files usually leave "total samples" at 0 in the
+  /// STREAMINFO header (unknown), so the header alone cannot be trusted to
+  /// carry a duration. Order of evidence:
+  ///  1. header duration, when the header has one;
+  ///  2. file size (Content-Range) + sample rate / bit depth / channels from
+  ///     the header -> estimated duration;
+  ///  3. file size alone.
+  /// A stream nothing can be said about is rejected.
+  Future<bool> verifyFullStream(String url, int? expectedMs,
+      {required bool flac, String? tier}) async {
+    final name = tier ?? (flac ? 'flac' : 'mp3');
+    if (looksLikePreviewUrl(url)) {
+      print('[verify] $name: preview-looking URL rejected');
+      return false;
+    }
+    final probe = await _probeStream(url);
+    if (probe == null) {
+      print('[verify] $name: probe failed (no usable HTTP answer) -> REJECTED');
+      return false;
+    }
+    final expSec = expectedMs == null ? null : expectedMs / 1000.0;
+    bool ok = false;
+    String how = '';
+    final b = probe.head;
+    final total = probe.total;
+
+    if (!flac) {
+      if (total != null) {
+        final est = (total * 8 / 320000).round();
+        ok = isFullTrack(est, expectedMs);
+        how = 'mp3 size estimate ${est}s';
+      } else {
+        how = 'mp3 size unknown';
+      }
+    } else {
+      int? sr, bps, ch, hdrSec;
+      final isFlac = b.length >= 34 &&
+          b[0] == 0x66 && b[1] == 0x4C && b[2] == 0x61 && b[3] == 0x43;
+      if (isFlac && (b[4] & 0x7F) == 0) {
+        sr = (b[18] << 12) | (b[19] << 4) | (b[20] >> 4);
+        ch = ((b[20] >> 1) & 0x07) + 1;
+        bps = (((b[20] & 0x01) << 4) | (b[21] >> 4)) + 1;
+        final samples = ((b[21] & 0x0F) << 32) |
+            (b[22] << 24) | (b[23] << 16) | (b[24] << 8) | b[25];
+        if (sr > 0 && samples > 0) hdrSec = (samples / sr).round();
+        if (sr <= 0) sr = null;
+      }
+      if (hdrSec != null) {
+        ok = isFullTrack(hdrSec, expectedMs);
+        how = 'header ${hdrSec}s';
+      } else if (total != null && sr != null && bps != null && ch != null) {
+        // FLAC averages roughly 60% of the raw PCM rate.
+        final est = (total / (sr * bps * ch / 8.0 * 0.6)).round();
+        ok = expSec != null ? (est >= expSec * 0.65 && est >= 45) : est >= 60;
+        how = 'size estimate ${est}s ($sr Hz/$bps bit/${ch}ch, $total bytes)';
+      } else if (total != null) {
+        ok = expSec != null
+            ? total >= expSec * 0.65 * 60000 && total >= 3000000
+            : total >= 8000000;
+        how = 'size only ($total bytes, header '
+            '${isFlac ? 'unusable' : 'not FLAC: ${_hex4(b)}'})';
+      } else {
+        how = 'no duration, no size (HTTP ${probe.status})';
+      }
+    }
+    print('[verify] $name: $how, expected '
+        '${expSec == null ? '?' : '${expSec.round()}s'} -> '
+        '${ok ? 'full track' : 'REJECTED (preview/short/unverifiable)'}');
+    return ok;
+  }
+
+  static String _hex4(Uint8List b) => b
+      .take(4)
+      .map((e) => e.toRadixString(16).padLeft(2, '0'))
+      .join(' ');
+
+  Future<_StreamProbe?> _probeStream(String url) async {
+    final client = HttpClient()
+      ..connectionTimeout = MirrorConfig.streamConnectTimeout;
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      req.headers.set(HttpHeaders.rangeHeader, 'bytes=0-65535');
+      final res = await req.close().timeout(MirrorConfig.probeTimeout);
+      if (res.statusCode != HttpStatus.partialContent &&
+          res.statusCode != HttpStatus.ok) {
+        print('[verify] probe HTTP ${res.statusCode}');
+        return null;
+      }
+      int? total;
+      final range = res.headers.value(HttpHeaders.contentRangeHeader);
+      if (range != null && range.contains('/')) {
+        total = int.tryParse(range.split('/').last);
+      } else if (res.statusCode == HttpStatus.ok && res.contentLength > 0) {
+        total = res.contentLength;
+      }
+      final head = BytesBuilder();
+      await for (final chunk
+          in res.timeout(MirrorConfig.probeTimeout, onTimeout: (sink) {
+        sink.close();
+      })) {
+        head.add(chunk);
+        if (head.length > 65535) break;
+      }
+      return _StreamProbe(res.statusCode, total, head.toBytes());
+    } catch (e) {
+      print('[verify] probe error: $e');
+      return null;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   /// Fetch the head of the CDN asset and return the FLAC duration in
   /// seconds, or null when the bytes are not a verifiable FLAC stream.
   /// [blowfishKey] enables the Deezer first-blocks decryption (the first
   /// 2048-byte block of the payload is always encrypted).
-  Future<int?> _probeFlacSeconds(String url, {Uint8List? blowfishKey}) async {
+  Future<int?> _probeFlacSeconds(String url,
+      {Uint8List? blowfishKey, bool trackBreaker = true}) async {
     final client = HttpClient()
       ..connectionTimeout = MirrorConfig.streamConnectTimeout;
     try {
@@ -923,7 +1070,7 @@ class MirrorSource {
       return MirrorSource.flacDurationSeconds(bytes);
     } catch (e) {
       print('[mirror] flac probe error: $e');
-      if (_isNetError(e)) _noteNetFail();
+      if (trackBreaker && _isNetError(e)) _noteNetFail();
       return null;
     } finally {
       client.close(force: true);
@@ -1085,4 +1232,11 @@ class _BlockReader {
   }
 
   Future<void> cancel() => _it.cancel();
+}
+
+class _StreamProbe {
+  _StreamProbe(this.status, this.total, this.head);
+  final int status;
+  final int? total;
+  final Uint8List head;
 }
