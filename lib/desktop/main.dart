@@ -35,13 +35,13 @@ import 'package:zenmusic/desktop/services/library.dart';
 import 'package:zenmusic/desktop/services/lyrics.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/settings_manager.dart';
-import 'package:zenmusic/desktop/services/dynamic_accent.dart';
 import 'package:zenmusic/desktop/services/yt_audio_stream.dart';
 import 'package:zenmusic/desktop/utils/router.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
 import 'package:zenmusic/desktop/ytmusic/modals/yt_config.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/beat_haptics.dart';
+import 'package:zenmusic/desktop/services/ai_tempo_source.dart';
 import 'package:zenmusic/desktop/services/zen_wall_service.dart';
 import 'package:zenmusic/desktop/spotify/spotify_auth.dart';
 import 'package:zenmusic/desktop/spotify/spotify_desktop_engine.dart';
@@ -104,9 +104,12 @@ Future<void> main(List<String> args) async {
 
   GetIt.I.registerSingleton<BeatHapticsEngine>(
       BeatHapticsEngine(mediaPlayer));
+  // SP-78: prefer the offline on-device analyzer for the beat
+  // grid (AI model, then built-in DSP); it falls back to the
+  // Deezer lookup internally when no local answer is possible.
+  GetIt.I<BeatHapticsEngine>().tempoSource = AiTempoSource();
   GetIt.I<BeatHapticsEngine>().start();
   ZenWallService.instance.attach(mediaPlayer.currentSongNotifier);
-  DynamicAccent.instance.attach(mediaPlayer.currentSongNotifier);
 
   final libraryService = LibraryService();
   GetIt.I.registerSingleton<LibraryService>(libraryService);
@@ -153,37 +156,15 @@ class ZenDesktopApp extends StatelessWidget {
   const ZenDesktopApp({super.key});
 
   @override
-  Widget build(BuildContext context) =>
-      ListenableBuilder(
-        listenable: DynamicAccent.instance,
-        builder: (context, _) => _buildApp(context),
-      );
-
-  Widget _buildApp(BuildContext context) {
+  Widget build(BuildContext context) {
     final settings = context.watch<SettingsManager>();
-    // Dynamic colors: the accent follows the playing song's artwork.
-    final accent = settings.dynamicColors
-        ? (DynamicAccent.instance.color ?? settings.accentColor)
-        : settings.accentColor;
-    // Pure black: true-black surfaces in dark mode (OLED).
-    final amoled = settings.amoledBlack;
-    ThemeData black(ThemeData t) => !amoled
-        ? t
-        : t.copyWith(
-            scaffoldBackgroundColor: Colors.black,
-            colorScheme: t.colorScheme.copyWith(
-              surface: Colors.black,
-              surfaceContainerLowest: Colors.black,
-              surfaceContainerLow: const Color(0xFF0A0A0A),
-            ),
-          );
     final liquid = settings.liquidGlass;
     final dark = getDarkness(settings.themeModes.indexOf(settings.themeMode));
 
     // Keep the Kotlin glass engine in sync on Android (no-op on desktop).
     if (Platform.isAndroid) {
       LiquidGlassBridge.instance
-          .sync(enabled: liquid, dark: dark, accent: accent?.value);
+          .sync(enabled: liquid, dark: dark, accent: settings.accentColor?.value);
       unawaited(LiquidGlassBridge.instance.warmUp());
     }
 
@@ -197,50 +178,41 @@ class ZenDesktopApp extends StatelessWidget {
         routerConfig: router,
         themeMode: settings.themeMode,
         theme: switch (settings.uiTheme) {
-          'm3' => ZenM3Theme.light(primary: accent),
+          'm3' => ZenM3Theme.light(primary: settings.accentColor),
           'liquid' =>
-              ZenLiquidTheme.light(primary: accent),
-          _ => AppTheme.light(
-              primary: settings.dynamicColors && accent != null
-                  ? accent
-                  : Colors.black),
+            ZenLiquidTheme.light(primary: settings.accentColor),
+          _ => AppTheme.light(primary: Colors.black),
         },
-        darkTheme: black(switch (settings.uiTheme) {
-          'm3' => ZenM3Theme.dark(primary: accent),
+        darkTheme: switch (settings.uiTheme) {
+          'm3' => ZenM3Theme.dark(primary: settings.accentColor),
           'liquid' =>
-              ZenLiquidTheme.dark(primary: accent),
-          _ => AppTheme.dark(
-              primary: settings.dynamicColors && accent != null
-                  ? accent
-                  : Colors.white),
-        }),
+            ZenLiquidTheme.dark(primary: settings.accentColor),
+          _ => AppTheme.dark(primary: Colors.white),
+        },
         builder: (context, child) {
           return Directionality(
-              textDirection: L10n.isRtl ? TextDirection.rtl : TextDirection.ltr,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (liquid)
-                    LiquidBackdrop(
-                      dark: dark,
-                      accent: accent,
-                      child: const SizedBox.expand(),
-                    )
-                  else
-                    ColoredBox(
-                      color: (amoled &&
-                              Theme.of(context).brightness == Brightness.dark)
-                          ? Colors.black
-                          : settings.uiTheme == 'm3'
-                          ? (Theme.of(context).brightness == Brightness.dark
+            textDirection: L10n.isRtl ? TextDirection.rtl : TextDirection.ltr,
+            child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (liquid)
+                LiquidBackdrop(
+                  dark: dark,
+                  accent: settings.accentColor,
+                  child: const SizedBox.expand(),
+                )
+              else
+                ColoredBox(
+                  color: settings.uiTheme == 'm3'
+                      ? (Theme.of(context).brightness == Brightness.dark
                           ? ZenM3Palette.darkBackground
                           : ZenM3Palette.lightBackground)
-                          : Theme.of(context).colorScheme.surfaceContainerLowest,
-                      child: const SizedBox.expand(),
-                    ),
-                  if (child != null) child!,
-                ],
-              ));
+                      : Theme.of(context).colorScheme.surfaceContainerLowest,
+                  child: const SizedBox.expand(),
+                ),
+              if (child != null) child!,
+            ],
+          ));
         },
       ),
     );

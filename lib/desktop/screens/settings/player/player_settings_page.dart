@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:zenmusic/desktop/screens/settings/player/ai_remix_page.dart';
 import 'package:zenmusic/desktop/screens/settings/player/cubit/player_settings_cubit.dart';
 import 'package:zenmusic/desktop/screens/settings/widgets/setting_item.dart';
 
@@ -119,6 +120,27 @@ class PlayerSettingsPage extends StatelessWidget {
                                 .setSingVoiceLevel(v),
                           ),
                   ],
+
+                  /// AI remix models — offline ONNX model manager +
+                  /// on-device track scanner (SP-78).
+                  ({required bool first, required bool last}) =>
+                      SettingTile(
+                        title: 'AI Remix Models'.tr,
+                        subtitle:
+                            'Download an offline model and scan tracks'
+                                .tr,
+                        leading: const Icon(Icons.psychology),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const AiRemixPage(),
+                            ),
+                          );
+                        },
+                        isFirst: first,
+                        isLast: last,
+                      ),
                 ];
 
                 return ListView(

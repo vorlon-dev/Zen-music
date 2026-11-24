@@ -19,6 +19,7 @@ import 'package:provider/provider.dart';
 import 'package:zenmusic/desktop/main.dart' show ZenDesktopApp, initialiseHive;
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/beat_haptics.dart';
+import 'package:zenmusic/desktop/services/ai_tempo_source.dart';
 import 'package:zenmusic/desktop/services/zen_wall_service.dart';
 import 'package:zenmusic/desktop/services/discover_feed.dart';
 import 'package:zenmusic/desktop/services/download_manager.dart';
@@ -93,6 +94,10 @@ Future<void> main() async {
 
   GetIt.I.registerSingleton<BeatHapticsEngine>(
       BeatHapticsEngine(mediaPlayer));
+  // SP-78: prefer the offline on-device analyzer for the beat
+  // grid (AI model, then built-in DSP); it falls back to the
+  // Deezer lookup internally when no local answer is possible.
+  GetIt.I<BeatHapticsEngine>().tempoSource = AiTempoSource();
   GetIt.I<BeatHapticsEngine>().start();
   ZenWallService.instance.attach(mediaPlayer.currentSongNotifier);
 

@@ -3,12 +3,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-enum LyricMotion { smooth, spring, bounce, fade, slide, zoom, elastic, snap }
+import 'lyric_spring.dart';
+
+enum LyricMotion { smooth, spring, bounce, fade, slide, zoom, elastic, snap, apple }
 
 extension LyricMotionX on LyricMotion {
   Curve get curve => const [
         Curves.easeInOutCubic, Curves.elasticOut, Curves.bounceOut, Curves.easeIn,
         Curves.easeOutQuart, Curves.easeOutBack, Curves.elasticInOut, Curves.linear,
+        Curves.easeOutCubic,
       ][index];
   Duration get duration => Duration(milliseconds: this == LyricMotion.snap ? 120 : 380);
   static LyricMotion load() {
@@ -117,6 +120,12 @@ extension LyricMotionSpecX on LyricMotion {
         return const LyricMotionSpec(
             curve: Curves.elasticOut, fxMs: 950, scrollCurve: Curves.easeOutBack,
             scrollMs: 800, inactiveScale: 0.88, dy: 6, trailMul: 2.4);
+      case LyricMotion.apple:
+        // Apple Music style (spring scroll, word rise, letter swell,
+        // breathing instrumental dots - see lyric_spring.dart).
+        return const LyricMotionSpec(
+            curve: Curves.easeOutCubic, fxMs: 450, scrollCurve: SpringCurve(),
+            scrollMs: 1200, inactiveScale: 0.98, trailMul: 1.0);
       case LyricMotion.snap:
         return const LyricMotionSpec(
             curve: Curves.linear, fxMs: 120, scrollCurve: Curves.linear,

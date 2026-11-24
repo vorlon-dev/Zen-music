@@ -2,6 +2,7 @@
 
 import '../../services/lyrics_romanizer.dart';
 import '../../services/lyric_motion.dart';
+import '../../services/lyric_spring.dart';
 import '../../services/lyric_translation.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -100,6 +101,8 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
   final Stopwatch _clock = Stopwatch()..start();
   final ValueNotifier<int> _posNotifier = ValueNotifier<int>(0);
   int _anchorMs = 0;
+  int _gapStartMs = 0;
+  int _gapEndMs = 0;
   int _anchorAt = 0;
   double _smooth = 0;
   Duration _lastTick = Duration.zero;
@@ -221,6 +224,10 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
 
     var interlude = false;
     if (idx >= 0 && idx + 1 < lyrics.length) {
+      final cur = lyrics[idx];
+      // Bounds of the instrumental gap (used by the Apple dots).
+      _gapStartMs = cur.endMs > cur.timeMs ? cur.endMs : cur.timeMs + _interludeAfterMs;
+      _gapEndMs = lyrics[idx + 1].timeMs;
       final gap = lyrics[idx + 1].timeMs - lyrics[idx].timeMs;
       interlude = gap > _interludeMinMs &&
           posMs > lyrics[idx].timeMs + _interludeAfterMs;
@@ -579,7 +586,15 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
         if (isActive && _interlude)
           Padding(
             padding: const EdgeInsets.only(top: 6, bottom: 6, left: 4),
-            child: _Breath(color: accent, scale: widget.textScale),
+            child: LyricMotionPrefs.motion.value == LyricMotion.apple
+                ? _AppleDots(
+                    color: accent,
+                    scale: widget.textScale,
+                    pos: _posNotifier,
+                    gapStartMs: _gapStartMs,
+                    gapEndMs: _gapEndMs,
+                  )
+                : _Breath(color: accent, scale: widget.textScale),
           ),
       ],
     );
@@ -608,6 +623,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
         accent: accent,
         dim: _inactive(context, isWaterDrop ? 0.35 : 0.40),
         isWaterDrop: isWaterDrop,
+        apple: LyricMotionPrefs.motion.value == LyricMotion.apple,
       );
     }
 
@@ -827,6 +843,7 @@ class _KaraokeLine extends StatefulWidget {
     required this.accent,
     required this.dim,
     this.isWaterDrop = false,
+    this.apple = false,
   });
 
   final LyricLine line;
@@ -835,6 +852,7 @@ class _KaraokeLine extends StatefulWidget {
   final Color accent;
   final Color dim;
   final bool isWaterDrop;
+  final bool apple;
 
   @override
   State<_KaraokeLine> createState() => _KaraokeLineState();
@@ -846,6 +864,8 @@ class _KaraokeLineState extends State<_KaraokeLine> {
   TextStyle? _style;
   Color? _accent;
   Color? _dim;
+  bool? _apple;
+  late List<List<Rect>?> _charRects;
 
   late String _full;
   late List<int> _t0;
@@ -869,7 +889,8 @@ class _KaraokeLineState extends State<_KaraokeLine> {
         identical(_lineKey, widget.line) &&
         _style == widget.style &&
         _accent == widget.accent &&
-        _dim == widget.dim) {
+        _dim == widget.dim &&
+        _apple == widget.apple) {
       return;
     }
     _w = w;
@@ -877,6 +898,7 @@ class _KaraokeLineState extends State<_KaraokeLine> {
     _style = widget.style;
     _accent = widget.accent;
     _dim = widget.dim;
+    _apple = widget.apple;
 
     final words = widget.line.words;
     final sb = StringBuffer();
@@ -923,6 +945,48 @@ class _KaraokeLineState extends State<_KaraokeLine> {
       }
       _rects.add(rect);
     }
+
+    // Apple mode: per-letter boxes for long held (non-CJK) words.
+    _charRects = <List<Rect>?>[];
+    for (var i = 0; i < _ranges.length; i++) {
+      List<Rect>? chars;
+      final r = _rects[i];
+      if (widget.apple &&
+          r != null &&
+          _dur[i] > AppleMotion.emphasisMinMs &&
+          !_isCjk(_full.substring(_ranges[i].$1, _ranges[i].$2))) {
+        chars = <Rect>[];
+        var off = _ranges[i].$1;
+        for (final rune in _full.substring(_ranges[i].$1, _ranges[i].$2).runes) {
+          final len = rune > 0xFFFF ? 2 : 1;
+          final isSpace = String.fromCharCode(rune).trim().isEmpty;
+          if (!isSpace) {
+            final boxes = _brightTp!.getBoxesForSelection(
+              TextSelection(baseOffset: off, extentOffset: off + len),
+            );
+            if (boxes.isEmpty) {
+              chars = null;
+              break;
+            }
+            chars.add(boxes.first.toRect());
+          }
+          off += len;
+        }
+        if (chars != null && chars.length < 2) chars = null;
+      }
+      _charRects.add(chars);
+    }
+  }
+
+  static bool _isCjk(String s) {
+    for (final c in s.runes) {
+      if ((c >= 0x3040 && c <= 0x30FF) ||
+          (c >= 0x3400 && c <= 0x9FFF) ||
+          (c >= 0xAC00 && c <= 0xD7AF)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @override
@@ -960,6 +1024,9 @@ class _KaraokeLineState extends State<_KaraokeLine> {
                   rects: _rects,
                   textLength: _full.length,
                   pos: widget.pos,
+                  apple: widget.apple,
+                  charRects: _charRects,
+                  fontSize: widget.style.fontSize ?? 18,
                 ),
                 foregroundPainter: widget.isWaterDrop
                     ? _TextDropletsPainter(text: _full, style: widget.style)
@@ -983,6 +1050,9 @@ class _KaraokePainter extends CustomPainter {
     required this.rects,
     required this.textLength,
     required this.pos,
+    this.apple = false,
+    this.charRects = const [],
+    this.fontSize = 18,
   }) : super(repaint: pos);
 
   final TextPainter dim;
@@ -993,6 +1063,9 @@ class _KaraokePainter extends CustomPainter {
   final List<Rect?> rects;
   final int textLength;
   final ValueListenable<int> pos;
+  final bool apple;
+  final List<List<Rect>?> charRects;
+  final double fontSize;
 
   static const double _lift = 3.0;
 
@@ -1013,6 +1086,10 @@ class _KaraokePainter extends CustomPainter {
 
   /// Text with each currently-lifting syllable translated up by <= _lift px.
   void _paintLifted(Canvas canvas, TextPainter tp, int p) {
+    if (apple) {
+      _paintApple(canvas, tp, p);
+      return;
+    }
     List<(Rect, double)>? lifts;
     for (var i = 0; i < t0.length; i++) {
       final r = rects[i];
@@ -1038,6 +1115,71 @@ class _KaraokePainter extends CustomPainter {
       tp.paint(canvas, Offset.zero);
       canvas.restore();
     }
+  }
+
+  /// Apple mode: spring word rise + per-letter swell on long held words.
+  void _paintApple(Canvas canvas, TextPainter tp, int p) {
+    List<(Rect, double)>? lifts;
+    List<int>? emphasised;
+    for (var i = 0; i < t0.length; i++) {
+      final r = rects[i];
+      if (r == null || p < t0[i]) continue;
+      if (i < charRects.length && charRects[i] != null) {
+        (emphasised ??= <int>[]).add(i);
+        continue;
+      }
+      final l = AppleMotion.wordRise((p - t0[i]) / 1000.0) * _fall(i, p);
+      if (l <= 0.001) continue;
+      (lifts ??= <(Rect, double)>[]).add((r, -l * _lift));
+    }
+    if (lifts == null && emphasised == null) {
+      tp.paint(canvas, Offset.zero);
+      return;
+    }
+    canvas.save();
+    for (final e in lifts ?? const <(Rect, double)>[]) {
+      canvas.clipRect(e.$1, clipOp: ui.ClipOp.difference);
+    }
+    for (final i in emphasised ?? const <int>[]) {
+      canvas.clipRect(rects[i]!, clipOp: ui.ClipOp.difference);
+    }
+    tp.paint(canvas, Offset.zero);
+    canvas.restore();
+    for (final e in lifts ?? const <(Rect, double)>[]) {
+      canvas.save();
+      canvas.translate(0, e.$2);
+      canvas.clipRect(e.$1);
+      tp.paint(canvas, Offset.zero);
+      canvas.restore();
+    }
+    for (final i in emphasised ?? const <int>[]) {
+      final chars = charRects[i]!;
+      final tSec = (p - t0[i]) / 1000.0;
+      final dSec = math.max(dur[i], 1) / 1000.0;
+      final fall = _fall(i, p);
+      for (var k = 0; k < chars.length; k++) {
+        final fx = AppleMotion.charFx(
+            tSec: tSec, durationSec: dSec, index: k, count: chars.length);
+        final r = chars[k];
+        final c = r.center;
+        final dy = (-AppleMotion.wordRisePx * 0.92 * fx.rise - fx.lift) * fall;
+        canvas.save();
+        canvas.translate(c.dx + fx.dxEm * fontSize, c.dy + dy);
+        canvas.scale(fx.scale);
+        canvas.translate(-c.dx, -c.dy);
+        canvas.clipRect(Rect.fromLTRB(
+            r.left, r.top - fontSize * 0.4, r.right, r.bottom + fontSize * 0.25));
+        tp.paint(canvas, Offset.zero);
+        canvas.restore();
+      }
+    }
+  }
+
+  /// Words stay risen while sung, then settle back shortly after they end.
+  double _fall(int i, int p) {
+    final after = p - (t0[i] + math.max(dur[i], 1));
+    final s = after <= 600 ? 1.0 : (1 - (after - 600) / 900).clamp(0.0, 1.0).toDouble();
+    return s * s * (3 - 2 * s);
   }
 
   @override
@@ -1093,7 +1235,7 @@ class _KaraokePainter extends CustomPainter {
       bottom = b.bottom;
     }
     // Lifted glyphs rise above the row; widen the mask upward.
-    top -= _lift * 1.5;
+    top -= apple ? fontSize * 0.3 : _lift * 1.5;
 
     canvas.saveLayer(Offset.zero & size, Paint());
     _paintLifted(canvas, bright, p);
@@ -1122,7 +1264,11 @@ class _KaraokePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _KaraokePainter old) =>
-      old.dim != dim || old.bright != bright || old.rects != rects;
+      old.dim != dim ||
+      old.bright != bright ||
+      old.rects != rects ||
+      old.apple != apple ||
+      old.charRects != charRects;
 }
 
 
@@ -1161,6 +1307,63 @@ class _BreathState extends State<_Breath> with SingleTickerProviderStateMixin {
           fontWeight: FontWeight.w700,
           letterSpacing: 2,
         ),
+      ),
+    );
+  }
+}
+
+/// Three breathing dots for long instrumental gaps (Apple mode). Driven by
+/// the playback position, so it is exact after seeks too.
+class _AppleDots extends StatelessWidget {
+  const _AppleDots({
+    required this.color,
+    required this.pos,
+    required this.gapStartMs,
+    required this.gapEndMs,
+    this.scale = 1.0,
+  });
+
+  final Color color;
+  final ValueListenable<int> pos;
+  final int gapStartMs;
+  final int gapEndMs;
+  final double scale;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = math.max(1, gapEndMs - gapStartMs).toDouble();
+    final size = 11.0 * scale;
+    return SizedBox(
+      height: 26 * scale,
+      child: ValueListenableBuilder<int>(
+        valueListenable: pos,
+        builder: (context, ms, _) {
+          final t = (ms - gapStartMs).toDouble();
+          final (s, o) = AppleMotion.gapLayer(t, d);
+          return Opacity(
+            opacity: o.clamp(0.0, 1.0).toDouble(),
+            child: Transform.scale(
+              scale: s,
+              alignment: Alignment.centerLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < 3; i++)
+                    Container(
+                      width: size,
+                      height: size,
+                      margin: EdgeInsets.only(right: size * 0.45),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: color.withValues(
+                            alpha: AppleMotion.dotOpacity(i, 3, t, d)),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

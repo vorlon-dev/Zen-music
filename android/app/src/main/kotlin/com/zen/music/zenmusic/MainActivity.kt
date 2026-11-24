@@ -27,6 +27,7 @@ import androidx.core.view.WindowCompat
 import com.ryanheise.audioservice.AudioServiceActivity
 import com.zen.music.zenmusic.addon.AddonClient
 import com.zen.music.zenmusic.addon.LosslessMusicApi
+import com.zen.music.zenmusic.ai.AiRemixAnalyzer
 import com.zen.music.zenmusic.dsp.core.BiquadFilter
 import com.zen.music.zenmusic.dsp.core.models.FilterType
 import com.zen.music.zenmusic.dsp.core.models.ParametricEQ
@@ -115,6 +116,9 @@ class MainActivity : AudioServiceActivity() {
         // lossless while the Dart mirror engine is resting (see
         // lib/desktop/lossless/mirror_arbiter.dart for the alternation).
         registerMirrorEngineChannel(flutterEngine)
+        // SP78: offline AI remix analyzer — downloads an ONNX model (Hugging
+        // Face / Essentia zoo) and runs tempo analysis fully on-device.
+        registerAiRemixChannel(flutterEngine)
         // In-app APK installer channel (OTA updates)
         InstallApkPlugin.register(flutterEngine, this)
         registerLauncherLogoChannel(flutterEngine)
@@ -565,6 +569,33 @@ class MainActivity : AudioServiceActivity() {
         "metadata" to eq.metadata,
     )
 
+
+    private fun registerAiRemixChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/ai_remix")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "analyze" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrBlank()) {
+                            result.error("BAD_ARGS", "path required", null)
+                        } else {
+                            val modelPath = call.argument<String>("modelPath")
+                            val contract = (call.argument<Any>("contract")
+                                    as? Map<String, Any?>) ?: emptyMap()
+                            Thread {
+                                val out = try {
+                                    AiRemixAnalyzer.analyze(path, modelPath, contract)
+                                } catch (t: Throwable) {
+                                    mapOf("bpm" to 0.0, "source" to "dsp")
+                                }
+                                mainHandler.post { result.success(out) }
+                            }.start()
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
 
     private fun registerLosslessChannel(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/lossless")
