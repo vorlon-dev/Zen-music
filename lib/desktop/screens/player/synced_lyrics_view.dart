@@ -483,8 +483,8 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
       scale: isActive
           ? 1.0
           : 1 -
-              (1 - _distScale[math.min(dist, _distScale.length - 1)]) *
-                  ((1 - _spec.inactiveScale) / 0.02).clamp(0.0, 6.0),
+          (1 - _distScale[math.min(dist, _distScale.length - 1)]) *
+              ((1 - _spec.inactiveScale) / 0.02).clamp(0.0, 6.0),
       alpha: isActive ? _fallAlpha[k] : _fallAlpha[k] * _spec.alphaMul,
       blur: (!_depthOfField || isActive || _dragging || _active < 0)
           ? 0
@@ -588,12 +588,12 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView>
             padding: const EdgeInsets.only(top: 6, bottom: 6, left: 4),
             child: LyricMotionPrefs.motion.value == LyricMotion.apple
                 ? _AppleDots(
-                    color: accent,
-                    scale: widget.textScale,
-                    pos: _posNotifier,
-                    gapStartMs: _gapStartMs,
-                    gapEndMs: _gapEndMs,
-                  )
+              color: accent,
+              scale: widget.textScale,
+              pos: _posNotifier,
+              gapStartMs: _gapStartMs,
+              gapEndMs: _gapEndMs,
+            )
                 : _Breath(color: accent, scale: widget.textScale),
           ),
       ],
@@ -955,7 +955,10 @@ class _KaraokeLineState extends State<_KaraokeLine> {
           r != null &&
           _dur[i] > AppleMotion.emphasisMinMs &&
           !_isCjk(_full.substring(_ranges[i].$1, _ranges[i].$2))) {
-        chars = <Rect>[];
+        // Build into a non-null list: assigning `chars = null` inside the
+        // loop would stop the analyzer promoting `chars` for `chars.add`.
+        final built = <Rect>[];
+        var ok = true;
         var off = _ranges[i].$1;
         for (final rune in _full.substring(_ranges[i].$1, _ranges[i].$2).runes) {
           final len = rune > 0xFFFF ? 2 : 1;
@@ -965,14 +968,14 @@ class _KaraokeLineState extends State<_KaraokeLine> {
               TextSelection(baseOffset: off, extentOffset: off + len),
             );
             if (boxes.isEmpty) {
-              chars = null;
+              ok = false;
               break;
             }
-            chars.add(boxes.first.toRect());
+            built.add(boxes.first.toRect());
           }
           off += len;
         }
-        if (chars != null && chars.length < 2) chars = null;
+        chars = (ok && built.length >= 2) ? built : null;
       }
       _charRects.add(chars);
     }
@@ -1265,10 +1268,10 @@ class _KaraokePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _KaraokePainter old) =>
       old.dim != dim ||
-      old.bright != bright ||
-      old.rects != rects ||
-      old.apple != apple ||
-      old.charRects != charRects;
+          old.bright != bright ||
+          old.rects != rects ||
+          old.apple != apple ||
+          old.charRects != charRects;
 }
 
 

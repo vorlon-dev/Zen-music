@@ -59,6 +59,15 @@ Future<void> main(List<String> args) async {
     return;
   }
 
+  // Paint a first frame NOW (logo on the system colour) instead of leaving the
+  // window black while every service below starts; the real app replaces it
+  // with a second runApp once everything is ready.
+  runApp(const _BootSplash());
+
+  // Independent start-up work runs side by side with Hive instead of after it.
+  final audioServerFuture = createAudioStreamServer();
+  final appearanceFuture = AppearancePrefs.load();
+
   await initialiseHive();
 
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
@@ -69,9 +78,11 @@ Future<void> main(List<String> args) async {
     JustAudioMediaKit.pitch = true;
   }
 
-  await FileStorage.initialise();
-  await AppearancePrefs.load();
-  await L10n.load();
+  await Future.wait<void>([
+    FileStorage.initialise(),
+    appearanceFuture,
+    L10n.load(),
+  ]);
   LyricStylePrefs.load();
   LyricMotionPrefs.load();
   LyricsTranslation.instance.load();
@@ -95,7 +106,7 @@ Future<void> main(List<String> args) async {
 
   unawaited(loadM3Tokens());
 
-  final String audioStreamUrl = await createAudioStreamServer();
+  final String audioStreamUrl = await audioServerFuture;
   GetIt.I.registerSingleton<String>(audioStreamUrl,
       instanceName: 'audioStreamUrl');
 
@@ -152,6 +163,40 @@ Future<void> main(List<String> args) async {
   );
 }
 
+/// First frame while the services start: the app logo, centred, on the same
+/// colour as the Android launch window (so there is no black/white flash).
+class _BootSplash extends StatelessWidget {
+  const _BootSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+        Brightness.dark;
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: ColoredBox(
+        color: dark ? Colors.black : Colors.white,
+        child: Center(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: .86, end: 1),
+            duration: const Duration(milliseconds: 600),
+            curve: Curves.easeOutCubic,
+            builder: (_, v, child) => Opacity(
+              opacity: ((v - .86) / .14).clamp(0.0, 1.0),
+              child: Transform.scale(scale: v, child: child),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(26),
+              child: Image.asset('assets/icon/logo.png',
+                  width: 96, height: 96, filterQuality: FilterQuality.medium),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ZenDesktopApp extends StatelessWidget {
   const ZenDesktopApp({super.key});
 
@@ -180,39 +225,39 @@ class ZenDesktopApp extends StatelessWidget {
         theme: switch (settings.uiTheme) {
           'm3' => ZenM3Theme.light(primary: settings.accentColor),
           'liquid' =>
-            ZenLiquidTheme.light(primary: settings.accentColor),
+              ZenLiquidTheme.light(primary: settings.accentColor),
           _ => AppTheme.light(primary: Colors.black),
         },
         darkTheme: switch (settings.uiTheme) {
           'm3' => ZenM3Theme.dark(primary: settings.accentColor),
           'liquid' =>
-            ZenLiquidTheme.dark(primary: settings.accentColor),
+              ZenLiquidTheme.dark(primary: settings.accentColor),
           _ => AppTheme.dark(primary: Colors.white),
         },
         builder: (context, child) {
           return Directionality(
-            textDirection: L10n.isRtl ? TextDirection.rtl : TextDirection.ltr,
-            child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (liquid)
-                LiquidBackdrop(
-                  dark: dark,
-                  accent: settings.accentColor,
-                  child: const SizedBox.expand(),
-                )
-              else
-                ColoredBox(
-                  color: settings.uiTheme == 'm3'
-                      ? (Theme.of(context).brightness == Brightness.dark
+              textDirection: L10n.isRtl ? TextDirection.rtl : TextDirection.ltr,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (liquid)
+                    LiquidBackdrop(
+                      dark: dark,
+                      accent: settings.accentColor,
+                      child: const SizedBox.expand(),
+                    )
+                  else
+                    ColoredBox(
+                      color: settings.uiTheme == 'm3'
+                          ? (Theme.of(context).brightness == Brightness.dark
                           ? ZenM3Palette.darkBackground
                           : ZenM3Palette.lightBackground)
-                      : Theme.of(context).colorScheme.surfaceContainerLowest,
-                  child: const SizedBox.expand(),
-                ),
-              if (child != null) child!,
-            ],
-          ));
+                          : Theme.of(context).colorScheme.surfaceContainerLowest,
+                      child: const SizedBox.expand(),
+                    ),
+                  if (child != null) child!,
+                ],
+              ));
         },
       ),
     );

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ZenMusic · vorlon-dev -->
+<!-- Native launch window: shows the app icon on the system colour from the
+     first instant, so there is never an empty black window before Flutter
+     draws its first frame. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/black" />
+    <item
+        android:width="96dp"
+        android:height="96dp"
+        android:gravity="center">
+        <bitmap
+            android:gravity="fill"
+            android:src="@mipmap/ic_launcher" />
+    </item>
+</layer-list>

@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- ZenMusic · vorlon-dev -->
-
-<!-- ZenMusic · vorlon-dev --><!-- Modify this file to customize your launch splash screen -->
+<!-- Native launch window: shows the app icon on the system colour from the
+     first instant, so there is never an empty black window before Flutter
+     draws its first frame. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="?android:colorBackground" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
+    <item android:drawable="@android:color/white" />
+    <item
+        android:width="96dp"
+        android:height="96dp"
+        android:gravity="center">
         <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+            android:gravity="fill"
+            android:src="@mipmap/ic_launcher" />
+    </item>
 </layer-list>
