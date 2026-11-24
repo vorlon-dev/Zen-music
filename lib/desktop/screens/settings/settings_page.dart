@@ -638,9 +638,10 @@ class _SpotifyTileState extends State<_SpotifyTile> {
           children: [
             ZenRow(
               icon: ZenIcons.connected,
+              // Same 40 dp tile as Last.fm, dimmed until connected.
               leading: Opacity(
-                opacity: loggedIn ? 1.0 : 0.4,
-                child: const SpotifyLogo(size: 22),
+                opacity: loggedIn ? 1.0 : 0.55,
+                child: const ZenBrandTile(ZenBrands.spotify),
               ),
               title: 'Spotify',
               subtitle: loggedIn
@@ -826,9 +827,10 @@ class _YtmTileState extends State<_YtmTile> {
           children: [
             ZenRow(
               icon: ZenIcons.connected,
+              // Same 40 dp tile as Last.fm, dimmed until connected.
               leading: Opacity(
-                opacity: loggedIn ? 1.0 : 0.4,
-                child: const YouTubeMusicLogo(size: 22),
+                opacity: loggedIn ? 1.0 : 0.55,
+                child: const ZenBrandTile(ZenBrands.ytmusic),
               ),
               title: 'YouTube Music'.tr,
               subtitle: loggedIn
