@@ -1432,7 +1432,7 @@ class _EchoSkin extends StatelessWidget {
   ]);
 
   // ── artwork / canvas hero (canvas replaces the artwork when it plays) ────
-  Widget _hero({double radius = 0, bool fade = true}) =>
+  Widget _hero({double radius = 0, bool fade = true, double t = 0}) =>
       LayoutBuilder(builder: (_, c) {
         final side = math.max(c.maxWidth, c.maxHeight);
         final art = ClipRect(
@@ -1456,15 +1456,18 @@ class _EchoSkin extends StatelessWidget {
           ),
         ]);
         if (fade) {
+          // t = 0: full-bleed cover fading into the controls; t = 1: the
+          // small rounded thumbnail of the lyrics sheet (no fade).
           media = ShaderMask(
             blendMode: BlendMode.dstIn,
-            shaderCallback: (r) => const LinearGradient(
+            shaderCallback: (r) => LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Colors.white, Colors.white, Colors.transparent],
-              stops: [0, .8, 1],
+              colors: const [Colors.white, Colors.white, Colors.transparent],
+              stops: [0, .8 + .2 * t, 1],
             ).createShader(r),
-            child: media,
+            child: ClipRRect(
+                borderRadius: BorderRadius.circular(14 * t), child: media),
           );
         } else {
           media = ClipRRect(
@@ -1768,34 +1771,15 @@ class _EchoSkin extends StatelessWidget {
   Widget _main() => LayoutBuilder(builder: (ctx, c) {
     if (_isWide(c)) return _wide();
     final compact = c.maxHeight < 700;
-    return Stack(children: [
-      Positioned.fill(
-        child: Column(children: [
-          Expanded(child: _hero()),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 560),
-                  child: _controls(compact: compact),
-                ),
-              ),
-            ),
-          ),
-        ]),
+    return _EchoMorph(
+      x: x,
+      hero: (t) => _hero(t: t),
+      pill: _pill(),
+      controls: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: _controls(compact: compact),
       ),
-      SafeArea(
-        bottom: false,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: Padding(
-              padding: const EdgeInsets.only(top: 10), child: _pill()),
-        ),
-      ),
-    ]);
+    );
   });
 
   Widget _wide() => SafeArea(
@@ -1834,23 +1818,340 @@ class _EchoSkin extends StatelessWidget {
       type: MaterialType.transparency,
       child: Stack(fit: StackFit.expand, children: [
         _bg(t),
-        _lyricsLayer(
-          x,
-          _main(),
-              (shown) => _LyricsPage(
-            x: x,
-            shown: shown,
-            ink: _w,
-            dim: _dim,
-            prim: _w,
-            onPrim: Colors.black,
-            chip: _w.withValues(alpha: .14),
-            chipInk: _w,
-            scrim: Colors.black.withValues(alpha: .34),
-          ),
-        ),
+        LayoutBuilder(builder: (ctx, c) {
+          // Narrow (phone): the player morphs into the lyrics sheet.
+          if (!_isWide(c)) return _main();
+          return _lyricsLayer(
+            x,
+            _main(),
+            (shown) => _LyricsPage(
+              x: x,
+              shown: shown,
+              ink: _w,
+              dim: _dim,
+              prim: _w,
+              onPrim: Colors.black,
+              chip: _w.withValues(alpha: .14),
+              chipInk: _w,
+              scrim: Colors.black.withValues(alpha: .34),
+            ),
+          );
+        }),
       ]),
     );
+  }
+}
+
+/// Player ⇄ lyrics sheet, the way Echo does it: ONE offset (0 = player,
+/// 1 = lyrics) drives every element together — cover shrinks to a corner
+/// thumbnail, the controls slide down and fade out within the first third,
+/// the title row slides in from above, the tab pill glides below it and the
+/// lyrics rise from the bottom. The offset follows a finger on the pill /
+/// cover / header (drag up to open, down to close) and settles with a
+/// critically damped spring, so it never overshoots.
+class _EchoMorph extends StatefulWidget {
+  const _EchoMorph({
+    required this.x,
+    required this.hero,
+    required this.pill,
+    required this.controls,
+  });
+  final PlayerCtx x;
+  final Widget Function(double t) hero;
+  final Widget pill;
+  final Widget controls;
+
+  @override
+  State<_EchoMorph> createState() => _EchoMorphState();
+}
+
+class _EchoMorphState extends State<_EchoMorph>
+    with SingleTickerProviderStateMixin {
+  static const double _thumb = 56; // collapsed cover
+  static const double _gutter = 16;
+  static const double _range = 280; // px of drag for a full open
+  static final SpringDescription _spring =
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 380, ratio: 1);
+
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    value: _on ? 1 : 0,
+  );
+  bool _dragging = false;
+  double _ctrlH = 330;
+
+  bool get _on => widget.x.hasLyrics && widget.x.showLyrics;
+
+  @override
+  void didUpdateWidget(_EchoMorph old) {
+    super.didUpdateWidget(old);
+    if (!_dragging) _settle(_on ? 1 : 0, 0);
+  }
+
+  void _settle(double target, double velocity) {
+    if ((_c.value - target).abs() < .001 && velocity.abs() < .01) {
+      _c.value = target;
+      return;
+    }
+    _c.animateWith(SpringSimulation(_spring, _c.value, target, velocity));
+  }
+
+  void _dragStart(DragStartDetails _) {
+    _dragging = true;
+    _c.stop();
+  }
+
+  void _dragUpdate(DragUpdateDetails d) {
+    // Without lyrics there is nothing to open: just a little rubber band.
+    final max = widget.x.hasLyrics ? 1.0 : .06;
+    _c.value = (_c.value - d.delta.dy / _range).clamp(0.0, max);
+  }
+
+  void _dragEnd(DragEndDetails d) {
+    _dragging = false;
+    final v = d.velocity.pixelsPerSecond.dy; // negative = upwards
+    var target = _c.value > .5 ? 1.0 : 0.0;
+    if (v.abs() > 700) target = v < 0 ? 1.0 : 0.0;
+    if (!widget.x.hasLyrics) target = 0;
+    if (target != (_on ? 1.0 : 0.0)) {
+      HapticFeedback.selectionClick();
+      widget.x.toggleLyrics();
+    }
+    _settle(target, -v / _range);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final x = widget.x;
+    final pad = MediaQuery.paddingOf(context);
+    // Wraps a handle widget so a vertical drag on it scrubs the offset.
+    Widget grab(Widget child) => GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onVerticalDragStart: _dragStart,
+          onVerticalDragUpdate: _dragUpdate,
+          onVerticalDragEnd: _dragEnd,
+          child: child,
+        );
+    return LayoutBuilder(builder: (context, c) {
+      final w = c.maxWidth, h = c.maxHeight;
+      final topY = pad.top + 8;
+      final headerBottom = topY + _thumb;
+      const pillH = 44.0;
+      final pillRestY = pad.top + 10;
+      final pillOpenY = headerBottom + 12;
+      final lyricsTop = pillOpenY + pillH + 8;
+      final heroH = (h - _ctrlH - pad.bottom - 10).clamp(120.0, h);
+
+      return AnimatedBuilder(
+        animation: _c,
+        child: _MeasureSize(
+          onSize: (s) {
+            if ((s.height - _ctrlH).abs() > 1) {
+              setState(() => _ctrlH = s.height);
+            }
+          },
+          child: widget.controls,
+        ),
+        builder: (context, controls) {
+          final t = _c.value;
+          final out = (1 - (t * 3)).clamp(0.0, 1.0); // controls: gone by 1/3
+          final hero = Rect.lerp(
+            Rect.fromLTWH(0, 0, w, heroH),
+            Rect.fromLTWH(_gutter, topY, _thumb, _thumb),
+            t,
+          )!;
+          return Stack(children: [
+            // lyrics: rise from the bottom, fade in with the offset
+            if (t > 0.001)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: lyricsTop,
+                bottom: pad.bottom + 140, // above the seek bar + transport
+                child: IgnorePointer(
+                  ignoring: t < .9,
+                  child: Opacity(
+                    opacity: Curves.easeIn.transform(t),
+                    child: Transform.translate(
+                      offset: Offset(0, (1 - t) * 60),
+                      child: LayoutBuilder(
+                        builder: (_, lc) => x.lyrics(t > .02
+                            ? Size(lc.maxWidth, lc.maxHeight)
+                            : Size.zero),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // controls: slide down + fade out
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                ignoring: t > .15,
+                child: Opacity(
+                  opacity: out,
+                  child: Transform.translate(
+                    offset: Offset(0, 120 * t),
+                    child: SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: controls,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // cover → thumbnail
+            Positioned.fromRect(
+              rect: hero,
+              child: grab(GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: t > .9 ? x.toggleLyrics : null,
+                child: widget.hero(t),
+              )),
+            ),
+            // title row: slides in from above, alpha = offset
+            if (t > 0.001)
+              Positioned(
+                left: _gutter + _thumb + 12,
+                right: _gutter,
+                top: topY,
+                height: _thumb,
+                child: Opacity(
+                  opacity: t,
+                  child: Transform.translate(
+                    offset: Offset(0, -(1 - t) * _thumb * 2),
+                    child: grab(Row(children: [
+                      Expanded(
+                        child: _titles(x, Colors.white,
+                            Colors.white.withValues(alpha: .78), size: 15),
+                      ),
+                      _playing((s) => _Tap(
+                            onTap: _toggle,
+                            tip: s == ButtonState.playing ? 'Pause' : 'Play',
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: const BoxDecoration(
+                                  shape: BoxShape.circle, color: Colors.white),
+                              child: Icon(
+                                  s == ButtonState.playing
+                                      ? _Ic.pause
+                                      : _Ic.play,
+                                  size: 24,
+                                  color: Colors.black),
+                            ),
+                          )),
+                      const SizedBox(width: 6),
+                      _ibtn(Icons.keyboard_arrow_down_rounded, x.toggleLyrics,
+                          'Close lyrics',
+                          size: 26, c: Colors.white, pad: 8),
+                    ])),
+                  ),
+                ),
+              ),
+            // Song · Lyrics · Queue pill: glides from the top edge to just
+            // under the title row
+            Positioned(
+              top: pillRestY + (pillOpenY - pillRestY) * t,
+              left: 0,
+              right: 0,
+              child: Center(child: grab(widget.pill)),
+            ),
+            // seek bar + transport, fade in at the bottom with the lyrics
+            if (t > 0.001)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  ignoring: t < .9,
+                  child: Opacity(
+                    opacity: Curves.easeIn.transform(t),
+                    child: Transform.translate(
+                      offset: Offset(0, (1 - t) * 40),
+                      child: SafeArea(
+                        top: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(22, 0, 22, 10),
+                          child: _lyricsFooter(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ]);
+        },
+      );
+    });
+  }
+
+  Widget _lyricsFooter() => Column(mainAxisSize: MainAxisSize.min, children: [
+        _bar(Colors.white, Colors.white24, h: 18, t: 6, th: _Thumb.none),
+        _times(Colors.white.withValues(alpha: .78), fs: 11.5),
+        const SizedBox(height: 2),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          _ibtn(_Ic.prev, widget.x.prev, 'Previous',
+              size: 34, c: Colors.white, pad: 10),
+          _playing((s) => _Tap(
+                onTap: _toggle,
+                tip: s == ButtonState.playing ? 'Pause' : 'Play',
+                child: Container(
+                  width: 60,
+                  height: 60,
+                  decoration: const BoxDecoration(
+                      shape: BoxShape.circle, color: Colors.white),
+                  child: s == ButtonState.loading
+                      ? const Padding(
+                          padding: EdgeInsets.all(18),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 3, color: Colors.black))
+                      : Icon(
+                          s == ButtonState.playing ? _Ic.pause : _Ic.play,
+                          size: 30,
+                          color: Colors.black),
+                ),
+              )),
+          _ibtn(_Ic.next, widget.x.next, 'Next',
+              size: 34, c: Colors.white, pad: 10),
+        ]),
+      ]);
+}
+
+/// Reports its child's size after layout (no rebuild when it is unchanged).
+class _MeasureSize extends StatefulWidget {
+  const _MeasureSize({required this.onSize, required this.child});
+  final ValueChanged<Size> onSize;
+  final Widget child;
+
+  @override
+  State<_MeasureSize> createState() => _MeasureSizeState();
+}
+
+class _MeasureSizeState extends State<_MeasureSize> {
+  final _key = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final box = _key.currentContext?.findRenderObject() as RenderBox?;
+      if (box != null && box.hasSize && mounted) widget.onSize(box.size);
+    });
+    return KeyedSubtree(key: _key, child: widget.child);
   }
 }
 
