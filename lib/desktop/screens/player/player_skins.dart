@@ -1480,54 +1480,6 @@ class _EchoSkin extends StatelessWidget {
         );
       });
 
-  // ── Song · Lyrics · Queue pill ───────────────────────────────────────────
-  Widget _tab(IconData i, String label, bool sel, VoidCallback? t) => Opacity(
-    opacity: t == null ? .45 : 1,
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: t == null
-          ? null
-          : () {
-        HapticFeedback.selectionClick();
-        t();
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-        decoration: BoxDecoration(
-          color: sel ? Colors.white.withValues(alpha: .22) : Colors.transparent,
-          borderRadius: BorderRadius.circular(40),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(i, size: 15, color: sel ? _w : Colors.white.withValues(alpha: .72)),
-          const SizedBox(width: 5),
-          Text(label,
-              style: _s(12, sel ? _w : Colors.white.withValues(alpha: .72),
-                  w: sel ? FontWeight.w700 : FontWeight.w600, ls: .2)),
-        ]),
-      ),
-    ),
-  );
-
-  Widget _pill() {
-    final lyr = x.hasLyrics && x.showLyrics;
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .34),
-        borderRadius: BorderRadius.circular(40),
-        border: Border.all(color: Colors.white.withValues(alpha: .18)),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        _tab(Icons.music_note_rounded, 'Song', !lyr, lyr ? x.toggleLyrics : null),
-        _tab(Icons.lyrics_outlined, 'Lyrics', lyr,
-            x.hasLyrics && !lyr ? x.toggleLyrics : null),
-        _tab(Icons.queue_music_rounded, 'Queue', false, x.openQueue),
-      ]),
-    );
-  }
-
   // ── title row + action buttons ───────────────────────────────────────────
   static BorderRadius _grp(int i, int n) {
     const o = Radius.circular(50), s = Radius.circular(3);
@@ -1763,6 +1715,8 @@ class _EchoSkin extends StatelessWidget {
         SizedBox(height: compact ? 4 : 10),
         _volApple(),
         const _OutputName(),
+        SizedBox(height: compact ? 8 : 14),
+        _dockM3(),
       ],
     ]);
   }
@@ -1774,7 +1728,6 @@ class _EchoSkin extends StatelessWidget {
     return _EchoMorph(
       x: x,
       hero: (t) => _hero(t: t),
-      pill: _pill(),
       controls: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 560),
         child: _controls(compact: compact),
@@ -1800,8 +1753,6 @@ class _EchoSkin extends StatelessWidget {
           child: Center(
             child: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                _pill(),
-                const SizedBox(height: 22),
                 _controls(compact: false),
               ]),
             ),
@@ -1845,20 +1796,17 @@ class _EchoSkin extends StatelessWidget {
 /// Player ⇄ lyrics sheet, the way Echo does it: ONE offset (0 = player,
 /// 1 = lyrics) drives every element together — cover shrinks to a corner
 /// thumbnail, the controls slide down and fade out within the first third,
-/// the title row slides in from above, the tab pill glides below it and the
-/// lyrics rise from the bottom. The offset follows a finger on the pill /
+/// the title row slides in from above and the lyrics rise from the bottom. The offset follows a finger on the pill /
 /// cover / header (drag up to open, down to close) and settles with a
 /// critically damped spring, so it never overshoots.
 class _EchoMorph extends StatefulWidget {
   const _EchoMorph({
     required this.x,
     required this.hero,
-    required this.pill,
     required this.controls,
   });
   final PlayerCtx x;
   final Widget Function(double t) hero;
-  final Widget pill;
   final Widget controls;
 
   @override
@@ -1942,10 +1890,7 @@ class _EchoMorphState extends State<_EchoMorph>
       final w = c.maxWidth, h = c.maxHeight;
       final topY = pad.top + 8;
       final headerBottom = topY + _thumb;
-      const pillH = 44.0;
-      final pillRestY = pad.top + 10;
-      final pillOpenY = headerBottom + 12;
-      final lyricsTop = pillOpenY + pillH + 8;
+      final lyricsTop = headerBottom + 12;
       final heroH = (h - _ctrlH - pad.bottom - 10).clamp(120.0, h);
 
       return AnimatedBuilder(
@@ -2063,14 +2008,6 @@ class _EchoMorphState extends State<_EchoMorph>
                   ),
                 ),
               ),
-            // Song · Lyrics · Queue pill: glides from the top edge to just
-            // under the title row
-            Positioned(
-              top: pillRestY + (pillOpenY - pillRestY) * t,
-              left: 0,
-              right: 0,
-              child: Center(child: grab(widget.pill)),
-            ),
             // seek bar + transport, fade in at the bottom with the lyrics
             if (t > 0.001)
               Positioned(
