@@ -1,16 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- ZenMusic · vorlon-dev -->
-<!-- Native launch window: shows the app icon on the system colour from the
-     first instant, so there is never an empty black window before Flutter
-     draws its first frame. -->
+
+<!-- Dark-mode launch splash (SP-79 Rev 2).
+
+     android:src="@mipmap/ic_launcher_foreground" shows YOUR CURRENT
+     launcher logo automatically: it is the glyph layer of the adaptive
+     icon (mipmap-anydpi-v26/ic_launcher.xml) and exists ONLY as real
+     raster PNGs (mipmap-*/ic_launcher_foreground.png) — always decodable,
+     and any logo update you commit shows up here with no extra work.
+
+     RULE for <bitmap android:src>: the name must resolve to a RASTER
+     image (PNG / WEBP / JPG) in a mipmap or drawable folder.
+
+       SAFE   : ic_launcher_foreground, ic_launcher_background,
+                ic_launcher_monochrome, logo_zen1..logo_zen9,
+                logo_mandala            (PNG-only, no shadowing XML)
+       FORBID : ic_launcher, zen_logo_1..zen_logo_9  — on Android 8+
+                (API 26+) those names resolve to the ADAPTIVE-ICON XML in
+                mipmap-anydpi-v26/, BitmapFactory cannot decode XML, and
+                the app dies at startup with:
+                  <bitmap> requires a valid 'src' attribute
+     Never reference a vector/XML drawable or an uncommitted file either. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@android:color/black" />
-    <item
-        android:width="96dp"
-        android:height="96dp"
-        android:gravity="center">
+
+    <item>
         <bitmap
-            android:gravity="fill"
-            android:src="@mipmap/ic_launcher" />
+            android:gravity="center"
+            android:src="@mipmap/ic_launcher_foreground" />
     </item>
 </layer-list>
