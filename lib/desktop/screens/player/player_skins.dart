@@ -13,7 +13,7 @@ import 'package:flutter/physics.dart' show SpringDescription, SpringSimulation;
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show EventChannel, HapticFeedback, MethodChannel;
+    show AssetManifest, EventChannel, HapticFeedback, MethodChannel, rootBundle;
 import 'package:get_it/get_it.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio_background/just_audio_background.dart'
@@ -568,7 +568,7 @@ class _SysVolState extends State<_SysVol> {
       initialData: _mp.player.volume,
       builder: (_, s) => _row(
           (s.data ?? 1.0).clamp(0.0, 1.0).toDouble(),
-          (n) => _mp.player.setVolume(n)),
+              (n) => _mp.player.setVolume(n)),
     );
   }
 }
@@ -647,7 +647,7 @@ class _OutputNameState extends State<_OutputName> {
 /// Player ⇄ full-screen lyrics page (SimpMusic). The page replaces the whole
 /// player while lyrics are on.
 Widget _lyricsLayer(
-        PlayerCtx x, Widget main, Widget Function(bool shown) page) {
+    PlayerCtx x, Widget main, Widget Function(bool shown) page) {
   final on = x.hasLyrics && x.showLyrics;
   return Stack(children: [
     Positioned.fill(
@@ -682,18 +682,18 @@ class _LyricsPage extends StatelessWidget {
   final Color? scrim;
 
   Widget _c(IconData i, VoidCallback? t, String tip) => Opacity(
-        opacity: t == null ? .4 : 1,
-        child: _Tap(
-          onTap: t,
-          tip: tip,
-          child: Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: chip),
-            child: Icon(i, size: 21, color: chipInk),
-          ),
-        ),
-      );
+    opacity: t == null ? .4 : 1,
+    child: _Tap(
+      onTap: t,
+      tip: tip,
+      child: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(shape: BoxShape.circle, color: chip),
+        child: Icon(i, size: 21, color: chipInk),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -732,26 +732,26 @@ class _LyricsPage extends StatelessWidget {
                 Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
                   _ibtn(_Ic.prev, x.prev, 'Previous', size: 34, c: ink, pad: 10),
                   _playing((s) => _Tap(
-                        onTap: _toggle,
-                        tip: s == ButtonState.playing ? 'Pause' : 'Play',
-                        child: Container(
-                          width: 62,
-                          height: 62,
-                          decoration:
-                              BoxDecoration(shape: BoxShape.circle, color: prim),
-                          child: s == ButtonState.loading
-                              ? Padding(
-                                  padding: const EdgeInsets.all(19),
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 3, color: onPrim))
-                              : Icon(
-                                  s == ButtonState.playing
-                                      ? _Ic.pause
-                                      : _Ic.play,
-                                  size: 30,
-                                  color: onPrim),
-                        ),
-                      )),
+                    onTap: _toggle,
+                    tip: s == ButtonState.playing ? 'Pause' : 'Play',
+                    child: Container(
+                      width: 62,
+                      height: 62,
+                      decoration:
+                      BoxDecoration(shape: BoxShape.circle, color: prim),
+                      child: s == ButtonState.loading
+                          ? Padding(
+                          padding: const EdgeInsets.all(19),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 3, color: onPrim))
+                          : Icon(
+                          s == ButtonState.playing
+                              ? _Ic.pause
+                              : _Ic.play,
+                          size: 30,
+                          color: onPrim),
+                    ),
+                  )),
                   _ibtn(_Ic.next, x.next, 'Next', size: 34, c: ink, pad: 10),
                 ]),
               ]),
@@ -989,7 +989,7 @@ class _SimpLiquid extends StatelessWidget {
         _lyricsLayer(
           x,
           _main(),
-          (shown) => _LyricsPage(
+              (shown) => _LyricsPage(
             x: x,
             shown: shown,
             ink: _w,
@@ -1006,29 +1006,29 @@ class _SimpLiquid extends StatelessWidget {
   }
 
   Widget _main() => LayoutBuilder(builder: (ctx, c) {
-          if (_isWide(c)) return _wide(ctx);
-          final compact = c.maxHeight < 660;
-          return Stack(children: [
-            Positioned.fill(
-              child: Column(children: [
-                Expanded(child: _hero(ctx)),
-                SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                    child: Align(
-                      alignment: Alignment.bottomCenter,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 560),
-                        child: _controls(compact: compact),
-                      ),
-                    ),
-                  ),
+    if (_isWide(c)) return _wide(ctx);
+    final compact = c.maxHeight < 660;
+    return Stack(children: [
+      Positioned.fill(
+        child: Column(children: [
+          Expanded(child: _hero(ctx)),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: _controls(compact: compact),
                 ),
-              ]),
+              ),
             ),
-          ]);
-        });
+          ),
+        ]),
+      ),
+    ]);
+  });
 
   Widget _wide(BuildContext ctx) => SafeArea(
     child: Padding(
@@ -1097,9 +1097,9 @@ class _PressState extends State<_Press> {
         onTap: widget.onTap == null
             ? null
             : () {
-                HapticFeedback.selectionClick();
-                widget.onTap!();
-              },
+          HapticFeedback.selectionClick();
+          widget.onTap!();
+        },
         child: AnimatedScale(
           scale: _d ? 0.9 : 1,
           duration: Duration(milliseconds: _d ? 90 : 320),
@@ -1432,7 +1432,7 @@ class _EchoSkin extends StatelessWidget {
   ]);
 
   // ── artwork / canvas hero (canvas replaces the artwork when it plays) ────
-  Widget _hero({double radius = 0, bool fade = true}) =>
+  Widget _hero({double radius = 0, bool fade = true, double t = 0}) =>
       LayoutBuilder(builder: (_, c) {
         final side = math.max(c.maxWidth, c.maxHeight);
         final art = ClipRect(
@@ -1456,15 +1456,18 @@ class _EchoSkin extends StatelessWidget {
           ),
         ]);
         if (fade) {
+          // t = 0: full-bleed cover fading into the controls; t = 1: the
+          // small rounded thumbnail of the lyrics sheet (no fade).
           media = ShaderMask(
             blendMode: BlendMode.dstIn,
-            shaderCallback: (r) => const LinearGradient(
+            shaderCallback: (r) => LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Colors.white, Colors.white, Colors.transparent],
-              stops: [0, .8, 1],
+              colors: const [Colors.white, Colors.white, Colors.transparent],
+              stops: [0, .8 + .2 * t, 1],
             ).createShader(r),
-            child: media,
+            child: ClipRRect(
+                borderRadius: BorderRadius.circular(14 * t), child: media),
           );
         } else {
           media = ClipRRect(
@@ -1476,54 +1479,6 @@ class _EchoSkin extends StatelessWidget {
           child: media,
         );
       });
-
-  // ── Song · Lyrics · Queue pill ───────────────────────────────────────────
-  Widget _tab(IconData i, String label, bool sel, VoidCallback? t) => Opacity(
-    opacity: t == null ? .45 : 1,
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: t == null
-          ? null
-          : () {
-        HapticFeedback.selectionClick();
-        t();
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-        decoration: BoxDecoration(
-          color: sel ? Colors.white.withValues(alpha: .22) : Colors.transparent,
-          borderRadius: BorderRadius.circular(40),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(i, size: 15, color: sel ? _w : Colors.white.withValues(alpha: .72)),
-          const SizedBox(width: 5),
-          Text(label,
-              style: _s(12, sel ? _w : Colors.white.withValues(alpha: .72),
-                  w: sel ? FontWeight.w700 : FontWeight.w600, ls: .2)),
-        ]),
-      ),
-    ),
-  );
-
-  Widget _pill() {
-    final lyr = x.hasLyrics && x.showLyrics;
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .34),
-        borderRadius: BorderRadius.circular(40),
-        border: Border.all(color: Colors.white.withValues(alpha: .18)),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        _tab(Icons.music_note_rounded, 'Song', !lyr, lyr ? x.toggleLyrics : null),
-        _tab(Icons.lyrics_outlined, 'Lyrics', lyr,
-            x.hasLyrics && !lyr ? x.toggleLyrics : null),
-        _tab(Icons.queue_music_rounded, 'Queue', false, x.openQueue),
-      ]),
-    );
-  }
 
   // ── title row + action buttons ───────────────────────────────────────────
   static BorderRadius _grp(int i, int n) {
@@ -1760,6 +1715,8 @@ class _EchoSkin extends StatelessWidget {
         SizedBox(height: compact ? 4 : 10),
         _volApple(),
         const _OutputName(),
+        SizedBox(height: compact ? 8 : 14),
+        _dockM3(),
       ],
     ]);
   }
@@ -1768,34 +1725,14 @@ class _EchoSkin extends StatelessWidget {
   Widget _main() => LayoutBuilder(builder: (ctx, c) {
     if (_isWide(c)) return _wide();
     final compact = c.maxHeight < 700;
-    return Stack(children: [
-      Positioned.fill(
-        child: Column(children: [
-          Expanded(child: _hero()),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 560),
-                  child: _controls(compact: compact),
-                ),
-              ),
-            ),
-          ),
-        ]),
+    return _EchoMorph(
+      x: x,
+      hero: (t) => _hero(t: t),
+      controls: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: _controls(compact: compact),
       ),
-      SafeArea(
-        bottom: false,
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: Padding(
-              padding: const EdgeInsets.only(top: 10), child: _pill()),
-        ),
-      ),
-    ]);
+    );
   });
 
   Widget _wide() => SafeArea(
@@ -1816,8 +1753,6 @@ class _EchoSkin extends StatelessWidget {
           child: Center(
             child: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                _pill(),
-                const SizedBox(height: 22),
                 _controls(compact: false),
               ]),
             ),
@@ -1834,59 +1769,488 @@ class _EchoSkin extends StatelessWidget {
       type: MaterialType.transparency,
       child: Stack(fit: StackFit.expand, children: [
         _bg(t),
-        _lyricsLayer(
-          x,
-          _main(),
-              (shown) => _LyricsPage(
-            x: x,
-            shown: shown,
-            ink: _w,
-            dim: _dim,
-            prim: _w,
-            onPrim: Colors.black,
-            chip: _w.withValues(alpha: .14),
-            chipInk: _w,
-            scrim: Colors.black.withValues(alpha: .34),
-          ),
-        ),
+        LayoutBuilder(builder: (ctx, c) {
+          // Narrow (phone): the player morphs into the lyrics sheet.
+          if (!_isWide(c)) return _main();
+          return _lyricsLayer(
+            x,
+            _main(),
+                (shown) => _LyricsPage(
+              x: x,
+              shown: shown,
+              ink: _w,
+              dim: _dim,
+              prim: _w,
+              onPrim: Colors.black,
+              chip: _w.withValues(alpha: .14),
+              chipInk: _w,
+              scrim: Colors.black.withValues(alpha: .34),
+            ),
+          );
+        }),
       ]),
     );
   }
 }
 
-class PlayerSkinPage extends StatelessWidget {
+/// Player ⇄ lyrics sheet, the way Echo does it: ONE offset (0 = player,
+/// 1 = lyrics) drives every element together — cover shrinks to a corner
+/// thumbnail, the controls slide down and fade out within the first third,
+/// the title row slides in from above and the lyrics rise from the bottom. The offset follows a finger on the pill /
+/// cover / header (drag up to open, down to close) and settles with a
+/// critically damped spring, so it never overshoots.
+class _EchoMorph extends StatefulWidget {
+  const _EchoMorph({
+    required this.x,
+    required this.hero,
+    required this.controls,
+  });
+  final PlayerCtx x;
+  final Widget Function(double t) hero;
+  final Widget controls;
+
+  @override
+  State<_EchoMorph> createState() => _EchoMorphState();
+}
+
+class _EchoMorphState extends State<_EchoMorph>
+    with SingleTickerProviderStateMixin {
+  static const double _thumb = 56; // collapsed cover
+  static const double _gutter = 16;
+  static const double _range = 280; // px of drag for a full open
+  static final SpringDescription _spring =
+  SpringDescription.withDampingRatio(mass: 1, stiffness: 380, ratio: 1);
+
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    value: _on ? 1 : 0,
+  );
+  bool _dragging = false;
+  double _ctrlH = 330;
+
+  bool get _on => widget.x.hasLyrics && widget.x.showLyrics;
+
+  @override
+  void didUpdateWidget(_EchoMorph old) {
+    super.didUpdateWidget(old);
+    if (!_dragging) _settle(_on ? 1 : 0, 0);
+  }
+
+  void _settle(double target, double velocity) {
+    if ((_c.value - target).abs() < .001 && velocity.abs() < .01) {
+      _c.value = target;
+      return;
+    }
+    _c.animateWith(SpringSimulation(_spring, _c.value, target, velocity));
+  }
+
+  void _dragStart(DragStartDetails _) {
+    _dragging = true;
+    _c.stop();
+  }
+
+  void _dragUpdate(DragUpdateDetails d) {
+    // Without lyrics there is nothing to open: just a little rubber band.
+    final max = widget.x.hasLyrics ? 1.0 : .06;
+    _c.value = (_c.value - d.delta.dy / _range).clamp(0.0, max);
+  }
+
+  void _dragEnd(DragEndDetails d) {
+    _dragging = false;
+    final v = d.velocity.pixelsPerSecond.dy; // negative = upwards
+    var target = _c.value > .5 ? 1.0 : 0.0;
+    if (v.abs() > 700) target = v < 0 ? 1.0 : 0.0;
+    if (!widget.x.hasLyrics) target = 0;
+    if (target != (_on ? 1.0 : 0.0)) {
+      HapticFeedback.selectionClick();
+      widget.x.toggleLyrics();
+    }
+    _settle(target, -v / _range);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final x = widget.x;
+    final pad = MediaQuery.paddingOf(context);
+    // Wraps a handle widget so a vertical drag on it scrubs the offset.
+    Widget grab(Widget child) => GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onVerticalDragStart: _dragStart,
+      onVerticalDragUpdate: _dragUpdate,
+      onVerticalDragEnd: _dragEnd,
+      child: child,
+    );
+    return LayoutBuilder(builder: (context, c) {
+      final w = c.maxWidth, h = c.maxHeight;
+      final topY = pad.top + 8;
+      final headerBottom = topY + _thumb;
+      final lyricsTop = headerBottom + 12;
+      final heroH = (h - _ctrlH - pad.bottom - 10).clamp(120.0, h);
+
+      return AnimatedBuilder(
+        animation: _c,
+        child: _MeasureSize(
+          onSize: (s) {
+            if ((s.height - _ctrlH).abs() > 1) {
+              setState(() => _ctrlH = s.height);
+            }
+          },
+          child: widget.controls,
+        ),
+        builder: (context, controls) {
+          final t = _c.value;
+          final out = (1 - (t * 3)).clamp(0.0, 1.0); // controls: gone by 1/3
+          final hero = Rect.lerp(
+            Rect.fromLTWH(0, 0, w, heroH),
+            Rect.fromLTWH(_gutter, topY, _thumb, _thumb),
+            t,
+          )!;
+          return Stack(children: [
+            // lyrics: rise from the bottom, fade in with the offset. Always
+            // mounted (zero-sized while closed): the box is what looks the
+            // lyrics up, so the Lyrics button only enables if it exists.
+            Positioned(
+              left: 0,
+              right: 0,
+              top: lyricsTop,
+              bottom: pad.bottom + 140, // above the seek bar + transport
+              child: IgnorePointer(
+                ignoring: t < .9,
+                child: Opacity(
+                  opacity: Curves.easeIn.transform(t),
+                  child: Transform.translate(
+                    offset: Offset(0, (1 - t) * 60),
+                    child: LayoutBuilder(
+                      builder: (_, lc) => x.lyrics(t > .02
+                          ? Size(lc.maxWidth, lc.maxHeight)
+                          : Size.zero),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // controls: slide down + fade out
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                ignoring: t > .15,
+                child: Opacity(
+                  opacity: out,
+                  child: Transform.translate(
+                    offset: Offset(0, 120 * t),
+                    child: SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: controls,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // cover → thumbnail
+            Positioned.fromRect(
+              rect: hero,
+              child: grab(GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: t > .9 ? x.toggleLyrics : null,
+                child: widget.hero(t),
+              )),
+            ),
+            // title row: slides in from above, alpha = offset
+            if (t > 0.001)
+              Positioned(
+                left: _gutter + _thumb + 12,
+                right: _gutter,
+                top: topY,
+                height: _thumb,
+                child: Opacity(
+                  opacity: t,
+                  child: Transform.translate(
+                    offset: Offset(0, -(1 - t) * _thumb * 2),
+                    child: grab(Row(children: [
+                      Expanded(
+                        child: _titles(x, Colors.white,
+                            Colors.white.withValues(alpha: .78), size: 15),
+                      ),
+                      _playing((s) => _Tap(
+                        onTap: _toggle,
+                        tip: s == ButtonState.playing ? 'Pause' : 'Play',
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: const BoxDecoration(
+                              shape: BoxShape.circle, color: Colors.white),
+                          child: Icon(
+                              s == ButtonState.playing
+                                  ? _Ic.pause
+                                  : _Ic.play,
+                              size: 24,
+                              color: Colors.black),
+                        ),
+                      )),
+                      const SizedBox(width: 6),
+                      _ibtn(Icons.keyboard_arrow_down_rounded, x.toggleLyrics,
+                          'Close lyrics',
+                          size: 26, c: Colors.white, pad: 8),
+                    ])),
+                  ),
+                ),
+              ),
+            // seek bar + transport, fade in at the bottom with the lyrics
+            if (t > 0.001)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  ignoring: t < .9,
+                  child: Opacity(
+                    opacity: Curves.easeIn.transform(t),
+                    child: Transform.translate(
+                      offset: Offset(0, (1 - t) * 40),
+                      child: SafeArea(
+                        top: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(22, 0, 22, 10),
+                          child: _lyricsFooter(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ]);
+        },
+      );
+    });
+  }
+
+  Widget _lyricsFooter() => Column(mainAxisSize: MainAxisSize.min, children: [
+    _bar(Colors.white, Colors.white24, h: 18, t: 6, th: _Thumb.none),
+    _times(Colors.white.withValues(alpha: .78), fs: 11.5),
+    const SizedBox(height: 2),
+    Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+      _ibtn(_Ic.prev, widget.x.prev, 'Previous',
+          size: 34, c: Colors.white, pad: 10),
+      _playing((s) => _Tap(
+        onTap: _toggle,
+        tip: s == ButtonState.playing ? 'Pause' : 'Play',
+        child: Container(
+          width: 60,
+          height: 60,
+          decoration: const BoxDecoration(
+              shape: BoxShape.circle, color: Colors.white),
+          child: s == ButtonState.loading
+              ? const Padding(
+              padding: EdgeInsets.all(18),
+              child: CircularProgressIndicator(
+                  strokeWidth: 3, color: Colors.black))
+              : Icon(
+              s == ButtonState.playing ? _Ic.pause : _Ic.play,
+              size: 30,
+              color: Colors.black),
+        ),
+      )),
+      _ibtn(_Ic.next, widget.x.next, 'Next',
+          size: 34, c: Colors.white, pad: 10),
+    ]),
+  ]);
+}
+
+/// Reports its child's size after layout (no rebuild when it is unchanged).
+class _MeasureSize extends StatefulWidget {
+  const _MeasureSize({required this.onSize, required this.child});
+  final ValueChanged<Size> onSize;
+  final Widget child;
+
+  @override
+  State<_MeasureSize> createState() => _MeasureSizeState();
+}
+
+class _MeasureSizeState extends State<_MeasureSize> {
+  final _key = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final box = _key.currentContext?.findRenderObject() as RenderBox?;
+      if (box != null && box.hasSize && mounted) widget.onSize(box.size);
+    });
+    return KeyedSubtree(key: _key, child: widget.child);
+  }
+}
+
+/// Player-screen picker: a small, clear preview of each style.
+///
+/// Drop one screenshot per style into assets/player/, named after the style
+/// (classic, applemusicmesh, simpliquid, simpm3 — or its label, e.g.
+/// "material3.png"; png / jpg / webp, any case). A style without a file
+/// shows assets/player/placeholder.* (or its icon).
+class PlayerSkinPage extends StatefulWidget {
   const PlayerSkinPage({super.key});
+
+  @override
+  State<PlayerSkinPage> createState() => _PlayerSkinPageState();
+}
+
+class _PlayerSkinPageState extends State<PlayerSkinPage> {
+  static Future<Map<String, String>>? _index;
+
+  static String _norm(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+  static Future<Map<String, String>> _load() => _index ??= () async {
+    final out = <String, String>{};
+    try {
+      final m = await AssetManifest.loadFromAssetBundle(rootBundle);
+      for (final a in m.listAssets()) {
+        if (!a.startsWith('assets/player/')) continue;
+        final file = a.substring('assets/player/'.length);
+        final dot = file.lastIndexOf('.');
+        if (dot <= 0) continue;
+        final ext = file.substring(dot + 1).toLowerCase();
+        if (!const {'png', 'jpg', 'jpeg', 'webp'}.contains(ext)) continue;
+        out[_norm(file.substring(0, dot))] = a;
+      }
+    } catch (_) {}
+    return out;
+  }();
+
+  String? _pathFor(Map<String, String>? idx, PlayerSkin s) =>
+      idx?[_norm(s.name)] ?? idx?[_norm(s.label)];
+
+  void _zoom(BuildContext context, PlayerSkin s, String? path) {
+    if (path == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(24),
+        child: GestureDetector(
+          onTap: () => Navigator.of(context).pop(),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: Image.asset(path, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(title: Text('Player screen'.tr)),
       body: ValueListenableBuilder<String>(
         valueListenable: PlayerSkinPrefs.skin,
         builder: (context, name, _) {
           final cur = PlayerSkin.fromName(name);
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 640),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
-                children: [
-                  ZenSection(children: [
-                    for (final s in PlayerSkin.values)
-                      ZenRow(
-                        icon: s.icon,
-                        title: s.label,
-                        subtitle: s.desc,
-                        onTap: () => PlayerSkinPrefs.set(s.name),
-                        trailing: s == cur
-                            ? Icon(ZenIcons.check, size: 22, color: cs.primary)
-                            : null,
-                      ),
-                  ]),
-                ],
-              ),
-            ),
+          return FutureBuilder<Map<String, String>>(
+            future: _load(),
+            builder: (context, snap) {
+              final idx = snap.data;
+              final ph = idx?['placeholder'];
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
+                    gridDelegate:
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 14,
+                      crossAxisSpacing: 14,
+                      childAspectRatio: .56,
+                    ),
+                    itemCount: PlayerSkin.values.length,
+                    itemBuilder: (context, i) {
+                      final s = PlayerSkin.values[i];
+                      final sel = s == cur;
+                      final path = _pathFor(idx, s) ?? ph;
+                      return GestureDetector(
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          PlayerSkinPrefs.set(s.name);
+                        },
+                        onLongPress: () => _zoom(context, s, path),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          decoration: BoxDecoration(
+                            color: cs.surfaceContainer,
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                              color: sel ? cs.primary : Colors.transparent,
+                              width: 2.5,
+                            ),
+                          ),
+                          padding: const EdgeInsets.all(8),
+                          child: Column(children: [
+                            Expanded(
+                              child: Stack(children: [
+                                Positioned.fill(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(14),
+                                    child: path == null
+                                        ? ColoredBox(
+                                      color: cs.surfaceContainerHighest,
+                                      child: Icon(s.icon,
+                                          size: 32,
+                                          color: cs.onSurfaceVariant),
+                                    )
+                                        : Image.asset(path,
+                                        fit: BoxFit.cover,
+                                        alignment: Alignment.topCenter,
+                                        errorBuilder: (_, __, ___) =>
+                                            ColoredBox(
+                                              color: cs
+                                                  .surfaceContainerHighest,
+                                              child: Icon(s.icon),
+                                            )),
+                                  ),
+                                ),
+                                if (sel)
+                                  Positioned(
+                                    top: 6,
+                                    right: 6,
+                                    child: CircleAvatar(
+                                      radius: 12,
+                                      backgroundColor: cs.primary,
+                                      child: Icon(Icons.check_rounded,
+                                          size: 16, color: cs.onPrimary),
+                                    ),
+                                  ),
+                              ]),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(s.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: tt.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: sel ? cs.primary : cs.onSurface)),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
           );
         },
       ),

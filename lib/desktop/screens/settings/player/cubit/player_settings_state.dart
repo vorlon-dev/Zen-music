@@ -10,7 +10,42 @@ sealed class PlayerSettingsState {
 class PlayerSettingsLoaded extends PlayerSettingsState {
   final bool skipSilence;
 
+  /// Haptic beats — vibrates on the rhythm of the playing song.
+  /// Backed by services/beat_haptics.dart (engine starts at boot).
+  final bool beatHaptics;
+
+  /// Vibration tier per beat: 0 = light, 1 = medium, 2 = strong
+  /// (BeatStrength in services/beat_haptics.dart).
+  final int beatStrength;
+
+  /// Sing mode — vocal removal so you can sing along.
+  /// Backed by services/sing_mode.dart (restored at boot).
+  final bool singMode;
+
+  /// How much of the singer's voice stays in the mix:
+  /// 0.0 = full karaoke, 1.0 = untouched vocals
+  /// (voiceLevel in services/sing_mode.dart).
+  final double singVoiceLevel;
+
   const PlayerSettingsLoaded({
     required this.skipSilence,
+    required this.beatHaptics,
+    required this.beatStrength,
+    required this.singMode,
+    required this.singVoiceLevel,
   });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlayerSettingsLoaded &&
+          other.skipSilence == skipSilence &&
+          other.beatHaptics == beatHaptics &&
+          other.beatStrength == beatStrength &&
+          other.singMode == singMode &&
+          other.singVoiceLevel == singVoiceLevel;
+
+  @override
+  int get hashCode => Object.hash(
+      skipSilence, beatHaptics, beatStrength, singMode, singVoiceLevel);
 }

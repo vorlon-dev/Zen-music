@@ -124,6 +124,8 @@ class ZenRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: tt.bodyLarge?.copyWith(
                             color: titleColor, fontWeight: FontWeight.w500)),
                     if (subtitle != null)
@@ -142,7 +144,15 @@ class ZenRow extends StatelessWidget {
               ),
               if (trailing != null) ...[
                 const SizedBox(width: 12),
-                trailing!,
+                // Dropdowns and buttons never get more than ~40 % of the
+                // row, so the title keeps room and never wraps per letter.
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: (MediaQuery.sizeOf(context).width * 0.4)
+                        .clamp(96.0, 200.0),
+                  ),
+                  child: trailing!,
+                ),
               ],
               if (chevron) ...[
                 const SizedBox(width: 8),

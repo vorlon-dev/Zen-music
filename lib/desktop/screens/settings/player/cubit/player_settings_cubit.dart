@@ -4,8 +4,10 @@ import 'package:bloc/bloc.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 
+import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/settings_manager.dart';
+import 'package:zenmusic/desktop/services/sing_mode.dart';
 
 part 'player_settings_state.dart';
 
@@ -19,6 +21,10 @@ class PlayerSettingsCubit extends Cubit<PlayerSettingsState> {
       : super(
     PlayerSettingsLoaded(
       skipSilence: GetIt.I<SettingsManager>().skipSilence,
+      beatHaptics: AppearancePrefs.beatHaptics.value,
+      beatStrength: AppearancePrefs.beatStrength.value,
+      singMode: SingMode.instance.enabled.value,
+      singVoiceLevel: SingMode.instance.voiceLevel.value,
     ),
   ) {
     _listener = () {
@@ -28,16 +34,28 @@ class PlayerSettingsCubit extends Cubit<PlayerSettingsState> {
     };
 
     _settings.addListener(_listener);
+    AppearancePrefs.beatHaptics.addListener(_listener);
+    AppearancePrefs.beatStrength.addListener(_listener);
+    SingMode.instance.enabled.addListener(_listener);
+    SingMode.instance.voiceLevel.addListener(_listener);
   }
 
   void _emitState() {
     if (isClosed) return;
 
-    emit(
-      PlayerSettingsLoaded(
-        skipSilence: _settings.skipSilence,
-      ),
+    final next = PlayerSettingsLoaded(
+      skipSilence: _settings.skipSilence,
+      beatHaptics: AppearancePrefs.beatHaptics.value,
+      beatStrength: AppearancePrefs.beatStrength.value,
+      singMode: SingMode.instance.enabled.value,
+      singVoiceLevel: SingMode.instance.voiceLevel.value,
     );
+
+    // Identical-state emits are skipped so a notifier storm never causes
+    // redundant BlocBuilder rebuilds.
+    if (next == state) return;
+
+    emit(next);
   }
 
   Future<void> setSkipSilence(bool value) async {
@@ -46,9 +64,41 @@ class PlayerSettingsCubit extends Cubit<PlayerSettingsState> {
     // listener will re-emit
   }
 
+  /// Haptic beats (services/beat_haptics.dart): the engine listens on
+  /// [AppearancePrefs.beatHaptics] itself, so writing the pref re-arms
+  /// it for the current song — including a first-ever enable mid-song.
+  Future<void> setBeatHaptics(bool value) async {
+    await AppearancePrefs.setBeatHaptics(value);
+    // listener will re-emit
+  }
+
+  /// 0 = light, 1 = medium, 2 = strong (BeatStrength tiers). The engine
+  /// reads the tier at every fire, so changes apply from the next beat.
+  Future<void> setBeatStrength(int value) async {
+    await AppearancePrefs.setBeatStrength(value);
+  }
+
+  /// Sing mode (services/sing_mode.dart): persists to the SETTINGS box
+  /// and applies the vocal-removal amount through the Android lossless
+  /// bridge immediately.
+  Future<void> setSingMode(bool value) async {
+    await SingMode.instance.setEnabled(value);
+    // listener will re-emit
+  }
+
+  /// 0.0 = no vocals (full karaoke), 1.0 = untouched mix. Applied live
+  /// while Sing mode is on.
+  Future<void> setSingVoiceLevel(double value) async {
+    await SingMode.instance.setVoiceLevel(value);
+  }
+
   @override
   Future<void> close() {
     _settings.removeListener(_listener);
+    AppearancePrefs.beatHaptics.removeListener(_listener);
+    AppearancePrefs.beatStrength.removeListener(_listener);
+    SingMode.instance.enabled.removeListener(_listener);
+    SingMode.instance.voiceLevel.removeListener(_listener);
     return super.close();
   }
 }

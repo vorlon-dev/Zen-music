@@ -33,6 +33,7 @@ import 'package:zenmusic/desktop/screens/player/widgets/swipe_artwork_stack.dart
 import 'package:zenmusic/desktop/screens/player/player_skins.dart';
 import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/innertubex_bridge.dart';
+import 'package:zenmusic/desktop/services/yt_canvas.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
 import 'package:zenmusic/desktop/instagram_canvas/instagram_canvas.dart';
@@ -184,6 +185,8 @@ class _PlayerPageState extends State<PlayerPage>
   Map<String, String> _videoHeaders = const {};
 
   bool _isSpotifyCanvas = false;
+  // Set for a YouTube canvas: a 20 s window of the video, looped muted.
+  Duration? _clipStart;
   bool _canvasReady = false;
 
   bool get _canvasOwnsScreen =>
@@ -300,6 +303,7 @@ class _PlayerPageState extends State<PlayerPage>
           _seekDrag = null;
           _videoBackdropUrl = null; // stale video must not linger
           _isSpotifyCanvas = false; // stale canvas must not linger
+          _clipStart = null;
           _canvasReady = false; // cover returns until the next canvas renders
         });
       }
@@ -315,7 +319,9 @@ class _PlayerPageState extends State<PlayerPage>
         builder: (context, state, _) => VideoBackdrop(
           streamUrl: _videoBackdropUrl!,
           playing: state == ButtonState.playing,
-          shortLoop: _isSpotifyCanvas,
+          shortLoop: _isSpotifyCanvas && _clipStart == null,
+          clipStart: _clipStart,
+          clipLength: YtCanvas.clipLength,
           synchronized: !_isSpotifyCanvas,
           positionStream: _isSpotifyCanvas
               ? null
@@ -332,6 +338,7 @@ class _PlayerPageState extends State<PlayerPage>
               setState(() {
                 _videoBackdropUrl = null;
                 _isSpotifyCanvas = false;
+                _clipStart = null;
                 _canvasReady = false;
               });
               _giveWindowsBackdropBack();
@@ -378,9 +385,25 @@ class _PlayerPageState extends State<PlayerPage>
       }
     }
 
-    // 1.5 Instagram reel canvas (SP72) — a related public reel for THIS
-    // song (its song videos / edits / dance videos, found per song), played
-    // muted + short-loop exactly like a canvas. No reel -> step 2 below.
+    // 1.5 YouTube canvas — no Spotify session, or Spotify has no canvas for
+    // this song: the song's own video, muted, a 20 s loop in up to 1080p.
+    // (Android: the extractor lives in the Android build.)
+    if (song != null && Platform.isAndroid) {
+      final clip = await YtCanvas.instance.resolve(song);
+      if (!mounted || currentSong?.id != id) return;
+      if (clip != null) {
+        setState(() {
+          _videoBackdropUrl = clip.url;
+          _videoHeaders = clip.headers;
+          _isSpotifyCanvas = true; // muted loop, exactly like a canvas
+          _clipStart = clip.clipStart;
+        });
+        return;
+      }
+    }
+
+    // 2. Instagram reel canvas (SP72) — a related public reel for THIS
+    // song, played muted + short-loop. No reel -> no video backdrop.
     if (song != null) {
       final reel = await InstagramCanvas.instance.resolveBackdrop(
         songKey: id,
@@ -394,26 +417,12 @@ class _PlayerPageState extends State<PlayerPage>
           _videoBackdropUrl = reel.url;
           _videoHeaders = reel.headers;
           _isSpotifyCanvas = true; // reel loops muted exactly like a canvas
+          _clipStart = null;
         });
         if (Platform.isWindows) {
           WindowsBackdropService.instance.trackChanged(videoId: null);
         }
-        return;
       }
-    }
-
-    // 2. YouTube Music video backdrop (Android only) — unchanged.
-    if (!Platform.isAndroid) return;
-    if (id.length != 11) return;
-
-    final streams = await InnertubexBridge.extractVideo(id, maxHeight: 720);
-    if (!mounted || currentSong?.id != id) return;
-    if (streams?.videoUrl != null) {
-      setState(() {
-        _videoBackdropUrl = streams!.videoUrl;
-        _videoHeaders = streams.headers;
-        _isSpotifyCanvas = false;
-      });
     }
   }
 
@@ -752,7 +761,9 @@ class _PlayerPageState extends State<PlayerPage>
                       builder: (context, state, _) => VideoBackdrop(
                         streamUrl: _videoBackdropUrl!,
                         playing: state == ButtonState.playing,
-                        shortLoop: _isSpotifyCanvas,
+                        shortLoop: _isSpotifyCanvas && _clipStart == null,
+          clipStart: _clipStart,
+          clipLength: YtCanvas.clipLength,
                         synchronized: !_isSpotifyCanvas,
                         positionStream: _isSpotifyCanvas
                             ? null
@@ -769,6 +780,7 @@ class _PlayerPageState extends State<PlayerPage>
                             setState(() {
                               _videoBackdropUrl = null;
                               _isSpotifyCanvas = false;
+                              _clipStart = null;
                               _canvasReady = false;
                             });
                             _giveWindowsBackdropBack();
