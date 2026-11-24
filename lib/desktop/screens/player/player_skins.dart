@@ -13,7 +13,7 @@ import 'package:flutter/physics.dart' show SpringDescription, SpringSimulation;
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show EventChannel, HapticFeedback, MethodChannel;
+    show AssetManifest, EventChannel, HapticFeedback, MethodChannel, rootBundle;
 import 'package:get_it/get_it.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio_background/just_audio_background.dart'
