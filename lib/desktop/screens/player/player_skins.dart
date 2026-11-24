@@ -2093,39 +2093,164 @@ class _MeasureSizeState extends State<_MeasureSize> {
   }
 }
 
-class PlayerSkinPage extends StatelessWidget {
+/// Player-screen picker: a small, clear preview of each style.
+///
+/// Drop one screenshot per style into assets/player/, named after the style
+/// (classic, applemusicmesh, simpliquid, simpm3 — or its label, e.g.
+/// "material3.png"; png / jpg / webp, any case). A style without a file
+/// shows assets/player/placeholder.* (or its icon).
+class PlayerSkinPage extends StatefulWidget {
   const PlayerSkinPage({super.key});
+
+  @override
+  State<PlayerSkinPage> createState() => _PlayerSkinPageState();
+}
+
+class _PlayerSkinPageState extends State<PlayerSkinPage> {
+  static Future<Map<String, String>>? _index;
+
+  static String _norm(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+  static Future<Map<String, String>> _load() => _index ??= () async {
+        final out = <String, String>{};
+        try {
+          final m = await AssetManifest.loadFromAssetBundle(rootBundle);
+          for (final a in m.listAssets()) {
+            if (!a.startsWith('assets/player/')) continue;
+            final file = a.substring('assets/player/'.length);
+            final dot = file.lastIndexOf('.');
+            if (dot <= 0) continue;
+            final ext = file.substring(dot + 1).toLowerCase();
+            if (!const {'png', 'jpg', 'jpeg', 'webp'}.contains(ext)) continue;
+            out[_norm(file.substring(0, dot))] = a;
+          }
+        } catch (_) {}
+        return out;
+      }();
+
+  String? _pathFor(Map<String, String>? idx, PlayerSkin s) =>
+      idx?[_norm(s.name)] ?? idx?[_norm(s.label)];
+
+  void _zoom(BuildContext context, PlayerSkin s, String? path) {
+    if (path == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(24),
+        child: GestureDetector(
+          onTap: () => Navigator.of(context).pop(),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: Image.asset(path, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(title: Text('Player screen'.tr)),
       body: ValueListenableBuilder<String>(
         valueListenable: PlayerSkinPrefs.skin,
         builder: (context, name, _) {
           final cur = PlayerSkin.fromName(name);
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 640),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
-                children: [
-                  ZenSection(children: [
-                    for (final s in PlayerSkin.values)
-                      ZenRow(
-                        icon: s.icon,
-                        title: s.label,
-                        subtitle: s.desc,
-                        onTap: () => PlayerSkinPrefs.set(s.name),
-                        trailing: s == cur
-                            ? Icon(ZenIcons.check, size: 22, color: cs.primary)
-                            : null,
-                      ),
-                  ]),
-                ],
-              ),
-            ),
+          return FutureBuilder<Map<String, String>>(
+            future: _load(),
+            builder: (context, snap) {
+              final idx = snap.data;
+              final ph = idx?['placeholder'];
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 14,
+                      crossAxisSpacing: 14,
+                      childAspectRatio: .56,
+                    ),
+                    itemCount: PlayerSkin.values.length,
+                    itemBuilder: (context, i) {
+                      final s = PlayerSkin.values[i];
+                      final sel = s == cur;
+                      final path = _pathFor(idx, s) ?? ph;
+                      return GestureDetector(
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          PlayerSkinPrefs.set(s.name);
+                        },
+                        onLongPress: () => _zoom(context, s, path),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          decoration: BoxDecoration(
+                            color: cs.surfaceContainer,
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                              color: sel ? cs.primary : Colors.transparent,
+                              width: 2.5,
+                            ),
+                          ),
+                          padding: const EdgeInsets.all(8),
+                          child: Column(children: [
+                            Expanded(
+                              child: Stack(children: [
+                                Positioned.fill(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(14),
+                                    child: path == null
+                                        ? ColoredBox(
+                                            color: cs.surfaceContainerHighest,
+                                            child: Icon(s.icon,
+                                                size: 32,
+                                                color: cs.onSurfaceVariant),
+                                          )
+                                        : Image.asset(path,
+                                            fit: BoxFit.cover,
+                                            alignment: Alignment.topCenter,
+                                            errorBuilder: (_, __, ___) =>
+                                                ColoredBox(
+                                                  color: cs
+                                                      .surfaceContainerHighest,
+                                                  child: Icon(s.icon),
+                                                )),
+                                  ),
+                                ),
+                                if (sel)
+                                  Positioned(
+                                    top: 6,
+                                    right: 6,
+                                    child: CircleAvatar(
+                                      radius: 12,
+                                      backgroundColor: cs.primary,
+                                      child: Icon(Icons.check_rounded,
+                                          size: 16, color: cs.onPrimary),
+                                    ),
+                                  ),
+                              ]),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(s.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: tt.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: sel ? cs.primary : cs.onSurface)),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
           );
         },
       ),
