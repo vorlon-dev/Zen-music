@@ -6,7 +6,7 @@
 // Logos: drop one file per source into assets/lyrics/, named after the
 // source (e.g. musixmatch.png, genius.svg, lrcred.png, betterlyrics.webp).
 // Letters only, any case, png / jpg / webp / svg. A source without a file
-// shows the app logo instead.
+// shows assets/lyrics/placeholder.* (or the app logo if that is missing).
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -373,7 +373,21 @@ class _SourceLogo extends StatelessWidget {
         return out;
       }();
 
-  Widget _fallback() => ZenLogoWidget(size: size, borderRadius: size * .3);
+  Widget _fallback([Map<String, String>? idx]) {
+    final ph = idx?['placeholder'];
+    if (ph == null) {
+      return ZenLogoWidget(size: size, borderRadius: size * .3);
+    }
+    if (ph.toLowerCase().endsWith('.svg')) {
+      return SvgPicture.asset(ph, width: size, height: size);
+    }
+    return Image.asset(ph,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) =>
+            ZenLogoWidget(size: size, borderRadius: size * .3));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -386,19 +400,19 @@ class _SourceLogo extends StatelessWidget {
             : (idx[_norm(source.name)] ?? idx[_norm(source.label)]);
         final Widget child;
         if (path == null) {
-          child = _fallback();
+          child = _fallback(idx);
         } else if (path.toLowerCase().endsWith('.svg')) {
           child = SvgPicture.asset(path,
               width: size,
               height: size,
               fit: BoxFit.contain,
-              placeholderBuilder: (_) => _fallback());
+              placeholderBuilder: (_) => _fallback(idx));
         } else {
           child = Image.asset(path,
               width: size,
               height: size,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _fallback());
+              errorBuilder: (_, __, ___) => _fallback(idx));
         }
         return ClipRRect(
           borderRadius: BorderRadius.circular(size * .3),
