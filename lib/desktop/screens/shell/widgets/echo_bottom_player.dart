@@ -3,6 +3,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart'
+    show DragUpdateDetails, DragEndDetails;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:get_it/get_it.dart';
@@ -16,10 +18,33 @@ import 'package:zenmusic/desktop/services/settings_manager.dart';
 import 'package:zenmusic/desktop/utils/adaptive_widgets/progress_ring.dart';
 import 'package:zenmusic/desktop/utils/song_thumbnail.dart';
 
+/// SP-76: vertical-drag sink for the mobile shell's Echo Nightly player
+/// sheet. When the shell provides one, dragging the mini pill UP feeds the
+/// shell's sheet offset every frame (1:1 finger tracking, like the
+/// reference) instead of firing the old threshold-open spring. Tap still
+/// opens through [EchoBottomPlayer.onOpen]; horizontal swipe-to-switch is
+/// untouched. Null (desktop / standalone) keeps the old behaviour.
+class EchoSheetDragSink {
+  const EchoSheetDragSink({
+    required this.update,
+    required this.end,
+    required this.cancel,
+  });
+
+  final void Function(DragUpdateDetails d) update;
+  final void Function(DragEndDetails d) end;
+  final VoidCallback cancel;
+}
+
 class EchoBottomPlayer extends StatefulWidget {
-  const EchoBottomPlayer({super.key, this.onOpen});
+  const EchoBottomPlayer({super.key, this.onOpen, this.sheetDrag});
 
   final VoidCallback? onOpen;
+
+  /// SP-76: when set, dragging the pill up/down drives the shell's player
+  /// sheet directly (Echo Nightly finger-following) instead of the
+  /// threshold-open spring.
+  final EchoSheetDragSink? sheetDrag;
 
   @override
   State<EchoBottomPlayer> createState() => _EchoBottomPlayerState();
@@ -64,6 +89,7 @@ class _EchoBottomPlayerState extends State<EchoBottomPlayer> {
               color: backgroundColor,
               onImageReady: updateBackgroundColor,
               onOpen: widget.onOpen, // SP-81b: forward the sheet opener
+              sheetDrag: widget.sheetDrag, // SP-76: finger-following sheet
             ),
           ),
         );
@@ -79,6 +105,7 @@ class _EchoMiniBody extends StatefulWidget {
     required this.color,
     required this.onImageReady,
     this.onOpen, // SP-81b
+    this.sheetDrag, // SP-76
   });
 
   final MediaItem song;
@@ -86,6 +113,9 @@ class _EchoMiniBody extends StatefulWidget {
   final void Function(ImageProvider image) onImageReady;
 
   final VoidCallback? onOpen;
+
+  /// SP-76: vertical drags go to the shell's sheet when provided.
+  final EchoSheetDragSink? sheetDrag;
 
   @override
   State<_EchoMiniBody> createState() => _EchoMiniBodyState();
@@ -297,9 +327,18 @@ class _EchoMiniBodyState extends State<_EchoMiniBody>
           onTapUp: (_) => _press.reverse(),
           onTapCancel: () => _press.reverse(),
           onTap: _open,
-          onVerticalDragUpdate: (d) {
-            if ((d.primaryDelta ?? 0) < -_dragThreshold) _open();
-          },
+          // SP-76: with a sheet sink the pill IS the collapsed sheet — drag
+          // it and the sheet follows the finger 1:1 (Echo Nightly). Without
+          // one, keep the old upward-threshold open.
+          onVerticalDragUpdate: widget.sheetDrag != null
+              ? (d) => widget.sheetDrag!.update(d)
+              : (d) {
+                  if ((d.primaryDelta ?? 0) < -_dragThreshold) _open();
+                },
+          onVerticalDragEnd:
+              widget.sheetDrag != null ? widget.sheetDrag!.end : null,
+          onVerticalDragCancel:
+              widget.sheetDrag != null ? widget.sheetDrag!.cancel : null,
           onHorizontalDragStart: (_) {
             _drag.stop();
             _dragStart = DateTime.now();

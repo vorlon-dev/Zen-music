@@ -8,6 +8,7 @@ import 'package:zenmusic/desktop/screens/settings/player/native_eq_view.dart';
 import 'package:zenmusic/desktop/services/eq_models.dart';
 import 'package:zenmusic/desktop/services/native_equalizer.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/utils/zen_settings_kit.dart';
 
 class EqualizerPage extends StatefulWidget {
   const EqualizerPage({super.key});
@@ -145,56 +146,61 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      children: [
-        SwitchListTile(
-          title: Text('Enable Equalizer'.tr),
-          secondary: const Icon(Icons.equalizer_rounded),
-          value: enabled,
-          onChanged: onEnabled,
-        ),
-        const Divider(),
-        for (var i = 0; i < params.bands.length; i++)
-          ListTile(
-            dense: true,
-            title: Text(
-              '${(params.bands[i].centerHz / 100).round() / 10} kHz',
-              style: const TextStyle(fontSize: 13),
+    final cs = Theme.of(context).colorScheme;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
+          children: [
+            ZenSection(children: [
+              ZenSwitchRow(
+                icon: Icons.equalizer_rounded,
+                title: 'Enable Equalizer'.tr,
+                subtitle: enabled ? 'On' : 'Off',
+                value: enabled,
+                onChanged: onEnabled,
+              ),
+            ]),
+            ZenSection(title: 'Bands'.tr, children: [
+              for (var i = 0; i < params.bands.length; i++)
+                ZenSliderRow(
+                  icon: Icons.graphic_eq_rounded,
+                  title: '${(params.bands[i].centerHz / 100).round() / 10} kHz',
+                  valueLabel: gains.length > i
+                      ? '${gains[i].toStringAsFixed(1)} dB'
+                      : '0.0 dB',
+                  value: gains.length > i ? gains[i] : 0.0,
+                  min: params.minDb,
+                  max: params.maxDb,
+                  divisions: ((params.maxDb - params.minDb) * 2)
+                      .round()
+                      .clamp(4, 60),
+                  onChanged: (v) {
+                    if (enabled) onGain(i, v);
+                  },
+                ),
+            ]),
+            Center(
+              child: FilledButton.tonalIcon(
+                onPressed: enabled ? onReset : null,
+                icon: const Icon(Icons.restart_alt_rounded),
+                label: Text('Reset all bands'.tr),
+              ),
             ),
-            subtitle: Slider(
-              value: gains.length > i
-                  ? gains[i].clamp(params.minDb, params.maxDb)
-                  : 0.0,
-              min: params.minDb,
-              max: params.maxDb,
-              divisions:
-              ((params.maxDb - params.minDb) * 2).round().clamp(4, 60),
-              label: gains.length > i
-                  ? '${gains[i].toStringAsFixed(1)} dB'
-                  : '0.0 dB',
-              onChanged: enabled ? (v) => onGain(i, v) : null,
+            const SizedBox(height: 20),
+            Text(
+              'Bands are the device equalizer — applies system-wide to '
+                  'ZenMusic playback while enabled.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: cs.onSurfaceVariant),
             ),
-          ),
-        const SizedBox(height: 8),
-        Center(
-          child: OutlinedButton.icon(
-            onPressed: enabled ? onReset : null,
-            icon: const Icon(Icons.restart_alt_rounded),
-            label: Text('Reset all bands'.tr),
-          ),
+          ],
         ),
-        const SizedBox(height: 24),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Text(
-            'Bands are the device equalizer — applies system-wide to '
-                'ZenMusic playback while enabled.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

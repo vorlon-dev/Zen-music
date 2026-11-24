@@ -3,11 +3,19 @@
 // Mobile shell with a "floating button" bottom bar.
 // A glowing circle rises out of a pill bar and springs to the active tab.
 //
+// SP-76 · Echo Nightly player sheet: the mini player IS the collapsed sheet.
+// Dragging the pill up grows THE PILL into the full player — the panel's
+// top edge rises 1:1 with the finger from the pill's own rect, the bottom
+// edge slides down over the dock in the first half of the travel, the
+// artwork morphs from the pill's thumbnail into the page's artwork, the
+// pill fades with offset*2 and the player content composes in over the
+// first half. Settles with a spring, exactly like the reference.
+//
 // Built to stay smooth on low-end phones:
-//  * no BackdropFilter / blur / saveLayer / BoxShadow blur
-//  * ONE AnimationController (spring) drives the whole dock
-//  * the circle only moves through a Transform (compositor, no repaint)
-//  * only the small bar outline is repainted per frame
+//  * no BackdropFilter / blur / saveLayer / BoxShadow blur in the sheet
+//  * ONE AnimationController (spring) drives dock + sheet + morph
+//  * per-frame work is positioned containers only; the player page subtree
+//    is a cached AnimatedBuilder child and never rebuilds mid-drag
 //  * scroll-hide uses a ValueNotifier, so the page below never rebuilds
 
 import 'dart:io';
@@ -15,9 +23,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
-import 'package:flutter/gestures.dart'
-    show DragUpdateDetails, DragEndDetails, GestureDragUpdateCallback, GestureDragEndCallback;
-import 'package:flutter/rendering.dart' show ScrollDirection;
+import 'package:flutter/gestures.dart' show DragUpdateDetails, DragEndDetails;
+import 'package:flutter/rendering.dart' show ScrollDirection, RenderBox;
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -26,10 +33,10 @@ import 'package:just_audio_background/just_audio_background.dart' show MediaItem
 import 'package:zenmusic/desktop/liquid/glass_panel.dart';
 import 'package:zenmusic/desktop/screens/player/player_page.dart';
 import 'package:zenmusic/desktop/services/settings_manager.dart';
-import 'package:zenmusic/desktop/screens/shell/widgets/bottom_player.dart';
 import 'package:zenmusic/desktop/screens/shell/widgets/echo_bottom_player.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/shell_overlays_bus.dart';
+import 'package:zenmusic/desktop/utils/song_thumbnail.dart';
 
 const List<int> kZenMobileBranchOrder = [0, 1, 2, 3, 4];
 const int _kDiscoverBranch = 2; // Home, Search, Discover, Saved, Settings
@@ -51,6 +58,9 @@ const double _kBubbleCenterY = _kOverhang + 6; // circle centre, from dock top
 const double _kNotchHalf = 40;
 const double _kNotchDepth = 13;
 
+/// The mini pill's total wrapper height (64 pill + 10 internal bottom pad).
+const double _kMiniWrapHeight = 74;
+
 class ZenMobileShell extends StatefulWidget {
   const ZenMobileShell({super.key, required this.navigationShell});
 
@@ -69,59 +79,187 @@ class _ZenMobileShellState extends State<ZenMobileShell>
 
   // Player sheet: 0 = closed (mini player), 1 = fully open. Dragged by the
   // finger, so the sheet, the mini player and the dock all follow it.
+  // Settles with a spring (Echo Nightly feel): slightly under-damped so it
+  // glides into place without a visible bounce. Overshoot past 0/1 is
+  // harmless — every consumer clamps the value before painting.
+  static const SpringDescription _sheetSpring = SpringDescription(
+    mass: 1,
+    stiffness: 420,
+    damping: 34,
+  );
+
   late final AnimationController _sheet = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 380),
   );
   bool _sheetBuilt = false;
 
+  /// SP-76 rev3.4: mini pill generation — bumped on every settle-closed so
+  /// the pill subtree remounts fresh over the normal page. No stale element
+  /// or render state can keep it invisible after an open/close cycle.
+  int _pillGen = 0;
+
+  /// The mini pill's wrapper box — measured live so the sheet and the
+  /// artwork morph always start from exactly the pill's on-screen rect.
+  final GlobalKey _miniKey = GlobalKey();
+
+  /// The player page's artwork box — measured live so the morph lands the
+  /// artwork exactly where the page will show it (classic AND every skin).
+  final GlobalKey _pageArtKey = GlobalKey();
+
+  // True while a finger owns the sheet (pointer down .. drag end/cancel).
+  // While a drag is live the player page must NEVER unmount, even when the
+  // drag clamps at an edge — unmounting mid-gesture disposes the very
+  // GestureDetector that is driving the drag and leaves the shell stuck.
+  bool _sheetDragging = false;
+
+  /// Fling speeds above this (in sheet-heights per second) win over position.
+  static const double _kSheetFlingVelocity = 0.8;
+
   @override
   void initState() {
     super.initState();
-    _sheet.addListener(() {
-      if (_sheet.value > 0 && !_sheetBuilt) setState(() => _sheetBuilt = true);
+    // Everything is derived from the sheet VALUE per frame — never from
+    // AnimationStatus. animateWith(SpringSimulation) reports `completed`
+    // even when it settles on 0 (never `dismissed`), so a status-based
+    // listener silently never fired and the dock stayed hidden forever
+    // (the stuck-shell bug). The plain value listener below always fires.
+    _sheet.addListener(_onSheetTick);
+  }
+
+  void _onSheetTick() {
+    if (!mounted) return;
+    final open = _sheet.value > 0;
+    if (open && !_sheetBuilt) {
+      setState(() => _sheetBuilt = true);
+    } else if (!open &&
+        !_sheet.isAnimating &&
+        !_sheetDragging &&
+        _sheetBuilt) {
+      // Settled closed: unmount the player and restore the chrome no matter
+      // what hid it — scroll-hide, a stale overlay flag, an interrupted
+      // settle. This is the "shell always pops back up" guarantee.
+      _settleClosedCleanup();
+    }
+  }
+
+  /// SP-76 rev3.3: the "mini player lives over the page, never inside the
+  /// player" state — runs whenever the sheet has settled closed, no matter
+  /// WHICH path landed it there (spring, edge-clamped drag, canceled
+  /// gesture). The player layer unmounts, the chrome flags are restored and
+  /// the mini pill is rebuilt FRESH (generation bump) at v = 0, so the
+  /// normal page always gets its chrome — and a full-opacity mini player —
+  /// back. SP-76 rev3.4: the rebuild is UNCONDITIONAL. The pill's alpha is
+  /// derived from the sheet value at build time, so a rebuild at v = 0
+  /// restores it at full opacity no matter which path landed here.
+  void _settleClosedCleanup() {
+    if (!mounted) return;
+    setState(() {
+      _sheetBuilt = false;
+      _pillGen++;
     });
-    // Refresh PopScope (back closes the sheet) when it settles open / closed.
-    _sheet.addStatusListener((status) {
-      if (!mounted) return;
-      setState(() {
-        // Unmount the player once closed: PlayerPage raises
-        // ShellOverlaysBus.fullPageAbove while mounted (hides the dock) and
-        // only clears it on dispose. Keeping it mounted left the dock hidden.
-        if (status == AnimationStatus.dismissed) _sheetBuilt = false;
-      });
-      if (status == AnimationStatus.dismissed) {
-        ShellOverlaysBus.fullPageAbove.value = false;
-      }
-    });
+    if (ShellOverlaysBus.fullPageAbove.value) {
+      ShellOverlaysBus.fullPageAbove.value = false;
+    }
+    if (_chromeHidden.value) _chromeHidden.value = false;
   }
 
   @override
   void dispose() {
     _sheet.dispose();
     _chromeHidden.dispose();
+    if (ShellOverlaysBus.fullPageAbove.value) {
+      ShellOverlaysBus.fullPageAbove.value = false;
+    }
     super.dispose();
   }
 
-  void _openSheet() => _sheet.animateTo(1,
-      duration: const Duration(milliseconds: 380),
-      curve: Curves.easeOutCubic);
-
-  void _closeSheet() => _sheet.animateTo(0,
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeInCubic);
-
-  void _dragSheet(DragUpdateDetails d, double height) {
-    _sheet.value = (_sheet.value - d.delta.dy / height).clamp(0.0, 1.0);
+  void _springSheetTo(double target, [double velocity = 0]) {
+    // animateWith forces the direction to forward, so when the spring
+    // finishes Flutter reports AnimationStatus.completed — even when it
+    // lands on 0 — and physics tolerance can stop it a hair off the target.
+    // Either way `dismissed` would never fire and the dock would stay hidden
+    // forever. Landing exactly on the target re-derives the status from the
+    // value (0 -> dismissed), so the player unmounts and the chrome returns.
+    _sheet
+        .animateWith(SpringSimulation(
+          _sheetSpring,
+          _sheet.value,
+          target,
+          velocity.clamp(-3.0, 3.0), // sheet-heights per second
+        ))
+        .whenComplete(() {
+      if (!mounted || _sheet.isAnimating) return;
+      // Only land if nothing grabbed the sheet in between (a new drag or
+      // another settle). A mid-range value means a new gesture owns it.
+      if ((_sheet.value - target).abs() > 0.05) return;
+      _sheet.value = target;
+      // SP-76 rev3.3: landing exactly on 0 can be a no-op (no value change,
+      // no listener tick) — run the closed-state cleanup here as well so
+      // EVERY path that settles closed unmounts the player layer and
+      // restores the mini player + dock over the normal page.
+      if (target == 0) _settleClosedCleanup();
+    });
   }
 
-  void _endDragSheet(DragEndDetails d, double height) {
-    final v = -d.velocity.pixelsPerSecond.dy / height; // + = flinging up
-    if (v.abs() > 0.8) {
-      v > 0 ? _openSheet() : _closeSheet();
+  void _openSheet() => _springSheetTo(1);
+
+  void _closeSheet() => _springSheetTo(0);
+
+  /// SP-76 rev3 (smoothness): mount the sheet layer the moment the finger
+  /// lands on the pill — the player page's one-time build happens while the
+  /// pointer is down (stationary) instead of on the first frame of the drag.
+  /// Pointer-down-only; the settle-closed unmount in _onSheetTick and the
+  /// shell pop-back guarantee are untouched.
+  void _preWarmSheet() {
+    if (!mounted) return;
+    if (_sheet.value > 0) return; // already open / already warm
+    if (!_sheetBuilt) setState(() => _sheetBuilt = true);
+  }
+
+  // Drag released mid-way (pointer lost): settle to the nearest edge.
+  void _settleSheet() {
+    _sheetDragging = false;
+    _springSheetTo(_sheet.value > 0.5 ? 1 : 0);
+  }
+
+  void _dragSheet(DragUpdateDetails d, double travel) {
+    _sheetDragging = true;
+    // Kill any in-flight settle so the finger takes over instantly (Echo
+    // Nightly grabs the sheet mid-animation the same way).
+    if (_sheet.isAnimating) _sheet.stop();
+    // 1:1 finger tracking: travel = pill top → screen top, so the sheet's
+    // top edge moves exactly as many pixels as the finger.
+    _sheet.value = (_sheet.value - d.delta.dy / travel).clamp(0.0, 1.0);
+  }
+
+  void _endDragSheet(DragEndDetails d, double travel) {
+    _sheetDragging = false;
+    final v = -d.velocity.pixelsPerSecond.dy / travel; // + = flinging up
+    final wasMostlyOpen = _sheet.value > 0.5;
+    final double target;
+    if (v.abs() > _kSheetFlingVelocity) {
+      target = v > 0 ? 1 : 0;
     } else {
-      _sheet.value > 0.5 ? _openSheet() : _closeSheet();
+      target = wasMostlyOpen ? 1 : 0;
     }
+    // Already resting on the target edge (the drag clamped there)? Land at
+    // once — springing from the edge would bounce a sliver of the page back
+    // onto the screen. The setter re-derives the boundary status, so the
+    // sheet unmounts and the dock + mini player come back immediately.
+    if ((_sheet.value - target).abs() < 0.002) {
+      _sheet.value = target;
+      // SP-76 rev3.3: the setter above is a NO-OP when the drag already
+      // clamped at the edge — that swallows the listener tick which unmounts
+      // the player. Land the closed state here too (the open edge is already
+      // correct: the sheet stays mounted while it is open).
+      if (target == 0) _settleClosedCleanup();
+      return;
+    }
+    // Same tap the reference gives when the sheet snaps away under the
+    // finger.
+    if (target == 0 && wasMostlyOpen) HapticFeedback.mediumImpact();
+    _springSheetTo(target, v);
   }
 
   void _goBranch(int branch) {
@@ -154,11 +292,18 @@ class _ZenMobileShellState extends State<ZenMobileShell>
     // empty bar (Search screen).
     final keyboardOpen = mq.viewInsets.bottom > 0;
 
-    return PopScope(
-      canPop: _sheet.value == 0,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _sheet.value > 0) _closeSheet();
-      },
+    // AnimatedBuilder keeps PopScope's canPop in sync with the sheet value
+    // every frame — a stale canPop let the system back gesture pop the whole
+    // app route instead of closing the sheet.
+    return AnimatedBuilder(
+      animation: _sheet,
+      builder: (context, child) => PopScope(
+        canPop: _sheet.value == 0,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && _sheet.value > 0) _closeSheet();
+        },
+        child: child!,
+      ),
       child: Scaffold(
         // The inner pages' own Scaffolds handle the keyboard; the shell must not
         // shrink the whole stack as well.
@@ -169,17 +314,23 @@ class _ZenMobileShellState extends State<ZenMobileShell>
           child: ValueListenableBuilder<bool>(
             valueListenable: ShellOverlaysBus.fullPageAbove,
             builder: (context, pageAboveRaw, _) {
-              // The "page above" flag only matters while the player sheet is
-              // open or the Discover tab is showing. Anywhere else it is
-              // ignored, so a stale flag can never leave the dock hidden.
+            // The "page above" flag hides the chrome only on the Discover
+            // tab; while the player sheet is up the mini pill fades with
+            // the sheet value itself (the sheet grows out of the pill) and
+            // the dock is simply covered by the panel. Anywhere else a
+            // stale flag is ignored, so it can never leave the dock hidden.
               final pageAbove = pageAboveRaw &&
-                  (_sheet.value > 0 ||
-                      widget.navigationShell.currentIndex == _kDiscoverBranch);
+                  widget.navigationShell.currentIndex == _kDiscoverBranch;
               return ValueListenableBuilder<MediaItem?>(
                 valueListenable: GetIt.I<MediaPlayer>().currentSongNotifier,
                 builder: (context, currentSong, _) {
                   final miniInset =
                   (currentSong == null || pageAbove || keyboardOpen) ? 0.0 : 82.0;
+                  final pill = _pillRect(mq);
+                  // 1:1 finger mapping uses the pill-top travel: the sheet's
+                  // top edge moves exactly as many pixels as the finger —
+                  // like the reference.
+                  final travel = math.max(pill.top, 220.0);
                   return Stack(
                     children: [
                       Positioned.fill(
@@ -195,75 +346,129 @@ class _ZenMobileShellState extends State<ZenMobileShell>
                           child: widget.navigationShell,
                         ),
                       ),
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: AnimatedBuilder(
-                          animation: _sheet,
-                          builder: (context, child) => Opacity(
-                            opacity: (1 - _sheet.value * 2).clamp(0.0, 1.0),
-                            child: Transform.translate(
-                              offset: Offset(0, _sheet.value * 140),
-                              child: IgnorePointer(
-                                  ignoring: _sheet.value > 0.05, child: child),
-                            ),
-                          ),
-                          child: ValueListenableBuilder<bool>(
-                            valueListenable: _chromeHidden,
-                            builder: (context, hidden, _) => _Chrome(
-                              hidden: hidden || pageAbove || keyboardOpen,
-                              currentIndex: widget.navigationShell.currentIndex,
-                              onSelect: _goBranch,
-                              onOpenPlayer: _openSheet,
-                              onDragPlayer: (d) =>
-                                  _dragSheet(d, mq.size.height * 0.8),
-                              onDragEndPlayer: (d) =>
-                                  _endDragSheet(d, mq.size.height * 0.8),
-                            ),
-                          ),
+                      // Chrome + sheet. Layer order IS the reference's
+                      // behaviour: the dock sits UNDER the sheet (the growing
+                      // panel slides over it), the mini pill sits ON TOP of
+                      // it (the sheet grows out from behind the pill, which
+                      // fades with the reference's offset*2 curve), and the
+                      // morphing artwork is topmost so it can take over the
+                      // pill's thumbnail 1:1 while it grows.
+                      Positioned.fill(
+                        child: ValueListenableBuilder<bool>(
+                          valueListenable: _chromeHidden,
+                          builder: (context, scrollHidden, _) {
+                            final chromeHidden =
+                                scrollHidden || pageAbove || keyboardOpen;
+                            return Stack(
+                              children: [
+                                // 1) Dock — under the sheet, never moves.
+                                Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: _chromeSlide(
+                                    chromeHidden,
+                                    _ZenDock(
+                                      currentIndex:
+                                          widget.navigationShell.currentIndex,
+                                      onSelect: _goBranch,
+                                    ),
+                                  ),
+                                ),
+                                // 2) The player sheet — the mini pill's
+                                //    grown-up self. Top edge tracks the
+                                //    finger 1:1 from the pill's own rect.
+                                if (_sheetBuilt)
+                                  _buildSheet(mq, pill, travel),
+                                // 3) Mini player — the sheet's collapsed
+                                //    state. Fades with offset*2 while the
+                                //    sheet grows out from behind it.
+                                //    Rev3.4: the alpha is VALUE-DERIVED —
+                                //    computed in the builder from the sheet
+                                //    value (the pre-SP-76 chrome's proven
+                                //    recipe), not a compositor FadeTransition
+                                //    layer, so a rebuild can never leave the
+                                //    pill stale-invisible over the home page.
+                                //    At rest the controller is idle (zero
+                                //    per-frame cost); in travel only this
+                                //    small strip repaints inside its own
+                                //    RepaintBoundary (cookie spin never
+                                //    dirties the shell stack).
+                                //    Listener pre-warms the sheet on
+                                //    pointer-down: the player page builds
+                                //    while the finger is still down, never
+                                //    mid-drag — the first drag frames are
+                                //    already warm.
+                                if (currentSong != null)
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: _chromeSlide(
+                                      chromeHidden,
+                                      Padding(
+                                        padding: EdgeInsets.only(
+                                          bottom:
+                                              mq.padding.bottom + _kDockExtent,
+                                        ),
+                                        child: Listener(
+                                          onPointerDown: (_) =>
+                                              _preWarmSheet(),
+                                          child: AnimatedBuilder(
+                                            animation: _sheet,
+                                            child: RepaintBoundary(
+                                              child: _buildMiniPill(travel),
+                                            ),
+                                            builder: (context, child) {
+                                              // SP-76 rev3.4: the pill's
+                                              // alpha is computed HERE, at
+                                              // build time, from the sheet
+                                              // value — the same synchronous
+                                              // recipe the pre-SP-76 chrome
+                                              // used (the version that always
+                                              // showed the mini player on
+                                              // this device). A compositor
+                                              // FadeTransition layer could
+                                              // go stale across the rev3.3
+                                              // structural drop/remount; a
+                                              // value-derived Opacity cannot
+                                              // — every rebuild paints
+                                              // exactly offset*2, so the
+                                              // mini player always comes
+                                              // back over the home page at
+                                              // full opacity.
+                                              // SP-76 rev3.3: once the sheet
+                                              // is fully open the mini
+                                              // player is removed
+                                              // STRUCTURALLY — the open
+                                              // player page can never contain
+                                              // it. The gate drops the
+                                              // subtree only once it is
+                                              // already invisible (no pop).
+                                              final v =
+                                                  _sheet.value.clamp(0.0, 1.0);
+                                              if (v >= 0.999) {
+                                                return const SizedBox
+                                                    .shrink();
+                                              }
+                                              return Opacity(
+                                                opacity: ((1 - v) * 2).clamp(0.0, 1.0),
+                                                child: IgnorePointer(
+                                                  ignoring: v > 0.05,
+                                                  child: child!,
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                // 4) Morphing artwork: pill thumb → page
+                                //    artwork, topmost.
+                                if (_sheetBuilt && currentSong != null)
+                                  _buildMorphArt(mq, currentSong, pill),
+                              ],
+                            );
+                          },
                         ),
                       ),
-                      if (_sheetBuilt)
-                        Positioned.fill(
-                          child: AnimatedBuilder(
-                            animation: _sheet,
-                            builder: (context, child) {
-                              final v = _sheet.value;
-                              return Visibility(
-                                visible: v > 0,
-                                maintainState: true,
-                                child: Transform.translate(
-                                  offset: Offset(0, (1 - v) * mq.size.height),
-                                  child: IgnorePointer(
-                                      ignoring: v < 0.98, child: child),
-                                ),
-                              );
-                            },
-                            child: Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: Material(
-                                    type: MaterialType.transparency,
-                                    child: PlayerPage(onClose: _closeSheet),
-                                  ),
-                                ),
-                                // Grab area at the top: drag down to close.
-                                Positioned(
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  height: 96,
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.translucent,
-                                    onVerticalDragUpdate: (d) =>
-                                        _dragSheet(d, mq.size.height * 0.8),
-                                    onVerticalDragEnd: (d) =>
-                                        _endDragSheet(d, mq.size.height * 0.8),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                     ],
                   );
                 },
@@ -274,59 +479,343 @@ class _ZenMobileShellState extends State<ZenMobileShell>
       ),
     );
   }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SP-76 · Echo Nightly sheet — the mini player IS the collapsed sheet
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// The mini pill's on-screen rect (measured live; constants as fallback).
+/// The sheet's collapsed rect and the artwork morph both derive from it, so
+/// the panel always grows out of the pill itself — never from the screen
+/// edge (that was the SP-75 behaviour the reference does not do).
+Rect _pillRect(MediaQueryData mq) {
+  final ctx = _miniKey.currentContext;
+  if (ctx != null) {
+    final ro = ctx.findRenderObject();
+    if (ro is RenderBox && ro.attached && ro.hasSize) {
+      final tl = ro.localToGlobal(Offset.zero);
+      return Rect.fromLTWH(tl.dx, tl.dy, ro.size.width, ro.size.height);
+    }
+  }
+  // Fallback = the Echo pill layout: ≤380 wide, centred, 74 tall (64 pill
+  // + 10 internal bottom pad), dock extent above the safe area.
+  final w = math.min(380.0, mq.size.width);
+  final left = (mq.size.width - w) / 2;
+  final bottom = mq.size.height - mq.padding.bottom - _kDockExtent;
+  return Rect.fromLTWH(left, bottom - _kMiniWrapHeight, w, _kMiniWrapHeight);
 }
 
-class _Chrome extends StatelessWidget {
-  const _Chrome({
-    required this.hidden,
-    required this.currentIndex,
-    required this.onSelect,
-    required this.onOpenPlayer,
-    required this.onDragPlayer,
-    required this.onDragEndPlayer,
-  });
+/// The classic page's full-screen artwork rect — the morph target fallback
+/// when the live measurement has not laid out yet. Mirrors
+/// _buildPlayerColumnMobile's math: SafeArea + 58 top bar + 4 top pad,
+/// 20 h-pad, media side = (inner height - 344 controls/gap) clamped to
+/// [150, min(inner width, 520)].
+Rect _classicArtRect(MediaQueryData mq) {
+  final safeTop = mq.padding.top;
+  final innerH = mq.size.height - safeTop - 78;
+  final innerW = mq.size.width - 40;
+  final room = innerH - 344;
+  final side =
+      room.clamp(150.0, math.min(innerW, 520.0)).toDouble();
+  final columnH = side + 344;
+  final columnTop = safeTop + 62 + (innerH - columnH) / 2;
+  return Rect.fromCenter(
+    center: Offset(mq.size.width / 2, columnTop + side / 2),
+    width: side,
+    height: side,
+  );
+}
 
-  final bool hidden;
-  final int currentIndex;
-  final ValueChanged<int> onSelect;
-  final VoidCallback onOpenPlayer;
-  final GestureDragUpdateCallback onDragPlayer;
-  final GestureDragEndCallback onDragEndPlayer;
+double _lerp(double a, double b, double t) => a + (b - a) * t;
 
-  @override
-  Widget build(BuildContext context) {
-    // Slide only (no AnimatedOpacity): opacity animation forces an offscreen
-    // layer, which is slow on weak GPUs. The chrome slides fully off-screen.
-    return AnimatedSlide(
+double _smoothstep(double a, double b, double x) {
+  final t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+  return t * t * (3 - 2 * t);
+}
+
+/// Scroll/keyboard/discover-hide wrapper for the chrome layers (same slide
+/// recipe the old _Chrome used).
+Widget _chromeSlide(bool hidden, Widget child) => AnimatedSlide(
       offset: hidden ? const Offset(0, 1.25) : Offset.zero,
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
-      child: IgnorePointer(
-        ignoring: hidden,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onVerticalDragUpdate: onDragPlayer,
-              onVerticalDragEnd: onDragEndPlayer,
-              child: GetIt.I<SettingsManager>().liquidGlass
-                  // Liquid theme colours are see-through by design; without
-                  // a frosted slab behind them the page bleeds through.
-                  ? ZenGlassPanel(
-                      radius: 20,
-                      margin: const EdgeInsets.fromLTRB(
-                          _kDockSideGap, 0, _kDockSideGap, 6),
-                      child: EchoBottomPlayer(onOpen: onOpenPlayer),
-                    )
-                  : EchoBottomPlayer(onOpen: onOpenPlayer),
-            ),
-            _ZenDock(currentIndex: currentIndex, onSelect: onSelect),
-          ],
-        ),
-      ),
+      child: IgnorePointer(ignoring: hidden, child: child),
+    );
+
+/// The mini pill — the sheet's collapsed state. Vertical drags feed the
+/// sheet (1:1 finger tracking) via [EchoSheetDragSink]; taps spring it open.
+Widget _buildMiniPill(double travel) {
+  final sink = EchoSheetDragSink(
+    update: (d) => _dragSheet(d, travel),
+    end: (d) => _endDragSheet(d, travel),
+    cancel: _settleSheet,
+  );
+  Widget pill = EchoBottomPlayer(
+    onOpen: _openSheet,
+    sheetDrag: sink,
+  );
+  if (GetIt.I<SettingsManager>().liquidGlass) {
+    // Liquid theme colours are see-through by design; without a frosted
+    // slab behind them the page bleeds through (unchanged from SP-73).
+    pill = ZenGlassPanel(
+      radius: 20,
+      margin: const EdgeInsets.fromLTRB(
+          _kDockSideGap, 0, _kDockSideGap, 6),
+      child: pill,
     );
   }
+  // rev3.4: the generation key forces a fresh subtree after every
+  // settle-closed — clean State, clean render objects; the pill comes back
+  // exactly as it was at app start.
+  return KeyedSubtree(key: _miniKey, child: KeyedSubtree(key: ValueKey<int>(_pillGen), child: pill));
+}
+
+/// The player sheet. Its collapsed rect IS the mini pill's rect; the top
+/// edge rises 1:1 with the finger, the bottom edge slides down over the
+/// dock during the first half of the travel, and the side insets close
+/// early — the reference's BottomSheetBehaviour with peek = mini player.
+/// The surface is a translucent dark gradient (no blur — this shell targets
+/// low-end phones), the pill fades out over it, and the player page
+/// composes in during the second third.
+///
+/// Perf model (the difference between Echo Nightly tracking and jank):
+/// the layer is laid out ONCE at full screen; every frame only changes
+/// paint/compositor state — the moving clip path, the gradient alpha and
+/// the page's layer opacity. The player page sits in its own
+/// RepaintBoundary, so its cached raster is re-composited, never redrawn.
+Widget _buildSheet(MediaQueryData mq, Rect pill, double travel) {
+  final liquid = GetIt.I<SettingsManager>().liquidGlass;
+  // NOTE: no Positioned wrapper here. This subtree is consumed inside
+  // Opacity(opacity: pageA, ...) below, and a Positioned is only legal as a
+  // DIRECT Stack child — nesting one under a render proxy (Opacity /
+  // IgnorePointer) throws `type 'ParentData' is not a subtype of type
+  // 'StackParentData'` on the sheet's first mount, which blanked the whole
+  // page when the player opened. The builder's own Positioned.fill (around
+  // ClipPath) is what fills the sheet Stack; the page just lives inside it.
+  final pageSub = Material(
+    type: MaterialType.transparency,
+    child: RepaintBoundary(
+      child: PlayerPage(
+        onClose: _closeSheet,
+        artKey: _pageArtKey,
+        sheetOffset: _sheet,
+        // Whole-body drags (any skin) drive the sheet: the page follows
+        // the finger 1:1 and settles with the shell's spring.
+        bodyDragSink: PlayerBodyDragSink(
+          update: (d) => _dragSheet(d, travel),
+          end: (d) => _endDragSheet(d, travel),
+          cancel: _settleSheet,
+        ),
+      ),
+    ),
+  );
+
+  return AnimatedBuilder(
+    animation: _sheet,
+    child: pageSub,
+    builder: (context, page) {
+      final v = _sheet.value.clamp(0.0, 1.0);
+      final screenH = mq.size.height;
+      final screenW = mq.size.width;
+      final top = _lerp(pill.top, 0, v);
+      final sideT = _smoothstep(0, 0.35, v);
+      final left = _lerp(pill.left, 0, sideT);
+      final right = _lerp(screenW - pill.right, 0, sideT);
+      final bottomInset =
+          _lerp(screenH - pill.bottom, 0, _smoothstep(0, 0.55, v));
+      // Corners: the pill's own rounding at rest, Echo's ~26 rounded top
+      // corners while it follows the finger, flat when fully open.
+      final startRadius = liquid ? 20.0 : 32.0;
+      final topRadius =
+          _lerp(startRadius, 26, (v * 3).clamp(0.0, 1.0)) * (1 - v);
+      final bottomRadius = topRadius * (1 - _smoothstep(0.55, 0.85, v));
+      // Translucent dark surface fades in as the pill fades out; the player
+      // content composes over it in the second third (reference crossfade).
+      final surfaceA = _smoothstep(0.02, 0.22, v);
+      final pageA = _smoothstep(0.30, 0.55, v);
+
+      return Positioned.fill(
+        child: ClipPath(
+          clipper: _SheetRectClipper(
+            Rect.fromLTRB(left, top, screenW - right, screenH - bottomInset),
+            topRadius,
+            bottomRadius,
+          ),
+          child: Stack(
+            children: [
+              // Surface: full-screen gradient, alpha-only per frame (the
+              // moving clip keeps it to the sheet rect). Hit-testing is
+              // clipped to the sheet rect as well.
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Color.fromRGBO(12, 12, 16, 0.88 * surfaceA),
+                        Color.fromRGBO(8, 8, 12, 0.94 * surfaceA),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Page content: laid out once at full screen, revealed by the
+              // moving clip; alpha is compositor-only (RepaintBoundary
+              // above). Never interactive until fully open — same as the
+              // reference, where mid-travel taps keep driving the sheet.
+              Positioned.fill(
+                child: IgnorePointer(
+                  ignoring: v < 0.98,
+                  child: Opacity(opacity: pageA, child: page!),
+                ),
+              ),
+              // Grab area at the top: drag down to close. Translated per
+              // frame (paint-only) so it hugs the sheet's top edge. Only
+              // vertical drags are captured — taps fall through to the
+              // page's own top-bar buttons. Dormant while the sheet rests at
+              // 0 (pointer-down pre-warm mounts the layer early; without
+              // this gate the strip would steal vertical scrolls in the
+              // band above the mini pill).
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                height: 96,
+                child: Transform.translate(
+                  offset: Offset(0, top),
+                  child: IgnorePointer(
+                    ignoring: v <= 0.0,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onVerticalDragUpdate: (d) => _dragSheet(d, travel),
+                      onVerticalDragEnd: (d) => _endDragSheet(d, travel),
+                      onVerticalDragCancel: _settleSheet,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// The morphing artwork: the pill's 40 dp round thumb grows into the page's
+/// full artwork — the reference's signature container transform. The target
+/// is the page's own artwork rect (the page is laid out at full screen, so
+/// the rect does not move during the morph), keeping the handoff at 0.985
+/// pixel-exact for the classic page AND every skin (the page hides its own
+/// artwork until then via PlayerPage.sheetOffset). Topmost layer, so it
+/// covers the pill's thumbnail 1:1 as it starts growing.
+///
+/// Perf model: the artwork is laid out ONCE at the target size and every
+/// frame only transforms + clips it (paint-only, GPU texture sample). The
+/// old version rebuilt SongThumbnail at a new size every tick — per-frame
+/// image re-layout + re-raster was the morph's stutter on low-end phones.
+Widget _buildMorphArt(MediaQueryData mq, MediaItem song, Rect pill) {
+  final extras = song.extras;
+  if (extras == null) return const SizedBox.shrink();
+  final thumb = Rect.fromCenter(
+    center: Offset(pill.left + 32, pill.top + 32), // 8 pad + 24 ring centre
+    width: 40,
+    height: 40,
+  );
+  // Morph target: measured once per shell build (song / scroll / keyboard
+  // changes), with the page's live artwork rect preferred over the classic
+  // fallback. Live measurement per tick is no longer needed because the
+  // page no longer re-layouts during the morph.
+  Rect end = _classicArtRect(mq);
+  final ctx = _pageArtKey.currentContext;
+  if (ctx != null) {
+    final ro = ctx.findRenderObject();
+    if (ro is RenderBox && ro.attached && ro.hasSize) {
+      final tl = ro.localToGlobal(Offset.zero);
+      final live = tl & ro.size;
+      if (live.width >= 8 && live.height >= 8) end = live;
+    }
+  }
+  final endW = math.max(end.width, 1.0);
+  final endH = math.max(end.height, 1.0);
+  // AnimatedBuilder sits directly under the shell's Stack so the builder can
+  // return Positioned.fromRect itself (a Positioned must be a Stack child).
+  return AnimatedBuilder(
+    animation: _sheet,
+    child: RepaintBoundary(
+      child: SongThumbnail(
+        song: extras,
+        dp: mq.devicePixelRatio,
+        width: endW,
+        height: endH,
+        fit: BoxFit.cover,
+      ),
+    ),
+    builder: (context, img) {
+      final v = _sheet.value.clamp(0.0, 1.0);
+      final opacity = 1 - _smoothstep(0.88, 0.985, v);
+      if (opacity <= 0.002) return const SizedBox.shrink();
+      final p = (v / 0.9).clamp(0.0, 1.0);
+      final rect = Rect.lerp(thumb, end, p)!;
+      final sx = rect.width / endW;
+      final sy = rect.height / endH;
+      return Positioned.fromRect(
+        rect: end,
+        child: IgnorePointer(
+          child: Opacity(
+            opacity: opacity,
+            child: Transform(
+              alignment: Alignment.topLeft,
+              transform: Matrix4.identity()
+                ..translate(rect.left - end.left, rect.top - end.top)
+                ..scale(sx, sy),
+              child: ClipRRect(
+                // Radius in pre-transform units so the SCREEN radius matches
+                // the reference (20 → 36) as the image scales up.
+                borderRadius:
+                    BorderRadius.circular(_lerp(20, 36, p) / sx),
+                child: img!,
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+  }
+}
+
+/// Per-frame clip of the sheet: the interpolated sheet rect (pill rect →
+/// full screen) with the interpolated corner radii. Changing the rect per
+/// frame is a PAINT-only operation — everything inside stays laid out at
+/// full screen ONCE, so following the finger never re-layouts (or
+/// re-rasterises) the player page. This is what keeps the sheet 1:1 smooth
+/// on low-end phones (the old per-frame Positioned insets re-laid-out the
+/// entire PlayerPage every tick — that was the lag).
+class _SheetRectClipper extends CustomClipper<Path> {
+  const _SheetRectClipper(this.rect, this.topRadius, this.bottomRadius);
+  final Rect rect;
+  final double topRadius;
+  final double bottomRadius;
+
+  @override
+  Path getClip(Size size) {
+    final rrect = RRect.fromRectAndCorners(
+      rect,
+      topLeft: Radius.circular(topRadius),
+      topRight: Radius.circular(topRadius),
+      bottomLeft: Radius.circular(bottomRadius),
+      bottomRight: Radius.circular(bottomRadius),
+    );
+    return Path()..addRRect(rrect);
+  }
+
+  @override
+  bool shouldReclip(_SheetRectClipper old) =>
+      old.rect != rect ||
+      old.topRadius != topRadius ||
+      old.bottomRadius != bottomRadius;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -7,7 +7,8 @@ import 'dart:typed_data';
 import 'dart:math';
 import 'dart:ui' show FontFeature, ImageFilter;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
-import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, ValueNotifier;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart' show SpringDescription, SpringSimulation;
 import 'package:flutter/services.dart'
@@ -78,11 +79,52 @@ const Color _kFallbackTint = Color(0xFF5B3FD1);
 
 const bool _kShowHeartButton = false;
 
+/// Mobile-shell sheet sink. When the mobile shell hosts [PlayerPage] inside
+/// its finger-following player sheet it passes one of these in; vertical
+/// drags on the player body are then forwarded to the sheet so the whole
+/// page follows the finger (Echo Nightly-style) and settles with a spring.
+/// Null on desktop and standalone routes — they keep the internal
+/// translate-and-spring dismiss, which behaves exactly as before.
+class PlayerBodyDragSink {
+  const PlayerBodyDragSink({
+    required this.update,
+    required this.end,
+    required this.cancel,
+  });
+
+  // Explicit function types (not the gestures typedefs) so the class works
+  // with the imports this file already has.
+  final void Function(DragUpdateDetails d) update;
+  final void Function(DragEndDetails d) end;
+  final VoidCallback cancel;
+}
+
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({super.key, this.videoId, this.onClose});
+  const PlayerPage({
+    super.key,
+    this.videoId,
+    this.onClose,
+    this.bodyDragSink,
+    this.artKey,
+    this.sheetOffset,
+  });
   final String? videoId;
 
   final VoidCallback? onClose;
+
+  final PlayerBodyDragSink? bodyDragSink;
+
+  /// SP-76: key attached to the classic page's artwork container so the
+  /// mobile shell can measure the artwork rect live and land the morphing
+  /// artwork exactly on it when the sheet finishes opening.
+  final Key? artKey;
+
+  /// SP-76: the mobile shell's sheet offset (0 = collapsed mini player,
+  /// 1 = open). While it is mid-travel the page hides ITS OWN artwork — the
+  /// shell paints the morphing artwork (thumb → page artwork) on top, and
+  /// the page's artwork fades back in at the handoff. Null on desktop and
+  /// standalone routes: nothing is hidden.
+  final ValueListenable<double>? sheetOffset;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -105,6 +147,21 @@ class _PlayerPageState extends State<PlayerPage>
     } else if (mounted) {
       context.pop();
     }
+  }
+
+  /// SP-76: hides the page's own artwork while the shell's sheet is
+  /// mid-morph (the shell paints the morphing thumb→artwork on top and the
+  /// handoff happens at 0.985, when both sit on the same rect). Without a
+  /// sheet offset (desktop / standalone) the artwork renders as before.
+  Widget _sheetArtHider(Widget art) {
+    final listenable = widget.sheetOffset;
+    if (listenable == null) return art;
+    return ValueListenableBuilder<double>(
+      valueListenable: listenable,
+      child: art,
+      builder: (context, v, child) =>
+          Opacity(opacity: v >= 0.985 ? 1.0 : 0.0, child: child),
+    );
   }
 
   bool _hasLyrics = false;
@@ -138,7 +195,13 @@ class _PlayerPageState extends State<PlayerPage>
   @override
   void initState() {
     super.initState();
-    ShellOverlaysBus.fullPageAbove.value = true;
+    // Hosted inside the mobile shell's player sheet: the SHELL owns this
+    // flag (it derives it from the sheet value every frame and restores the
+    // dock the moment the sheet settles closed). Writing it here as well
+    // left the dock hidden forever whenever dispose ordering slipped.
+    if (widget.bodyDragSink == null) {
+      ShellOverlaysBus.fullPageAbove.value = true;
+    }
     _StreamProbe.attach(GetIt.I<MediaPlayer>().player);
     _dismissSpring = const SpringDescription(
       mass: 1,
@@ -166,12 +229,23 @@ class _PlayerPageState extends State<PlayerPage>
   void dispose() {
     GetIt.I<MediaPlayer>().currentSongNotifier.removeListener(songListener);
     _dismissCtrl.dispose();
-    ShellOverlaysBus.fullPageAbove.value = false;
+    if (widget.bodyDragSink == null) {
+      ShellOverlaysBus.fullPageAbove.value = false;
+    }
     super.dispose();
   }
 
 
+  // Body drags: when the mobile shell sheet is hosting us, hand every drag
+  // to the sheet so the page follows the finger and the mini player fades in
+  // underneath DURING the drag (one continuous motion, like the reference).
+  // Without a sink the internal translate dismiss runs as before.
   void _onDismissDragUpdate(DragUpdateDetails d) {
+    final sink = widget.bodyDragSink;
+    if (sink != null) {
+      sink.update(d);
+      return;
+    }
     if (_dismissCtrl.isAnimating) _dismissCtrl.stop();
     final delta = d.delta.dy;
     // Downward follows 1:1; upward is rubber-banded (the sheet only ever
@@ -181,6 +255,11 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _onDismissDragEnd(DragEndDetails d) {
+    final sink = widget.bodyDragSink;
+    if (sink != null) {
+      sink.end(d);
+      return;
+    }
     const threshold = 88.0; // dp — the reference's swipe threshold.
     final velocity = d.velocity.pixelsPerSecond.dy;
     if (_dismissDragY > threshold || (velocity > 1500 && _dismissDragY > 24)) {
@@ -189,6 +268,15 @@ class _PlayerPageState extends State<PlayerPage>
       return;
     }
     _springDismissBack(velocity);
+  }
+
+  void _onDismissDragCancel() {
+    final sink = widget.bodyDragSink;
+    if (sink != null) {
+      sink.cancel();
+      return;
+    }
+    _springDismissBack();
   }
 
   void _springDismissBack([double velocity = 0]) {
@@ -566,10 +654,12 @@ class _PlayerPageState extends State<PlayerPage>
                 hasLyrics: _hasLyrics,
                 showLyrics: _showLyrics,
                 lyrics: (size) => _lyricsBox(song, size),
-                swipeArt: _buildArtwork(song),
-                art: (radius) => SquareArtwork(
-                  song: song.extras ?? {'videoId': song.id, 'title': song.title},
-                  borderRadius: radius,
+                swipeArt: _sheetArtHider(_buildArtwork(song)),
+                art: (radius) => _sheetArtHider(
+                  SquareArtwork(
+                    song: song.extras ?? {'videoId': song.id, 'title': song.title},
+                    borderRadius: radius,
+                  ),
                 ),
                 close: _close,
                 openQueue: () => _key.currentState?.openEndDrawer(),
@@ -602,7 +692,7 @@ class _PlayerPageState extends State<PlayerPage>
                     ? GestureDetector(
                         onVerticalDragUpdate: _onDismissDragUpdate,
                         onVerticalDragEnd: _onDismissDragEnd,
-                        onVerticalDragCancel: () => _springDismissBack(),
+                        onVerticalDragCancel: _onDismissDragCancel,
                         child: Transform.translate(
                           offset: Offset(0, _dismissDragY),
                           child: skinStage,
@@ -756,7 +846,7 @@ class _PlayerPageState extends State<PlayerPage>
                 ? GestureDetector(
               onVerticalDragUpdate: _onDismissDragUpdate,
               onVerticalDragEnd: _onDismissDragEnd,
-              onVerticalDragCancel: () => _springDismissBack(),
+              onVerticalDragCancel: _onDismissDragCancel,
               child: Transform.translate(
                 offset: Offset(0, _dismissDragY),
                 child: stage,
@@ -975,53 +1065,56 @@ class _PlayerPageState extends State<PlayerPage>
                     opacity: _canvasOwnsScreen ? 0.0 : 1.0,
                     duration: const Duration(milliseconds: 320),
                     curve: Curves.easeOut,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onDoubleTap: () => _doubleTapLike(song),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 600),
-                        width: side,
-                        height: side,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(36),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _tint.withValues(alpha: 0.32),
-                              blurRadius: mobile ? 44 : 60,
-                              spreadRadius: -10,
-                              offset: const Offset(0, 24),
-                            ),
-                          ],
-                        ),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            _buildArtwork(song, breathing: true),
-                            // Double-tap heart burst.
-                            IgnorePointer(
-                              child: Center(
-                                child: AnimatedScale(
-                                  scale: _heartBurst ? 1.0 : 0.4,
-                                  duration: const Duration(milliseconds: 280),
-                                  curve: Curves.easeOutBack,
-                                  child: AnimatedOpacity(
-                                    opacity: _heartBurst ? 1 : 0,
-                                    duration: const Duration(milliseconds: 220),
-                                    child: Icon(
-                                      _Ic.heartFill,
-                                      size: min(side * 0.34, 120),
-                                      color: Colors.white,
-                                      shadows: const [
-                                        Shadow(
-                                            color: Colors.black54,
-                                            blurRadius: 24),
-                                      ],
+                    child: _sheetArtHider(
+                      GestureDetector(
+                        key: widget.artKey,
+                        behavior: HitTestBehavior.translucent,
+                        onDoubleTap: () => _doubleTapLike(song),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 600),
+                          width: side,
+                          height: side,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(36),
+                            boxShadow: [
+                              BoxShadow(
+                                color: _tint.withValues(alpha: 0.32),
+                                blurRadius: mobile ? 44 : 60,
+                                spreadRadius: -10,
+                                offset: const Offset(0, 24),
+                              ),
+                            ],
+                          ),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              _buildArtwork(song, breathing: true),
+                              // Double-tap heart burst.
+                              IgnorePointer(
+                                child: Center(
+                                  child: AnimatedScale(
+                                    scale: _heartBurst ? 1.0 : 0.4,
+                                    duration: const Duration(milliseconds: 280),
+                                    curve: Curves.easeOutBack,
+                                    child: AnimatedOpacity(
+                                      opacity: _heartBurst ? 1 : 0,
+                                      duration: const Duration(milliseconds: 220),
+                                      child: Icon(
+                                        _Ic.heartFill,
+                                        size: min(side * 0.34, 120),
+                                        color: Colors.white,
+                                        shadows: const [
+                                          Shadow(
+                                              color: Colors.black54,
+                                              blurRadius: 24),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),

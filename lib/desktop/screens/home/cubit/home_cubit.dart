@@ -15,7 +15,15 @@ part 'home_state.dart';
 
 class HomeCubit extends Cubit<HomeState> {
   final YTMusic _ytMusic;
-  HomeCubit(this._ytMusic) : super(HomeLoading());
+
+  /// Billboard/Spotify chart previews belong to the DESKTOP home only. The
+  /// mobile Echo home opts out (fetchCharts: false): 16 parallel HTML
+  /// scrapes per home fetch made phones lag, and the mobile home shows
+  /// MusicMetrics charts instead. The default (true) keeps the desktop
+  /// behaving exactly as before.
+  final bool fetchCharts;
+
+  HomeCubit(this._ytMusic, {this.fetchCharts = true}) : super(HomeLoading());
 
   static const String _cacheKey = 'HOME_FEED_CACHE';
 
@@ -63,15 +71,17 @@ class HomeCubit extends Cubit<HomeState> {
       if (m['authed'] != authed) return null;
       final base = (m['sections'] as List?) ?? const [];
       if (base.isEmpty) return null;
-      _charts = [
-        for (final c in (m['charts'] as List?) ?? const [])
-          if (c is Map && c['title'] != null && c['url'] != null)
-            ChartURL(
-              title: c['title'].toString(),
-              url: c['url'].toString(),
-              coverArt: c['coverArt']?.toString(),
-            ),
-      ];
+      _charts = fetchCharts
+          ? [
+              for (final c in (m['charts'] as List?) ?? const [])
+                if (c is Map && c['title'] != null && c['url'] != null)
+                  ChartURL(
+                    title: c['title'].toString(),
+                    url: c['url'].toString(),
+                    coverArt: c['coverArt']?.toString(),
+                  ),
+            ]
+          : const [];
       return HomeSuccess(
         chips: (m['chips'] as List?) ?? const [],
         sections: _compose(List<dynamic>.from(base), authed, null),
@@ -126,7 +136,7 @@ class HomeCubit extends Cubit<HomeState> {
           history != null ? _lastListeningSection(history) : (prev ?? _onScreenLast());
       if (last != null) sections.insert(0, last);
     }
-    if (_charts.isNotEmpty) {
+    if (fetchCharts && _charts.isNotEmpty) {
       final c = _createChartsSection(_charts);
       if (authed) {
         sections.add(c);
@@ -156,11 +166,13 @@ class HomeCubit extends Cubit<HomeState> {
   Future<void> _assemble() async {
     final authed = YtmAuth.instance.hasSession;
 
-    final Future<List<ChartURL>> chartsF = ChartsService()
-        .getChartsWithPreviews()
-        .timeout(const Duration(seconds: 8),
-        onTimeout: () => <ChartURL>[])
-        .catchError((_) => <ChartURL>[]);
+    final Future<List<ChartURL>> chartsF = fetchCharts
+        ? ChartsService()
+            .getChartsWithPreviews()
+            .timeout(const Duration(seconds: 8),
+            onTimeout: () => <ChartURL>[])
+            .catchError((_) => <ChartURL>[])
+        : Future<List<ChartURL>>.value(const []);
     final Future<List<dynamic>> historyF = authed
         ? _ytMusic
         .getHistory()

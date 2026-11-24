@@ -40,6 +40,7 @@ import 'package:zenmusic/desktop/screens/youtube/yt_channel_page.dart';
 import 'package:zenmusic/desktop/screens/youtube/yt_playlist_page.dart';
 import 'package:zenmusic/desktop/screens/shell/app_shell.dart';
 import 'package:zenmusic/mobile/shell/zen_mobile_shell.dart';
+import 'package:zenmusic/mobile/home/echo_home_page.dart';
 import 'package:zenmusic/desktop/spotify/spotify_login_page.dart';
 import 'package:zenmusic/desktop/utils/expressive_motion.dart';
 import 'package:zenmusic/desktop/ytmusic/ytm_login_page.dart';
@@ -259,7 +260,11 @@ List<StatefulShellBranch> branches = [
     routes: [
       GoRoute(
         path: '/',
-        builder: (context, state) => const HomePage(),
+        // Mobile gets the Echo-style home page; desktop keeps the
+        // historical HomePage untouched.
+        builder: (context, state) => ZenMobileShell.applies()
+            ? const EchoHomePage()
+            : const HomePage(),
       ),
     ],
   ),

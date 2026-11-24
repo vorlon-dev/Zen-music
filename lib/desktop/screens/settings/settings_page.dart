@@ -9,6 +9,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:zenmusic/desktop/core/widgets/zen_logo.dart';
 
 import 'package:zenmusic/desktop/screens/library/backdrop_page.dart';
 import 'package:zenmusic/desktop/screens/library/crossfade_page.dart';
@@ -95,9 +98,10 @@ class _Entry {
 }
 
 class _Group {
-  const _Group(this.title, this.entries);
+  const _Group(this.title, this.entries, [this.color]);
   final String title;
   final List<_Entry> entries;
+  final Color? color;
 }
 
 
@@ -143,6 +147,13 @@ class _SettingsBodyState extends State<_SettingsBody> {
           subtitle: 'Playback, equalizer and queue'.tr,
           keywords: const ['equalizer', 'eq', 'audio', 'playback'],
           onTap: () => context.go('/settings/player'),
+        ),
+        _Entry(
+          icon: Icons.equalizer_rounded,
+          title: 'Equalizer'.tr,
+          subtitle: '15 bands, presets and bass boost'.tr,
+          keywords: const ['equalizer', 'eq', 'bass', 'treble', 'preset'],
+          onTap: () => context.go('/settings/player/equalizer'),
         ),
         _Entry(
           icon: Icons.compare_arrows,
@@ -196,7 +207,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
             },
           ),
         ),
-      ]),
+      ], const Color(0xFF5B8DEF)),
       _Group('Personalization', [
         if (Platform.isAndroid)
           _Entry(
@@ -260,7 +271,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
             ),
           ),
         ),
-      ]),
+      ], const Color(0xFFB65CF0)),
       if (Platform.isWindows)
         _Group('Desktop', [
           _Entry(
@@ -288,7 +299,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
               MaterialPageRoute(builder: (_) => const BackdropPage()),
             ),
           ),
-        ]),
+        ], const Color(0xFF2BB3A3)),
       _Group('Services', [
         _Entry(
           title: 'YouTube Music'.tr,
@@ -318,15 +329,20 @@ class _SettingsBodyState extends State<_SettingsBody> {
           builder: _spotifyBuilder,
         ),
         _Entry(
-          icon: Icons.graphic_eq,
           title: 'Last.fm',
-          subtitle: 'Scrobble your plays'.tr,
           keywords: const ['lastfm', 'last.fm', 'scrobble', 'music'],
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const LastfmPage()),
+          builder: (ctx) => ZenRow(
+            icon: Icons.graphic_eq,
+            leading: const ZenBrandTile(ZenBrands.lastfm),
+            title: 'Last.fm',
+            subtitle: 'Scrobble your plays'.tr,
+            chevron: true,
+            onTap: () => Navigator.of(ctx).push(
+              MaterialPageRoute(builder: (_) => const LastfmPage()),
+            ),
           ),
         ),
-      ]),
+      ], const Color(0xFFE8604C)),
       _Group('Storage and privacy', [
         _Entry(
           icon: ZenIcons.backup,
@@ -351,7 +367,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
             MaterialPageRoute(builder: (_) => const OfflineCachePage()),
           ),
         ),
-      ]),
+      ], const Color(0xFFE5A100)),
       _Group('About', [
         _Entry(
           icon: ZenIcons.about,
@@ -376,8 +392,64 @@ class _SettingsBodyState extends State<_SettingsBody> {
             }
           },
         ),
-      ]),
+      ], const Color(0xFF6B7A90)),
+      _Group('Community', [
+        _Entry(
+          title: 'Source code'.tr,
+          keywords: const ['github', 'code', 'repo', 'star'],
+          builder: (ctx) => ZenRow(
+            icon: Icons.code,
+            leading: const ZenBrandTile(ZenBrands.github),
+            title: 'Source code'.tr,
+            subtitle: 'github.com/vorlon-dev/Zen-music',
+            trailing: Icon(ZenIcons.openExternal,
+                size: 18,
+                color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+            onTap: () => _openUrl(_repoUrl),
+          ),
+        ),
+        _Entry(
+          icon: Icons.star_outline_rounded,
+          title: 'Star on GitHub'.tr,
+          subtitle: 'Support the project'.tr,
+          keywords: const ['star', 'support', 'rate'],
+          trailing: Icon(ZenIcons.openExternal,
+              size: 18,
+              color: Theme.of(context).colorScheme.onSurfaceVariant),
+          onTap: () => _openUrl(_repoUrl),
+        ),
+        _Entry(
+          icon: Icons.bug_report_outlined,
+          title: 'Report a problem'.tr,
+          subtitle: 'Open an issue on GitHub'.tr,
+          keywords: const ['bug', 'issue', 'feedback', 'help'],
+          trailing: Icon(ZenIcons.openExternal,
+              size: 18,
+              color: Theme.of(context).colorScheme.onSurfaceVariant),
+          onTap: () => _openUrl('$_repoUrl/issues/new'),
+        ),
+        _Entry(
+          icon: Icons.ios_share_rounded,
+          title: 'Share ZenMusic'.tr,
+          subtitle: 'Send the download link to a friend'.tr,
+          keywords: const ['share', 'invite', 'friend'],
+          chevron: false,
+          onTap: () => SharePlus.instance.share(ShareParams(
+            text: 'ZenMusic – YouTube Music and Spotify in one player: '
+                '$_repoUrl/releases',
+          )),
+        ),
+      ], const Color(0xFF3FA66A)),
     ];
+  }
+
+  static const _repoUrl = 'https://github.com/vorlon-dev/Zen-music';
+
+  static Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   static Widget _spotifyBuilder(BuildContext context) => const _SpotifyTile();
@@ -397,7 +469,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
         final groups = <_Group>[];
         for (final g in _groups(context)) {
           final list = g.entries.where((e) => e.matches(q)).toList();
-          if (list.isNotEmpty) groups.add(_Group(g.title, list));
+          if (list.isNotEmpty) groups.add(_Group(g.title, list, g.color));
         }
 
         return LayoutBuilder(
@@ -406,6 +478,7 @@ class _SettingsBodyState extends State<_SettingsBody> {
 
             Widget section(_Group g) => ZenSection(
               title: g.title,
+              tint: g.color,
               children: [for (final e in g.entries) e.build(context)],
             );
 
@@ -439,6 +512,12 @@ class _SettingsBodyState extends State<_SettingsBody> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (q.isEmpty) ...[
+                          const _Hero(),
+                          const SizedBox(height: 12),
+                          _QuickActions(),
+                          const SizedBox(height: 20),
+                        ],
                         ZenSearchField(
                           onChanged: (v) => setState(() => _query = v),
                         ),
@@ -762,13 +841,13 @@ class _YtmTileState extends State<_YtmTile> {
                   : null,
               trailing: loggedIn
                   ? OutlinedButton(
-                      onPressed: () => YtmAuth.instance.logout(),
-                      child: Text('Log out'.tr),
-                    )
+                onPressed: () => YtmAuth.instance.logout(),
+                child: Text('Log out'.tr),
+              )
                   : FilledButton.tonal(
-                      onPressed: _openEmbeddedLogin,
-                      child: Text('Log in'.tr),
-                    ),
+                onPressed: _openEmbeddedLogin,
+                child: Text('Log in'.tr),
+              ),
             ),
             if (!loggedIn)
               AnimatedSize(
@@ -777,100 +856,168 @@ class _YtmTileState extends State<_YtmTile> {
                 alignment: Alignment.topCenter,
                 child: _showPaste
                     ? Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            TextField(
-                              controller: _ctrl,
-                              maxLines: _hide ? 1 : 3,
-                              obscureText: _hide,
-                              decoration: InputDecoration(
-                                hintText:
-                                    'Paste cookies.txt content or a cookie '
-                                    'header from music.youtube.com',
-                                prefixIcon: Icon(ZenIcons.key, size: 18),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                suffixIcon: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Paste'.tr,
-                                      icon: Icon(ZenIcons.paste, size: 18),
-                                      onPressed: _pasteFromClipboard,
-                                    ),
-                                    IconButton(
-                                      tooltip: _hide ? 'Show' : 'Hide',
-                                      icon: Icon(_hide
-                                          ? ZenIcons.eye
-                                          : ZenIcons.eyeOff,
-                                          size: 18),
-                                      onPressed: () =>
-                                          setState(() => _hide = !_hide),
-                                    ),
-                                  ],
-                                ),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _ctrl,
+                        maxLines: _hide ? 1 : 3,
+                        obscureText: _hide,
+                        decoration: InputDecoration(
+                          hintText:
+                          'Paste cookies.txt content or a cookie '
+                              'header from music.youtube.com',
+                          prefixIcon: Icon(ZenIcons.key, size: 18),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          suffixIcon: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Paste'.tr,
+                                icon: Icon(ZenIcons.paste, size: 18),
+                                onPressed: _pasteFromClipboard,
                               ),
-                            ),
-                            if (_error != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Row(
-                                  children: [
-                                    Icon(ZenIcons.error,
-                                        size: 16, color: cs.error),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Text(_error!,
-                                          style: TextStyle(
-                                              fontSize: 13,
-                                              color: cs.error)),
-                                    ),
-                                  ],
-                                ),
+                              IconButton(
+                                tooltip: _hide ? 'Show' : 'Hide',
+                                icon: Icon(_hide
+                                    ? ZenIcons.eye
+                                    : ZenIcons.eyeOff,
+                                    size: 18),
+                                onPressed: () =>
+                                    setState(() => _hide = !_hide),
                               ),
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                TextButton(
-                                  onPressed: () =>
-                                      setState(() => _showPaste = false),
-                                  child: Text('Cancel'.tr),
-                                ),
-                                const Spacer(),
-                                FilledButton(
-                                  onPressed: _busy ? null : _loginPaste,
-                                  child: _busy
-                                      ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                              strokeWidth: 2),
-                                        )
-                                      : Text('Log in with cookies'.tr),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      )
-                    : Padding(
-                        padding: const EdgeInsets.only(left: 54, bottom: 6),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton(
-                            onPressed: () =>
-                                setState(() => _showPaste = true),
-                            child: Text('Use cookies instead'.tr),
+                            ],
                           ),
                         ),
                       ),
+                      if (_error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Row(
+                            children: [
+                              Icon(ZenIcons.error,
+                                  size: 16, color: cs.error),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(_error!,
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        color: cs.error)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          TextButton(
+                            onPressed: () =>
+                                setState(() => _showPaste = false),
+                            child: Text('Cancel'.tr),
+                          ),
+                          const Spacer(),
+                          FilledButton(
+                            onPressed: _busy ? null : _loginPaste,
+                            child: _busy
+                                ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2),
+                            )
+                                : Text('Log in with cookies'.tr),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                )
+                    : Padding(
+                  padding: const EdgeInsets.only(left: 54, bottom: 6),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () =>
+                          setState(() => _showPaste = true),
+                      child: Text('Use cookies instead'.tr),
+                    ),
+                  ),
+                ),
               ),
           ],
         );
       },
     );
+  }
+}
+
+
+class _Hero extends StatelessWidget {
+  const _Hero();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cs.primaryContainer,
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Row(children: [
+        const ZenLogoWidget(size: 64, borderRadius: 18),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('ZenMusic',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: cs.onPrimaryContainer)),
+              const SizedBox(height: 2),
+              FutureBuilder<PackageInfo>(
+                future: PackageInfo.fromPlatform(),
+                builder: (context, snap) => Text(
+                  snap.hasData
+                      ? 'Version ${snap.data!.version} (${snap.data!.buildNumber})'
+                      : 'Settings',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: cs.onPrimaryContainer.withValues(alpha: 0.75)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton.filledTonal(
+          tooltip: 'Check for updates'.tr,
+          icon: Icon(ZenIcons.update),
+          onPressed: () =>
+              _SettingsBodyState._openUrl('${_SettingsBodyState._repoUrl}/releases'),
+        ),
+      ]),
+    );
+  }
+}
+
+class _QuickActions extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    Widget a(IconData i, String l, VoidCallback f) =>
+        Expanded(child: ZenQuickAction(icon: i, label: l, onTap: f));
+    return Row(children: [
+      a(ZenIcons.appearance, 'Appearance'.tr,
+              () => context.go('/settings/appearance')),
+      const SizedBox(width: 8),
+      a(Icons.equalizer_rounded, 'Equalizer'.tr,
+              () => context.go('/settings/player/equalizer')),
+      const SizedBox(width: 8),
+      a(ZenIcons.player, 'Player'.tr, () => context.go('/settings/player')),
+      const SizedBox(width: 8),
+      a(Icons.language, 'Language'.tr, () => showLanguageDialog(context)),
+    ]);
   }
 }
