@@ -1912,9 +1912,10 @@ class _EchoMorphState extends State<_EchoMorph>
             t,
           )!;
           return Stack(children: [
-            // lyrics: rise from the bottom, fade in with the offset
-            if (t > 0.001)
-              Positioned(
+            // lyrics: rise from the bottom, fade in with the offset. Always
+            // mounted (zero-sized while closed): the box is what looks the
+            // lyrics up, so the Lyrics button only enables if it exists.
+            Positioned(
                 left: 0,
                 right: 0,
                 top: lyricsTop,
