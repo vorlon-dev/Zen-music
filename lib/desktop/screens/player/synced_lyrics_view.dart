@@ -955,7 +955,10 @@ class _KaraokeLineState extends State<_KaraokeLine> {
           r != null &&
           _dur[i] > AppleMotion.emphasisMinMs &&
           !_isCjk(_full.substring(_ranges[i].$1, _ranges[i].$2))) {
-        chars = <Rect>[];
+        // Build into a non-null list: assigning `chars = null` inside the
+        // loop would stop the analyzer promoting `chars` for `chars.add`.
+        final built = <Rect>[];
+        var ok = true;
         var off = _ranges[i].$1;
         for (final rune in _full.substring(_ranges[i].$1, _ranges[i].$2).runes) {
           final len = rune > 0xFFFF ? 2 : 1;
@@ -965,14 +968,14 @@ class _KaraokeLineState extends State<_KaraokeLine> {
               TextSelection(baseOffset: off, extentOffset: off + len),
             );
             if (boxes.isEmpty) {
-              chars = null;
+              ok = false;
               break;
             }
-            chars.add(boxes.first.toRect());
+            built.add(boxes.first.toRect());
           }
           off += len;
         }
-        if (chars != null && chars.length < 2) chars = null;
+        chars = (ok && built.length >= 2) ? built : null;
       }
       _charRects.add(chars);
     }
