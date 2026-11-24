@@ -82,10 +82,13 @@ class _ZenMobileShellState extends State<ZenMobileShell>
   // Settles with a spring (Echo Nightly feel): slightly under-damped so it
   // glides into place without a visible bounce. Overshoot past 0/1 is
   // harmless — every consumer clamps the value before painting.
-  static const SpringDescription _sheetSpring = SpringDescription(
+  static final SpringDescription _sheetSpring =
+      SpringDescription.withDampingRatio(
     mass: 1,
     stiffness: 420,
-    damping: 34,
+    // Critically damped: the sheet eases into place with NO overshoot, so it
+    // never turns around at the end (the "snap back" hitch) — butter smooth.
+    ratio: 1.0,
   );
 
   late final AnimationController _sheet = AnimationController(
@@ -448,7 +451,9 @@ class _ZenMobileShellState extends State<ZenMobileShell>
                                                     .shrink();
                                               }
                                               return Opacity(
-                                                opacity: ((1 - v) * 2).clamp(0.0, 1.0),
+                                                // Fades over the first ~45 % of
+                                                // travel (smooth, no 2x ramp).
+                                                opacity: 1 - _smoothstep(0.02, 0.25, v),
                                                 child: IgnorePointer(
                                                   ignoring: v > 0.05,
                                                   child: child!,
@@ -631,8 +636,15 @@ Widget _buildSheet(MediaQueryData mq, Rect pill, double travel) {
       final bottomRadius = topRadius * (1 - _smoothstep(0.55, 0.85, v));
       // Translucent dark surface fades in as the pill fades out; the player
       // content composes over it in the second third (reference crossfade).
-      final surfaceA = _smoothstep(0.02, 0.22, v);
-      final pageA = _smoothstep(0.30, 0.55, v);
+      // The player content starts appearing early and overlaps the pill
+      // fading out, so there is never a near-empty dark panel mid-travel.
+      // The pill fades out and the page fades in over the SAME short window
+      // (first quarter of travel), so their alphas always add up to ~1 and
+      // the sheet never shows an empty dark panel mid-travel (the hollow
+      // frame seen while closing). It also keeps the full-screen Opacity
+      // layer (a saveLayer) alive for only a handful of frames.
+      final surfaceA = _smoothstep(0.0, 0.25, v);
+      final pageA = _smoothstep(0.02, 0.25, v);
 
       return Positioned.fill(
         child: ClipPath(
