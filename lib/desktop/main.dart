@@ -35,6 +35,7 @@ import 'package:zenmusic/desktop/services/library.dart';
 import 'package:zenmusic/desktop/services/lyrics.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/settings_manager.dart';
+import 'package:zenmusic/desktop/services/dynamic_accent.dart';
 import 'package:zenmusic/desktop/services/yt_audio_stream.dart';
 import 'package:zenmusic/desktop/utils/router.dart';
 import 'package:zenmusic/desktop/ytmusic/ytmusic.dart';
@@ -121,6 +122,7 @@ Future<void> main(List<String> args) async {
   GetIt.I<BeatHapticsEngine>().tempoSource = AiTempoSource();
   GetIt.I<BeatHapticsEngine>().start();
   ZenWallService.instance.attach(mediaPlayer.currentSongNotifier);
+  DynamicAccent.instance.attach(mediaPlayer.currentSongNotifier);
 
   final libraryService = LibraryService();
   GetIt.I.registerSingleton<LibraryService>(libraryService);
@@ -201,15 +203,37 @@ class ZenDesktopApp extends StatelessWidget {
   const ZenDesktopApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      ListenableBuilder(
+        listenable: DynamicAccent.instance,
+        builder: (context, _) => _buildApp(context),
+      );
+
+  Widget _buildApp(BuildContext context) {
     final settings = context.watch<SettingsManager>();
+    // Dynamic colors: the accent follows the playing song's artwork.
+    final accent = settings.dynamicColors
+        ? (DynamicAccent.instance.color ?? settings.accentColor)
+        : settings.accentColor;
+    // Pure black: true-black surfaces in dark mode (OLED).
+    final amoled = settings.amoledBlack;
+    ThemeData black(ThemeData t) => !amoled
+        ? t
+        : t.copyWith(
+            scaffoldBackgroundColor: Colors.black,
+            colorScheme: t.colorScheme.copyWith(
+              surface: Colors.black,
+              surfaceContainerLowest: Colors.black,
+              surfaceContainerLow: const Color(0xFF0A0A0A),
+            ),
+          );
     final liquid = settings.liquidGlass;
     final dark = getDarkness(settings.themeModes.indexOf(settings.themeMode));
 
     // Keep the Kotlin glass engine in sync on Android (no-op on desktop).
     if (Platform.isAndroid) {
       LiquidGlassBridge.instance
-          .sync(enabled: liquid, dark: dark, accent: settings.accentColor?.value);
+          .sync(enabled: liquid, dark: dark, accent: accent?.value);
       unawaited(LiquidGlassBridge.instance.warmUp());
     }
 
@@ -223,17 +247,23 @@ class ZenDesktopApp extends StatelessWidget {
         routerConfig: router,
         themeMode: settings.themeMode,
         theme: switch (settings.uiTheme) {
-          'm3' => ZenM3Theme.light(primary: settings.accentColor),
+          'm3' => ZenM3Theme.light(primary: accent),
           'liquid' =>
-              ZenLiquidTheme.light(primary: settings.accentColor),
-          _ => AppTheme.light(primary: Colors.black),
+              ZenLiquidTheme.light(primary: accent),
+          _ => AppTheme.light(
+              primary: settings.dynamicColors && accent != null
+                  ? accent
+                  : Colors.black),
         },
-        darkTheme: switch (settings.uiTheme) {
-          'm3' => ZenM3Theme.dark(primary: settings.accentColor),
+        darkTheme: black(switch (settings.uiTheme) {
+          'm3' => ZenM3Theme.dark(primary: accent),
           'liquid' =>
-              ZenLiquidTheme.dark(primary: settings.accentColor),
-          _ => AppTheme.dark(primary: Colors.white),
-        },
+              ZenLiquidTheme.dark(primary: accent),
+          _ => AppTheme.dark(
+              primary: settings.dynamicColors && accent != null
+                  ? accent
+                  : Colors.white),
+        }),
         builder: (context, child) {
           return Directionality(
               textDirection: L10n.isRtl ? TextDirection.rtl : TextDirection.ltr,
@@ -243,12 +273,15 @@ class ZenDesktopApp extends StatelessWidget {
                   if (liquid)
                     LiquidBackdrop(
                       dark: dark,
-                      accent: settings.accentColor,
+                      accent: accent,
                       child: const SizedBox.expand(),
                     )
                   else
                     ColoredBox(
-                      color: settings.uiTheme == 'm3'
+                      color: (amoled &&
+                              Theme.of(context).brightness == Brightness.dark)
+                          ? Colors.black
+                          : settings.uiTheme == 'm3'
                           ? (Theme.of(context).brightness == Brightness.dark
                           ? ZenM3Palette.darkBackground
                           : ZenM3Palette.lightBackground)
