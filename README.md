@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="screenshots/garden-jessica-transparent.gif" alt="ZenMusic" width="880" />
+<img src="assets/banners/zenmusic-banner.png" alt="ZenMusic" width="100%" />
+
+<p><b>A modern music player for Android and Windows with ad-free streaming, word-by-word synced lyrics, lossless audio, offline downloads and player skins.</b></p>
 
 <br/>
 
@@ -68,7 +70,7 @@ It runs on **Android** (phone and tablet) and **Windows** (a full desktop experi
 - **One app, many sources:** search and play across providers without switching apps.
 - **Great playback UX:** gapless-feeling queue, sleep timer, equalizer, and lyrics that follow the song.
 - **Make it yours:** player skins, slider styles, thumbnail radius, lyric layout and more.
-- **Open and hackable:** GPL-3.0, with an extension system for adding sources.
+- **Open and hackable:** GPL-3.0 licensed, so you can read, build and improve it.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -99,69 +101,123 @@ It runs on **Android** (phone and tablet) and **Windows** (a full desktop experi
 
 </div>
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
+> [!TIP]
+> **What's new in v25.11.2026:** Echo-style player skins, a smooth player ⇄ lyrics transition, an Echo mini player, YouTube video canvas, redesigned Settings / Appearance / Equalizer / Lyric sources, and working dynamic colors. See the [release notes](release-notes/v25.11.2026.md).
 
-#### Playback
-- Multi-source streaming: JioSaavn (320 kbps AAC), YouTube Music, and Spotify
-- Spotify login with your own account
-- Offline downloads
+<details open>
+<summary><b>Streaming & Sources</b></summary>
+<br>
 
-</td>
-    <td width="50%" valign="top">
+- **Three sources in one app:** YouTube Music, JioSaavn and Spotify.
+- **YouTube Music sign-in:** browse your account, library and recommendations.
+- **Spotify sign-in:** play with your own account, browse your library and import playlists (Web Player protocol with Widevine DRM; custom engine on Windows).
+- **Home feed:** charts, moods and genres, podcasts and YouTube Music browsing.
+- **Search:** one search across sources, plus a dedicated YouTube search for videos, channels and playlists.
+- **Regional workaround:** use a VPN or proxy if a source is blocked in your country.
 
-#### Audio
-- Lossless streaming (FLAC / Hi-Res) for YouTube Music and JioSaavn songs
-- System equalizer
-- Widevine DRM (Spotify)
+</details>
 
-</td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
+<details open>
+<summary><b>Audio Quality</b></summary>
+<br>
 
-#### Lyrics & Discovery
-- Time-synced lyrics (LRCLIB)
-- Adjustable lyric size, spacing and alignment
-- Song recognition: identify music playing around you
+- **Lossless streaming:** FLAC CD (16-bit / 44.1 kHz), Hi-Res (24-bit / 96 kHz) and Hi-Res Max (24-bit / 192 kHz) for YouTube Music and JioSaavn songs, plus MP3 320. Playback steps down automatically if a tier is unavailable.
+- **JioSaavn 320 kbps AAC.**
+- **15-band equalizer:** presets, bass boost, a live response curve and a reset button.
+- **Crossfade:** true two-deck blend with an optional Automix mode that matches tempo between tracks.
+- **Skip silence** and **Sing Mode** (vocal dip with an adjustable voice level, on Android).
+- **Haptic Beats:** vibrate with the rhythm of the song.
+- **Offline AI remix models:** optional on-device tempo models you download yourself.
 
-</td>
-    <td width="50%" valign="top">
+</details>
 
-#### Library
-- Import playlists from Spotify
-- Download and manage songs offline
+<details open>
+<summary><b>Lyrics</b></summary>
+<br>
 
-</td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
+- **Word-by-word synced lyrics** with per-letter animation, plus line-synced lyrics.
+- **Multiple sources:** LRCLIB, Better Lyrics, Musixmatch, Genius, KuGou, Lyrics+, Megalobiz, Paxsenix, Unison and more.
+- **Lyric sources page:** logo for each source, word / line badges, drag to reorder, reset to default.
+- **Translation and romanization:** show a translated line under each lyric, or romanize non-Latin scripts.
+- **Smooth player ⇄ lyrics transition:** the cover shrinks to a corner thumbnail while the lyrics rise in; drag to scrub it.
+- **Lyric style, animation, text size, line spacing and alignment** are all adjustable.
+- **Lyrics overlay and Sing Mode window** on Windows: a pinned always-on-top sing-along window.
+- **Keep screen on** while lyrics are showing.
 
-#### Social
-- Listen Together: create a room, share the code, and listen in sync
-- Host controls playback for everyone
+</details>
 
-</td>
-    <td width="50%" valign="top">
+<details open>
+<summary><b>Player & Visuals</b></summary>
+<br>
 
-#### Interface
-- 8 custom player skins: Classic, Turntable, Editorial, Lyrics, Polaroid, Tabletop Radio, Studio, Ring
-- 22 progress slider styles (Wavy, RGB Glow, Equalizer, Neon, Orbit, DNA Helix and more)
-- OTA update checks via GitHub Releases
+- **4 player skins:** Classic, Apple Music, Liquid Glass (SimpMusic style) and Material 3, with a preview card for each in Settings.
+- **22 progress-slider styles:** Wavy, RGB Glow, Classic, Pill, Segments, Equalizer, Neon, Orbit, Heartbeat, DNA Helix, Elastic String, Liquid Tube, Constellation, Fireflies, Ripple, Spring Coil, Dot Wave, Ruler, Comet, Lightning, Glitch and Bubbles.
+- **Canvas backdrops:** Spotify canvas when available, otherwise the song's own music video as a muted 20-second loop (up to 1080p), then an Instagram reel fallback.
+- **Echo-style mini player on phones:** pill with a progress ring around the artwork, cookie-shaped play button and swipe to skip.
+- **Dynamic colors:** the app accent follows the playing song's artwork.
+- **Pure black background** for OLED screens.
+- **Themes:** Classic and Liquid Glass UI, light / dark / system, accent swatches and a custom launcher logo.
+- **Zen Wall and song backdrop:** full-screen visuals behind the player.
+- **Adjustable thumbnail radius** and haptic feedback.
 
-</td>
-  </tr>
-  <tr>
-    <td colspan="2" valign="top">
+</details>
 
-#### Platforms
-- **Android**: full experience (phone and tablet)
-- **Windows**: full desktop experience with a custom Spotify engine, responsive UI, and an installer
+<details open>
+<summary><b>Discover & Library</b></summary>
+<br>
 
-</td>
-  </tr>
-</table>
+- **Smart Mix:** a daily mix built from your listening history.
+- **Genre DNA and weekly recap:** see what you listen to most.
+- **Discover feed:** an endless, ranked "Music Flow" built from what you play and like.
+- **Library:** favourites, playback history, downloads and your own playlists.
+- **Spotify library and playlists** inside the app.
+- **Import playlists** from Spotify and public Apple Music links.
+- **Friends feed:** see what your Last.fm friends are playing.
+- **Last.fm scrobbling.**
+- **Search and playback history** can be turned off or cleared.
+
+</details>
+
+<details open>
+<summary><b>Offline & Backup</b></summary>
+<br>
+
+- **Offline downloads** with tagging, a download queue and playlist downloads.
+- **Auto-cached songs** and an offline cache you can manage.
+- **Backup and restore** your library and settings, and manage storage space.
+
+</details>
+
+<details open>
+<summary><b>Social</b></summary>
+<br>
+
+- **Listen Together:** create a room, share the code and listen in sync. The host controls play, pause, seek and track changes.
+
+</details>
+
+<details open>
+<summary><b>Settings</b></summary>
+<br>
+
+- **Redesigned settings** with grouped tiles, quick actions and real brand logos.
+- **Appearance:** live theme preview, theme mode, UI theme, accent colors, dynamic colors and pure black.
+- **Player settings:** equalizer, crossfade, skip silence, Sing Mode, Haptic Beats, mini player and song quality.
+- **Content & region:** country, language and content type.
+- **Privacy:** history and data controls.
+- **About:** version and build, credits and licenses, check for updates, source code, star on GitHub, share and report a problem.
+
+</details>
+
+<details open>
+<summary><b>Platforms</b></summary>
+<br>
+
+- **Android:** phone and tablet, with background playback, notification controls and the Echo mini player.
+- **Windows 10/11:** full desktop experience with an installer, media-key and system media controls, a floating mini player, a lyrics overlay window, Mica / Acrylic backdrop and a responsive layout.
+- **Updates:** delivered through GitHub Releases (or Obtainium on Android).
+
+</details>
 
 ### Feature details
 
@@ -169,21 +225,21 @@ It runs on **Android** (phone and tablet) and **Windows** (a full desktop experi
 
 | Source | Quality | Notes |
 | --- | --- | --- |
-| JioSaavn | Up to 320 kbps AAC | May require a VPN/proxy outside supported regions |
-| YouTube Music | Stream-dependent | Stream extraction via Innertube; login support planned |
-| Spotify | Web Player protocol | Uses Widevine DRM; custom engine on Windows. Sign in with your Spotify account for playback and playlist import |
-
-Extra sources can be added through the **extension** system.
+| JioSaavn | Up to 320 kbps AAC, or lossless | May require a VPN/proxy outside supported regions |
+| YouTube Music | Stream-dependent, or lossless | Stream extraction via Innertube; sign in with your Google account |
+| Spotify | Web Player protocol | Uses Widevine DRM; custom engine on Windows. Sign in with your own account for playback and playlist import |
 
 #### Lossless streaming
 
-YouTube Music and JioSaavn songs can be upgraded to true lossless audio from **Settings → Song quality**: MP3 320, FLAC CD (16-bit / 44.1 kHz), Hi-Res Lossless (24-bit / 96 kHz) and Hi-Res Max (24-bit / 192 kHz). The tier ladder walks **down, never up** — the selected tier is the ceiling. If a song (or the service) can't provide the selected tier, playback silently continues through the lower tiers and then the normal stream, so it never breaks or stalls. YouTube videos keep their original audio, and the setting lives in its own page with live previews of each tier.
+Open **Settings → Song quality** and choose: MP3 320, FLAC CD (16-bit / 44.1 kHz), Hi-Res Lossless (24-bit / 96 kHz) or Hi-Res Max (24-bit / 192 kHz). The selected tier is the ceiling: if a song (or the service) can't provide it, playback quietly continues through the lower tiers and then the normal stream, so it never stalls. YouTube videos keep their original audio.
 
 #### Lyrics
 
-- Time-synced lyrics are fetched from [LRCLIB](https://lrclib.net/).
-- Customize font size, line spacing and alignment to taste.
-- Lyrics scroll in sync with playback and can be shown alongside the player.
+Lyrics are fetched from the sources you enable in **Settings → Lyric sources**, in the order you set. The first source with word-by-word timing wins when "Word timing first" is on; otherwise the first match is used. Everything else (style, size, spacing, alignment, translation, romanization) is under **Appearance** and **Lyrics**.
+
+#### Canvas
+
+When a song has a Spotify canvas it plays behind the player. If it doesn't (or you aren't signed in to Spotify), ZenMusic finds the song's music video on YouTube and loops a muted 20-second clip from the middle of the song, up to 1080p.
 
 #### Listen Together
 
@@ -196,13 +252,9 @@ YouTube Music and JioSaavn songs can be upgraded to true lossless audio from **S
 
 Download songs for offline playback and manage them from your library. Downloaded tracks play without a network connection.
 
-#### Song recognition
-
-Tap the recognition button to identify music playing around you. It uses a fingerprinting flow based on the Shazam discovery API.
-
 #### Player skins & appearance
 
-Pick between eight player skins: **Classic, Turntable, Editorial, Lyrics, Polaroid, Tabletop Radio, Studio and Ring** — from a spinning record with a tonearm that follows the song, to a tabletop radio with a tuning dial, to a studio console with faders. Combine them with **22 progress-slider styles** (Wavy, RGB Glow, Pill, Segments, Equalizer, Neon, Orbit, Heartbeat, DNA Helix, Comet and more), adjustable thumbnail radius and optional haptics. **Ambient mode** switches to a landscape player with an animated glow derived from the album art.
+Pick a skin from **Settings → Appearance → Player screen**: **Classic**, **Apple Music** (full-bleed artwork or canvas with round buttons), **Liquid Glass** (blurred backdrop with a live lyric line) or **Material 3** (connected buttons, squircle transport and a rotating cookie play button). Combine it with one of 22 progress-slider styles, an accent color, dynamic colors and pure black.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -408,8 +460,8 @@ Zen-music/
 - **Updates:** the app checks GitHub Releases for new versions (OTA update checks).
 - **Song quality:** lossless tiers (MP3 320, FLAC CD, Hi-Res 96, Hi-Res Max) are selectable in Settings → Song quality; playback falls back automatically when a tier is unavailable.
 - **Downloads:** offline songs are stored locally on the device and can be managed from the Library.
-- **Lyrics:** fetched on demand from LRCLIB.
-- **Accounts:** Spotify uses the Web Player protocol with Widevine DRM — sign in with your own account for playback and playlist import. YouTube Music login is planned for an upcoming update.
+- **Lyrics:** fetched on demand from the sources you enable in Settings → Lyric sources.
+- **Accounts:** Spotify uses the Web Player protocol with Widevine DRM — sign in with your own account for playback and playlist import. YouTube Music also supports account sign-in.
 - **Regional access:** some sources are region-locked. Use a VPN or proxy if a source is unavailable where you live.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
@@ -509,7 +561,7 @@ Spotify login, playback and playlist import require signing in with your own acc
 The app checks GitHub Releases for updates. Android users can also use Obtainium.
 
 **Can I add my own sources?**
-Yes. ZenMusic supports source extensions.
+No. The experimental extension runtime was removed in v25.11.2026; sources are built in.
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -523,7 +575,9 @@ Yes. ZenMusic supports source extensions.
 - [x] Listen Together
 - [x] Time-synced lyrics
 - [x] Offline downloads
-- [x] Song recognition
+- [x] Echo-style player skins and mini player
+- [x] YouTube video canvas
+- [x] Dynamic colors
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
