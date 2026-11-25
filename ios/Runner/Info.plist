@@ -81,6 +81,18 @@
 	<string>ZenMusic uses the local network for Jam sessions and its built-in audio stream.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>ZenMusic lets you pick images for playlist covers and wallpapers.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>ZenMusic can save album art and shared images to your photo library.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>https</string>
+		<string>http</string>
+		<string>spotify</string>
+		<string>mailto</string>
+		<string>tg</string>
+	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
