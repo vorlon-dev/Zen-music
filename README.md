@@ -212,7 +212,8 @@ Pick between eight player skins: **Classic, Turntable, Editorial, Lyrics, Polaro
 | --- | --- | --- |
 | Android (phone & tablet) | Full experience | APKs via GitHub Releases and Obtainium |
 | Windows 10/11 (x64) | Full desktop experience | Installer (`.exe`), custom Spotify engine, responsive UI |
-| iOS / macOS / Linux | Not supported | Not currently a build target |
+| iOS (beta) | Playback, lyrics, library, Spotify / YouTube Music sign-in | Unsigned IPA from GitHub Releases (sideload with AltStore, SideStore or Sideloadly). Android-only features are not available: lossless mirror engine, native equalizer, Sing Mode, launcher logo, Zen Wall, YouTube canvas |
+| macOS / Linux | Not supported | Not currently a build target |
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
