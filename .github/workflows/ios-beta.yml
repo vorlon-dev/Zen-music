@@ -33,7 +33,7 @@ concurrency:
 jobs:
   build-ios:
     name: Build unsigned IPA
-    runs-on: macos-15
+    runs-on: xcode-27   # macOS 27 + Xcode 27 (iOS 27 SDK); fall back to macos-26 if this label is unavailable
     timeout-minutes: 60
 
     steps:
