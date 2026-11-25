@@ -1,0 +1,143 @@
+# Zen Music · config.json generator workflow
+#
+# Manual trigger. Produces config/config.json in THIS repo and prints the
+# plug-in URL in the run summary. No app code is touched.
+#
+# The config carries: Innertube client matrix (versions refreshed live from
+# yt-dlp master), visitorData, a freshly minted BotGuard PO token (bgutil),
+# stream-extraction chains, YTM/YT/JioSaavn search endpoints and artwork
+# templates — everything a player needs except the UI.
+
+name: Generate config.json
+
+on:
+  workflow_dispatch:
+    inputs:
+      mint_po_token:
+        description: "Mint a fresh BotGuard PO token (bgutil generate_once)"
+        type: boolean
+        default: true
+      refresh_client_versions:
+        description: "Refresh Innertube client versions from yt-dlp master"
+        type: boolean
+        default: true
+      commit_config:
+        description: "Commit config/config.json to this branch"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: config-generator
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      BGUTIL_TAG: "2.0.2"
+      BGUTIL_DIR: /tmp/bgutil
+      POT_FILE: /tmp/pot.json
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 22 (bgutil requires >=22)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Mint PO token (BotGuard via bgutil)
+        if: ${{ inputs.mint_po_token }}
+        run: |
+          set -e
+          git clone --depth 1 --branch "$BGUTIL_TAG" \
+            https://github.com/brainicism/bgutil-ytdlp-pot-provider.git "$BGUTIL_DIR" \
+            || git clone --depth 1 \
+            https://github.com/brainicism/bgutil-ytdlp-pot-provider.git "$BGUTIL_DIR"
+          cd "$BGUTIL_DIR/server"
+          npm ci --no-audit --no-fund
+          npx tsc
+          node build/generate_once.js > "$POT_FILE" 2>/tmp/pot_err.txt || {
+            echo "::warning::PO token mint failed (non-fatal — config ships without starterToken)"; tail -3 /tmp/pot_err.txt; echo "{}" > "$POT_FILE"; }
+          cat "$POT_FILE" | head -c 200; echo
+
+      - name: Generate config.json + cipher mirror
+        run: |
+          set -e
+          RAW_URL="https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/config/config.json"
+          ARGS=(--out config/config.json --cipher-out config/player_configs.json --config-url "$RAW_URL")
+          if [ "${{ inputs.mint_po_token }}" = "true" ]; then ARGS+=(--bgutil-token-file "$POT_FILE"); fi
+          if [ "${{ inputs.refresh_client_versions }}" = "false" ]; then ARGS+=(--skip-versions); fi
+          python tools/generate_config.py "${ARGS[@]}"
+
+      - name: Validate config.json
+        run: |
+          jq -e '.meta and .innertube and .botguard and .cipher and .search' config/config.json > /dev/null
+          jq -e '.schemaVersion and .players' config/player_configs.json > /dev/null
+          echo "config.json valid: $(wc -c < config/config.json) bytes"
+          echo "player_configs.json valid: $(jq '.players | length' config/player_configs.json) players"
+
+      - name: Commit config to repo
+        if: ${{ inputs.commit_config }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add config/config.json config/player_configs.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "config: regenerate config.json + cipher mirror [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
+
+      - name: Config URLs (outputs)
+        id: urls
+        run: |
+          RAW="https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/config/config.json"
+          CIPHER="https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/config/player_configs.json"
+          CDN="https://cdn.jsdelivr.net/gh/${{ github.repository }}@${{ github.ref_name }}/config/config.json"
+          echo "raw=$RAW" >> "$GITHUB_OUTPUT"
+          echo "cipher=$CIPHER" >> "$GITHUB_OUTPUT"
+          echo "cdn=$CDN" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-json
+          path: |
+            config/config.json
+            config/player_configs.json
+
+      - name: Run summary
+        run: |
+          {
+            echo "## ✅ config.json generated"
+            echo ""
+            echo "Plug this URL into the app (Settings → config):"
+            echo ""
+            echo '```text'
+            echo "${{ steps.urls.outputs.raw }}"
+            echo '```'
+            echo "CDN mirror (cache-friendlier):"
+            echo '```text'
+            echo "${{ steps.urls.outputs.cdn }}"
+            echo '```'
+            echo ""
+            echo "### Cipher table mirror (zemer-cipher / innertubex compatible)"
+            echo ""
+            echo "Standalone \`player_configs.json\` (\`{schemaVersion, players}\` schema) — point "
+            echo "innertubex \`PlayerConfigRepository.sourceUrl\` or a zemer-style store at it:"
+            echo '```text'
+            echo "${{ steps.urls.outputs.cipher }}"
+            echo '```'
+            echo ""
+            echo "Health checks from this run: see \`health.checks\` inside config.json."
+            echo "The PO token starter expires (\`botguard.starterToken.expiresAt\`) — re-run this workflow to refresh."
+          } >> "$GITHUB_STEP_SUMMARY"
