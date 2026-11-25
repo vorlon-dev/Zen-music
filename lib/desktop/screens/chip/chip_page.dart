@@ -1,6 +1,7 @@
 // ZenMusic · vorlon-dev
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:zenmusic/desktop/core/widgets/section_item.dart';
@@ -67,6 +68,10 @@ class _ChipPageState extends State<_ChipPage> {
       onInternetRestored: context.read<ChipCubit>().fetch,
       child: Scaffold(
         appBar: AppBar(
+          leading: BackButton(
+            onPressed: () =>
+                context.canPop() ? context.pop() : context.go('/'),
+          ),
           title: Text(widget.title),
         ),
         body: BlocBuilder<ChipCubit, ChipState>(

@@ -339,7 +339,7 @@ class _EchoChipsRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
-                  onTap: () => context.go('/chip', extra: chip),
+                  onTap: () => context.push('/chip', extra: chip),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 8),

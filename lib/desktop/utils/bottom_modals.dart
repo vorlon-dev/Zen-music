@@ -449,7 +449,7 @@ class _AppleMusicStylePopup extends StatelessWidget {
                               ),
                               onTap: () {
                                 Navigator.pop(context);
-                                context.go('/browse', extra: {
+                                context.push('/browse', extra: {
                                   'endpoint': song['album']['endpoint']
                                       .cast<String, dynamic>(),
                                 });
@@ -1133,7 +1133,7 @@ class _SongWindowContent extends StatelessWidget {
             trailing: const Icon(Icons.chevron_right, color: Colors.white54),
             onTap: () {
               Navigator.pop(context);
-              context.go('/browse', extra: {
+              context.push('/browse', extra: {
                 'endpoint':
                 song['album']['endpoint'].cast<String, dynamic>(),
               });
