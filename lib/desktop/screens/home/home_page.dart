@@ -82,7 +82,7 @@ class _HomePageState extends State<_HomePage> {
       list.add(
         AdaptiveInkWell(
           borderRadius: BorderRadius.circular(10),
-          onTap: () => context.go('/chip', extra: element),
+          onTap: () => context.push('/chip', extra: element),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
