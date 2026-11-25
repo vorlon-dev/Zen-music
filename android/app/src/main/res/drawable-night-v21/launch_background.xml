@@ -13,14 +13,17 @@
      image (PNG / WEBP / JPG) in a mipmap or drawable folder.
 
        SAFE   : ic_launcher_foreground, ic_launcher_background,
-                ic_launcher_monochrome, logo_zen1..logo_zen9,
-                logo_mandala            (PNG-only, no shadowing XML)
-       FORBID : ic_launcher, zen_logo_1..zen_logo_9  — on Android 8+
+                ic_launcher_monochrome, zen_logo_N_foreground (N = 1..5)
+                (PNG-only, no shadowing XML)
+       FORBID : ic_launcher, zen_logo_1..zen_logo_5  — on Android 8+
                 (API 26+) those names resolve to the ADAPTIVE-ICON XML in
                 mipmap-anydpi-v26/, BitmapFactory cannot decode XML, and
                 the app dies at startup with:
                   <bitmap> requires a valid 'src' attribute
-     Never reference a vector/XML drawable or an uncommitted file either. -->
+     Never reference a vector/XML drawable or an uncommitted file either.
+     (The retired legacy logo mipmaps and the sixth-through-ninth zen logos
+     no longer exist in the repo — aliases and splash files must not
+     reference them.) -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@android:color/black" />
 

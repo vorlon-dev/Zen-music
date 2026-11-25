@@ -122,6 +122,9 @@ class MainActivity : AudioServiceActivity() {
         // In-app APK installer channel (OTA updates)
         InstallApkPlugin.register(flutterEngine, this)
         registerLauncherLogoChannel(flutterEngine)
+        // Repair any two-icons state left by older builds (alias enabled
+        // while .MainActivity stayed enabled) before anything reads slots.
+        reconcileLauncherIcon()
         // Native merged-stream video player (video watch page) —
         // platform-view factory; each instance owns the per-view
         // channel zen/video_player_<viewId>.
@@ -352,6 +355,51 @@ class MainActivity : AudioServiceActivity() {
     }
 
 
+    // Launcher icon slots. Every alias is declared android:enabled="false",
+    // i.e. DISABLED by default — and PackageManager silently drops disabled
+    // components from getPackageInfo(GET_ACTIVITIES) unless
+    // MATCH_DISABLED_COMPONENTS is requested. The earlier enumeration
+    // missed the flag, so every slot read as unavailable and the Logo page
+    // was untappable. MATCH_DISABLED_COMPONENTS restores them; the
+    // known-name probe below is a second net for OEM package-manager
+    // quirks (direct component lookup works for disabled components).
+    // Keep knownAliasNames in sync with the activity-alias list in
+    // AndroidManifest.xml and LauncherLogo.catalog in launcher_logo.dart.
+    private val knownLauncherAliases = listOf(
+        "LogoZen1", "LogoZen2", "LogoZen3", "LogoZen4", "LogoZen5",
+        "LogoZen6", "LogoZen7", "LogoZen8", "LogoZen9", "LogoZen10",
+        "LogoZen11", "LogoZen12", "LogoZen13", "LogoZen14", "LogoZen15"
+    )
+
+    private fun launcherAliases(pm: PackageManager, pkg: String): List<String> {
+        val found = LinkedHashSet<String>()
+        try {
+            val pkgInfo = pm.getPackageInfo(
+                pkg,
+                PackageManager.GET_ACTIVITIES
+                    or PackageManager.MATCH_DISABLED_COMPONENTS)
+            for (info in pkgInfo.activities ?: emptyArray()) {
+                // Activity aliases carry targetActivity; plain
+                // activities never do.
+                if (info.targetActivity != null && info.name.startsWith(pkg)) {
+                    found.add(info.name)
+                }
+            }
+        } catch (_: Throwable) {
+        }
+        for (simple in knownLauncherAliases) {
+            val full = "$pkg.$simple"
+            try {
+                pm.getActivityInfo(
+                    ComponentName(pkg, full),
+                    PackageManager.MATCH_DISABLED_COMPONENTS)
+                found.add(full)
+            } catch (_: Throwable) {
+            }
+        }
+        return found.toList()
+    }
+
     private fun registerLauncherLogoChannel(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zen/launcher_logo")
             .setMethodCallHandler { call, result ->
@@ -360,16 +408,7 @@ class MainActivity : AudioServiceActivity() {
                         try {
                             val pm = applicationContext.packageManager
                             val pkg = applicationContext.packageName
-                            val pkgInfo = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
-                            val aliases = mutableListOf<String>()
-                            for (info in pkgInfo.activities ?: emptyArray()) {
-                                // Activity aliases carry targetActivity; plain
-                                // activities never do.
-                                if (info.targetActivity != null && info.name.startsWith(pkg)) {
-                                    aliases.add(info.name)
-                                }
-                            }
-                            result.success(aliases)
+                            result.success(launcherAliases(pm, pkg))
                         } catch (_: Throwable) {
                             result.success(emptyList<String>())
                         }
@@ -378,14 +417,12 @@ class MainActivity : AudioServiceActivity() {
                         try {
                             val pm = applicationContext.packageManager
                             val pkg = applicationContext.packageName
-                            val pkgInfo = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
                             var current = "default"
-                            for (info in pkgInfo.activities ?: emptyArray()) {
-                                if (info.targetActivity == null) continue
+                            for (name in launcherAliases(pm, pkg)) {
                                 val state = pm.getComponentEnabledSetting(
-                                    ComponentName(pkg, info.name))
+                                    ComponentName(pkg, name))
                                 if (state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
-                                    current = info.name
+                                    current = name
                                     break
                                 }
                             }
@@ -399,30 +436,58 @@ class MainActivity : AudioServiceActivity() {
                         try {
                             val pm = applicationContext.packageManager
                             val pkg = applicationContext.packageName
-                            val pkgInfo = pm.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
-                            val aliases = (pkgInfo.activities ?: emptyArray())
-                                .filter { it.targetActivity != null }
-                                .map { it.name }
-                            if (slot != "default" && !aliases.contains(slot)) {
+                            // Dart sends the catalog's short id ('LogoZen1');
+                            // launcherAliases() returns FULL component names
+                            // ('com.zen.music.zenmusic.LogoZen1'). Normalise
+                            // both sides or the membership check below can
+                            // never pass — that was the slot_missing red box.
+                            fun full(name: String) =
+                                if (name.contains('.')) name else "$pkg.$name"
+                            val slotFull = if (slot == "default") "" else full(slot)
+                            val aliases = launcherAliases(pm, pkg).map(::full)
+                            if (slot != "default" && !aliases.contains(slotFull)) {
                                 result.error(
                                     "slot_missing",
                                     "This launcher logo slot is not part of this install. Rebuild and reinstall the app once with the shipped manifest — then every slot unlocks.",
                                     null)
                                 return@setMethodCallHandler
                             }
-                            // Disable every alias first, then enable the
-                            // requested one (none = back to the default icon).
+                            // Exactly ONE launcher component may stay
+                            // enabled: .MainActivity (the default icon) or
+                            // one of the aliases — never both. The old code
+                            // enabled an alias while .MainActivity stayed
+                            // enabled, so the launcher rendered TWO
+                            // zenmusic icons (the duplicate-icon bug).
+                            // Order matters: clear every alias, toggle
+                            // .MainActivity against the pick, then enable
+                            // the requested alias (none = default icon).
                             // DONT_KILL_APP keeps the running app alive; the
                             // launcher refreshes the icon on its own.
+                            val mainCn = ComponentName(pkg, MainActivity::class.java.name)
                             for (name in aliases) {
                                 pm.setComponentEnabledSetting(
                                     ComponentName(pkg, name),
                                     PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                                     PackageManager.DONT_KILL_APP)
                             }
-                            if (slot != "default") {
+                            if (slot == "default") {
+                                // Back to the built-in icon: restore the
+                                // manifest default (enabled) for the
+                                // activity itself.
                                 pm.setComponentEnabledSetting(
-                                    ComponentName(pkg, slot),
+                                    mainCn,
+                                    PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+                                    PackageManager.DONT_KILL_APP)
+                            } else {
+                                // The alias owns the icon now — the default
+                                // launcher entry must go dark or the
+                                // launcher shows both.
+                                pm.setComponentEnabledSetting(
+                                    mainCn,
+                                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                                    PackageManager.DONT_KILL_APP)
+                                pm.setComponentEnabledSetting(
+                                    ComponentName(pkg, slotFull),
                                     PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                                     PackageManager.DONT_KILL_APP)
                             }
@@ -434,6 +499,60 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // Self-heal after an update. Older builds enabled the picked alias
+    // without disabling .MainActivity, so the launcher ended up with TWO
+    // zenmusic icons and that state survives app updates (component
+    // enabled-state is persisted by PackageManager). Rule: exactly one
+    // launcher component is enabled — an alias OR the default activity.
+    // Runs once per process start and only writes state that is actually
+    // inconsistent, so healthy installs see zero PackageManager churn.
+    private fun reconcileLauncherIcon() {
+        try {
+            val pm = applicationContext.packageManager
+            val pkg = applicationContext.packageName
+            val mainCn = ComponentName(pkg, MainActivity::class.java.name)
+            val mainState = pm.getComponentEnabledSetting(mainCn)
+            // DEFAULT means "follow the manifest", which enables the
+            // activity — so DEFAULT counts as usable here.
+            val mainUsable =
+                mainState == PackageManager.COMPONENT_ENABLED_STATE_ENABLED ||
+                mainState == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+            val aliases = launcherAliases(pm, pkg)
+            val enabledAlias = aliases.firstOrNull {
+                pm.getComponentEnabledSetting(ComponentName(pkg, it)) ==
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            }
+            if (enabledAlias != null) {
+                // An alias owns the icon: the default entry must be dark
+                // and no other alias may stay lit.
+                if (mainUsable) {
+                    pm.setComponentEnabledSetting(
+                        mainCn,
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        PackageManager.DONT_KILL_APP)
+                }
+                for (name in aliases) {
+                    if (name == enabledAlias) continue
+                    if (pm.getComponentEnabledSetting(ComponentName(pkg, name)) ==
+                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {
+                        pm.setComponentEnabledSetting(
+                            ComponentName(pkg, name),
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP)
+                    }
+                }
+            } else if (mainState == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                // No alias owns the icon but the default one was switched
+                // off — restore it or the app would lose its launcher entry.
+                pm.setComponentEnabledSetting(
+                    mainCn,
+                    PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+                    PackageManager.DONT_KILL_APP)
+            }
+        } catch (_: Throwable) {
+        }
     }
 
 

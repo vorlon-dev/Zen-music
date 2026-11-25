@@ -36,27 +36,7 @@ subprojects {
     }
 }
 subprojects {
-    afterEvaluate {
-        if (name == "flutter_discord_rpc") {
-            extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {
-                compileSdkVersion(37)
-            }
-        }
-    }
-}
-
-subprojects {
     project.evaluationDependsOn(":app")
-}
-
-subprojects {
-    tasks.all(object : org.gradle.api.Action<org.gradle.api.Task> {
-        override fun execute(task: org.gradle.api.Task) {
-            if (task.name.startsWith("cargokitCargoBuild")) {
-                task.setEnabled(false)
-            }
-        }
-    })
 }
 
 tasks.register<Delete>("clean") {

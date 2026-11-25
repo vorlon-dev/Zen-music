@@ -1,10 +1,20 @@
 // ZenMusic · vorlon-dev
 
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("dev.flutter.flutter-gradle-plugin")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+// Release signing: filled by CI from the KEYSTORE_* secrets (or by you in
+// android/key.properties). Without it the release build falls back to the
+// debug key so `flutter build apk --release` always works.
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -34,6 +44,17 @@ android {
         }
     }
 
+    signingConfigs {
+        if (keystoreProps.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "com.zen.music.zenmusic"
         minSdk = 24
@@ -44,7 +65,8 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
             // R8 code/resource shrinking: unused classes and resources are
             // stripped from the APK (see proguard-rules.pro — shrink-only
             // mode, no obfuscation/optimization).

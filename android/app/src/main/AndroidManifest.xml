@@ -62,12 +62,19 @@
             </intent-filter>
         </activity>
         <!-- Launcher logo slots: each alias wraps .MainActivity with its
-             own icon; exactly one launcher component stays enabled. -->
+             own icon; exactly one launcher component stays enabled.
+             Icons are the adaptive zen_logo_1..5 set (anydpi-v26 XML on
+             Android 8+, raster zen_logo_N.png below that). The old
+             logo_zen1..9 / logo_mandala mipmaps and zen_logo_6..9 were
+             removed from the repo, so their aliases must NOT come back:
+             an alias whose @mipmap icon is missing fails the AAPT2 build
+             and shows up in-app as a dead slot. Keep this list in sync
+             with LauncherLogo.catalog in launcher_logo.dart. -->
         <activity-alias
             android:name=".LogoZen1"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_zen1"
+            android:icon="@mipmap/zen_logo_1"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -79,7 +86,7 @@
             android:name=".LogoZen2"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_zen2"
+            android:icon="@mipmap/zen_logo_2"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -91,7 +98,7 @@
             android:name=".LogoZen3"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_zen3"
+            android:icon="@mipmap/zen_logo_3"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -103,7 +110,7 @@
             android:name=".LogoZen4"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_zen4"
+            android:icon="@mipmap/zen_logo_4"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -115,7 +122,7 @@
             android:name=".LogoZen5"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_zen5"
+            android:icon="@mipmap/zen_logo_5"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -127,7 +134,7 @@
             android:name=".LogoZen6"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_zen6"
+            android:icon="@mipmap/zen_logo_6"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -139,7 +146,7 @@
             android:name=".LogoZen7"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_zen7"
+            android:icon="@mipmap/zen_logo_7"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -151,7 +158,7 @@
             android:name=".LogoZen8"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_zen8"
+            android:icon="@mipmap/zen_logo_8"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -163,7 +170,7 @@
             android:name=".LogoZen9"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_zen9"
+            android:icon="@mipmap/zen_logo_9"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -172,10 +179,10 @@
             </intent-filter>
         </activity-alias>
         <activity-alias
-            android:name=".LogoMandala"
+            android:name=".LogoZen10"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/logo_mandala"
+            android:icon="@mipmap/zen_logo_10"
             android:label="zenmusic"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -183,7 +190,66 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity-alias>
-
+        <activity-alias
+            android:name=".LogoZen11"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/zen_logo_11"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen12"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/zen_logo_12"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen13"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/zen_logo_13"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen14"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/zen_logo_14"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LogoZen15"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/zen_logo_15"
+            android:label="zenmusic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
         <!-- Serves the downloaded APK to the system installer. -->
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -69,7 +69,9 @@ class _LogoPageState extends State<LogoPage> {
       // so the whole app follows the launcher icon.
       await AppearancePrefs.setCustomLogo(switch (slot.preview) {
         null => '',
-        'assets/icon/logo.png' => '',
+        // The default slot previews the shipped launcher art; both map
+        // to '' so the in-app mark resets to the built-in logo.
+        'assets/logos/default.png' || 'assets/icon/logo.png' => '',
         final p => p,
       });
       if (!mounted) return;

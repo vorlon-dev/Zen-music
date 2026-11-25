@@ -8,39 +8,70 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
 jobs:
   nightly:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '17' }
+        with: { distribution: temurin, java-version: "17" }
+
       - uses: subosito/flutter-action@v2
-        with: { channel: stable }
+        with: { channel: stable, cache: true }
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties', 'pubspec.lock') }}
+          restore-keys: gradle-${{ runner.os }}-
+
       - run: flutter pub get
-      - name: Patch flutter_discord_rpc cargokit (compileSdk "android-37.0" parse bug)
-        shell: bash
+
+      - name: Set up release signing (optional)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          F=$(ls $HOME/.pub-cache/hosted/pub.dev/flutter_discord_rpc-*/cargokit/gradle/plugin.gradle 2>/dev/null | head -1)
-          if [ -z "$F" ]; then echo "flutter_discord_rpc not found, skipping"; exit 0; fi
-          echo "Patching $F"
-          echo "--- before ---"; grep -n "compileSdkVersion = " "$F"
-          sed -i 's/\.substring(8) as int/.substring(8).toDouble().intValue()/' "$F"
-          echo "--- after ---";  grep -n "compileSdkVersion = " "$F"
-          grep -q "toDouble().intValue()" "$F" || { echo "PATCH DID NOT APPLY"; exit 1; }
-      - run: flutter build apk --release --split-per-abi
-      - run: flutter build apk --release
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::KEYSTORE_BASE64 secret not set - signing with the throw-away debug key"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.jks
+          printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+
+      - name: Build per-ABI APKs
+        run: flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols
+
+      - name: Build universal APK (arm64 + arm32)
+        run: flutter build apk --release --target-platform android-arm,android-arm64 --obfuscate --split-debug-info=build/symbols
+
       - name: Rename artifacts
         run: |
+          set -e
+          OUT=build/app/outputs/flutter-apk
           mkdir out
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk out/zenmusic-nightly-arm64-v8a.apk
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk out/zenmusic-nightly-armeabi-v7a.apk
-          cp build/app/outputs/flutter-apk/app-x86_64-release.apk out/zenmusic-nightly-x86_64.apk
-          cp build/app/outputs/flutter-apk/app-release.apk out/zenmusic-nightly-universal.apk
+          cp $OUT/app-arm64-v8a-release.apk   out/zenmusic-nightly-arm64-v8a.apk
+          cp $OUT/app-armeabi-v7a-release.apk out/zenmusic-nightly-armeabi-v7a.apk
+          cp $OUT/app-x86_64-release.apk      out/zenmusic-nightly-x86_64.apk
+          cp $OUT/app-release.apk             out/zenmusic-nightly-universal.apk
+          ls -lh out
+
       - name: Replace nightly release
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: |
           gh release delete nightly --yes --cleanup-tag || true
           gh release create nightly out/*.apk --prerelease \
             --title "Nightly build" \
-            --notes "Automated build from main. Unstable — prefer the latest stable release."
+            --notes "Automated build from main. Unstable - prefer the latest stable release."

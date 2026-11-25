@@ -12,6 +12,7 @@ import 'package:provider/provider.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
 
 import 'package:zenmusic/desktop/core/widgets/section_item.dart';
+import 'package:zenmusic/desktop/core/widgets/smart_back_leading.dart';
 import 'package:zenmusic/desktop/core/extensions.dart';
 import 'package:zenmusic/desktop/screens/browse/cubit/browse_cubit.dart';
 import 'package:zenmusic/desktop/services/bottom_message.dart';
@@ -133,6 +134,10 @@ class _BrowsePageState extends State<_BrowsePage> {
       onInternetRestored: fetchData,
       child: Scaffold(
         appBar: AppBar(
+          // Explicit leading: this page is reachable via push AND go()
+          // (deep link, chips row). Auto-implied back only appears when
+          // the stack can pop — SmartBackLeading always offers a way out.
+          leading: const SmartBackLeading(),
           title: header['title'] != null ? Text(header['title']) : null,
           centerTitle: true,
         ),

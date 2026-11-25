@@ -82,7 +82,10 @@ class _HomePageState extends State<_HomePage> {
       list.add(
         AdaptiveInkWell(
           borderRadius: BorderRadius.circular(10),
-          onTap: () => context.go('/chip', extra: element),
+          // push (NOT go): go() replaces the stack, so the chip page
+          // (Podcasts, moods & genres …) opened with nothing to pop back
+          // to — the AppBar then shows no back button at all.
+          onTap: () => context.push('/chip', extra: element),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
@@ -133,7 +136,9 @@ class _HomePageState extends State<_HomePage> {
             builder: (context, state) {
               switch (state) {
                 case HomeLoading():
-                  return const HomeSkeleton();
+                  return Center(
+                    child: LoadingIndicatorM3E(),
+                  );
                 case HomeError():
                   return Center(
                     child: Text(state.message ?? ''),

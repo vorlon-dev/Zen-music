@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_swipe_action_cell/core/cell.dart';
 
 import 'package:zenmusic/desktop/core/widgets/section_item.dart';
+import 'package:zenmusic/desktop/core/widgets/smart_back_leading.dart';
 import 'package:zenmusic/desktop/screens/library/playlist/cubit/playlist_details_cubit.dart';
 import 'package:zenmusic/desktop/screens/library/widgets/my_playlist_header.dart';
 import 'package:zenmusic/desktop/services/bottom_message.dart';
@@ -30,6 +31,9 @@ class PlaylistDetailsPage extends StatelessWidget {
               body: Center(child: CircularProgressIndicator()),
             ),
             PlaylistDetailsError() => Scaffold(
+              // Error state must still offer a way back — without the bar
+              // a failed load strands the user on a bare "Not available".
+              appBar: AppBar(leading: const SmartBackLeading()),
               body: Center(child: Text('Not available'.tr)),
             ),
             PlaylistDetailsLoaded(:final playlist) => _PlaylistView(

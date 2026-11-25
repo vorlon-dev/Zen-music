@@ -15,7 +15,7 @@ class LauncherLogoSlot {
     this.available = true,
   });
 
-  /// 'default' or the alias suffix ('LogoZen1' … 'LogoMandala').
+  /// 'default' or the alias suffix ('LogoZen1' … 'LogoZen5').
   final String id;
   final String label;
   final Color bg;
@@ -34,77 +34,106 @@ class LauncherLogo {
 
   static const _channel = MethodChannel('zen/launcher_logo');
 
-  /// The 11 slots the Logo page offers, in display order. Colours mirror
-  /// the shipped mipmap launcher PNGs so the grid previews exactly what
-  /// the launcher will show.
+  /// The 6 slots the Logo page offers, in display order. Colours mirror
+  /// the shipped launcher art (black plate, cream glyph) so the grid
+  /// previews exactly what the launcher will show.
   static const List<LauncherLogoSlot> catalog = [
     LauncherLogoSlot(
         id: 'default',
         label: 'Default',
-        bg: Color(0xFF6D28D9),
-        fg: Color(0xFFFFFFFF),
-        preview: 'assets/icon/logo.png'),
+        bg: Color(0xFF171921),
+        fg: Color(0xFFFDF5E7),
+        preview: 'assets/logos/default.png'),
     LauncherLogoSlot(
         id: 'LogoZen1',
         label: 'Zen 1',
-        bg: Color(0xFF6D28D9),
-        fg: Color(0xFFFFFFFF),
+        bg: Color(0xFF000000),
+        fg: Color(0xF8E4C9),
         preview: 'assets/logos/zen_logo_1.png'),
     LauncherLogoSlot(
         id: 'LogoZen2',
         label: 'Zen 2',
-        bg: Color(0xFF111111),
-        fg: Color(0xFFFFFFFF),
+        bg: Color(0xFF000000),
+        fg: Color(0xFDF5E7),
         preview: 'assets/logos/zen_logo_2.png'),
     LauncherLogoSlot(
         id: 'LogoZen3',
         label: 'Zen 3',
-        bg: Color(0xFFF5F5F5),
-        fg: Color(0xFF111111),
+        bg: Color(0xFF000000),
+        fg: Color(0xFBF1DF),
         preview: 'assets/logos/zen_logo_3.png'),
     LauncherLogoSlot(
         id: 'LogoZen4',
         label: 'Zen 4',
-        bg: Color(0xFF1D4ED8),
-        fg: Color(0xFFFFFFFF),
+        bg: Color(0xFF000000),
+        fg: Color(0xFCF1E0),
         preview: 'assets/logos/zen_logo_4.png'),
     LauncherLogoSlot(
         id: 'LogoZen5',
         label: 'Zen 5',
-        bg: Color(0xFF15803D),
-        fg: Color(0xFFFFFFFF),
+        bg: Color(0xFF000000),
+        fg: Color(0xFCF0DB),
         preview: 'assets/logos/zen_logo_5.png'),
     LauncherLogoSlot(
         id: 'LogoZen6',
         label: 'Zen 6',
-        bg: Color(0xFFB91C1C),
-        fg: Color(0xFFFFFFFF),
+        bg: Color(0xFF000000),
+        fg: Color(0xFCF0DB),
         preview: 'assets/logos/zen_logo_6.png'),
     LauncherLogoSlot(
         id: 'LogoZen7',
         label: 'Zen 7',
-        bg: Color(0xFFEA580C),
-        fg: Color(0xFFFFFFFF),
+        bg: Color(0xFF000000),
+        fg: Color(0xFFFCF0DB),
         preview: 'assets/logos/zen_logo_7.png'),
     LauncherLogoSlot(
         id: 'LogoZen8',
         label: 'Zen 8',
-        bg: Color(0xFFBE185D),
-        fg: Color(0xFFFFFFFF),
+        bg: Color(0xFF000000),
+        fg: Color(0xFFFDF2DD),
         preview: 'assets/logos/zen_logo_8.png'),
     LauncherLogoSlot(
         id: 'LogoZen9',
         label: 'Zen 9',
-        bg: Color(0xFF0F766E),
-        fg: Color(0xFFFFFFFF),
+        bg: Color(0xFF000000),
+        fg: Color(0xFFFBF0D9),
         preview: 'assets/logos/zen_logo_9.png'),
     LauncherLogoSlot(
-        id: 'LogoMandala',
-        label: 'Mandala',
-        bg: Color(0xFF3B0764),
-        fg: Color(0xFFE9D5FF),
-        preview: 'assets/logos/mandala.png',
-        mandala: true),
+        id: 'LogoZen10',
+        label: 'Zen 10',
+        bg: Color(0xFF000000),
+        fg: Color(0xFFFDF3E0),
+        preview: 'assets/logos/zen_logo_10.png'),
+    LauncherLogoSlot(
+        id: 'LogoZen11',
+        label: 'Zen 11',
+        bg: Color(0xFF000000),
+        fg: Color(0xFFFAEFD8),
+        preview: 'assets/logos/zen_logo_11.png'),
+    LauncherLogoSlot(
+        id: 'LogoZen12',
+        label: 'Zen 12',
+        bg: Color(0xFF000000),
+        fg: Color(0xFFFCF1DC),
+        preview: 'assets/logos/zen_logo_12.png'),
+    LauncherLogoSlot(
+        id: 'LogoZen13',
+        label: 'Zen 13',
+        bg: Color(0xFF000000),
+        fg: Color(0xFFFDF4E2),
+        preview: 'assets/logos/zen_logo_13.png'),
+    LauncherLogoSlot(
+        id: 'LogoZen14',
+        label: 'Zen 14',
+        bg: Color(0xFF000000),
+        fg: Color(0xFFFBEEDA),
+        preview: 'assets/logos/zen_logo_14.png'),
+    LauncherLogoSlot(
+        id: 'LogoZen15',
+        label: 'Zen 15',
+        bg: Color(0xFF000000),
+        fg: Color(0xFFFBEEDA),
+        preview: 'assets/logos/zen_logo_15.png'),
   ];
 
   /// Android build flag for UI gating (widget layer avoids dart:io).

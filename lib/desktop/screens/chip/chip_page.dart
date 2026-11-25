@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:zenmusic/desktop/core/widgets/section_item.dart';
+import 'package:zenmusic/desktop/core/widgets/smart_back_leading.dart';
 import 'package:zenmusic/desktop/screens/chip/cubit/chip_cubit.dart';
 import 'package:zenmusic/desktop/utils/internet_guard.dart';
 import 'package:loading_indicator_m3e/loading_indicator_m3e.dart';
@@ -67,6 +68,9 @@ class _ChipPageState extends State<_ChipPage> {
       onInternetRestored: context.read<ChipCubit>().fetch,
       child: Scaffold(
         appBar: AppBar(
+          // Explicit leading: reached via context.go() from the Home chips
+          // row (Podcasts chip etc.) — without it there is no back arrow.
+          leading: const SmartBackLeading(),
           title: Text(widget.title),
         ),
         body: BlocBuilder<ChipCubit, ChipState>(

@@ -1,27 +1,47 @@
 name: Release
 
+# Push a tag like v25.11.2026 to build and publish the Android APKs.
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SYMBOLS_DIR: build/symbols
 
 jobs:
   build:
+    name: Build Android APKs
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties', 'pubspec.lock') }}
+          restore-keys: gradle-${{ runner.os }}-
 
       - name: Flutter doctor
         run: flutter doctor -v
@@ -29,35 +49,71 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Patch flutter_discord_rpc cargokit (compileSdk "android-37.0" parse bug)
-        shell: bash
+      # Optional: sign with your own key so every release can update the last
+      # one. Without these secrets the build still works, but it is signed with
+      # a throw-away debug key (users must uninstall before updating).
+      # Secrets: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+      - name: Set up release signing (optional)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          F=$(ls $HOME/.pub-cache/hosted/pub.dev/flutter_discord_rpc-*/cargokit/gradle/plugin.gradle 2>/dev/null | head -1)
-          if [ -z "$F" ]; then echo "flutter_discord_rpc not found, skipping"; exit 0; fi
-          echo "Patching $F"
-          echo "--- before ---"; grep -n "compileSdkVersion = " "$F"
-          sed -i 's/\.substring(8) as int/.substring(8).toDouble().intValue()/' "$F"
-          echo "--- after ---";  grep -n "compileSdkVersion = " "$F"
-          grep -q "toDouble().intValue()" "$F" || { echo "PATCH DID NOT APPLY"; exit 1; }
-      - name: Build universal APK
-        run: flutter build apk --release
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::KEYSTORE_BASE64 secret not set - signing with the throw-away debug key"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.jks
+          printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+          echo "Release signing configured"
 
-      - name: Build split-per-ABI APKs
-        run: flutter build apk --release --split-per-abi
+      # Small per-device APKs: arm64-v8a (modern phones), armeabi-v7a (old
+      # 32-bit phones) and x86_64 (emulators / x86 tablets).
+      - name: Build per-ABI APKs
+        run: >
+          flutter build apk --release --split-per-abi
+          --obfuscate --split-debug-info=${{ env.SYMBOLS_DIR }}
+
+      # The universal APK only carries the two ARM ABIs (x86_64 is only for
+      # emulators and has its own APK) - this alone saves ~30% of its size.
+      - name: Build universal APK (arm64 + arm32)
+        run: >
+          flutter build apk --release --target-platform android-arm,android-arm64
+          --obfuscate --split-debug-info=${{ env.SYMBOLS_DIR }}
 
       - name: Organize artifacts
         run: |
+          set -e
+          OUT=build/app/outputs/flutter-apk
+          for f in app-release app-arm64-v8a-release app-armeabi-v7a-release app-x86_64-release; do
+            test -f "$OUT/$f.apk" || { echo "::error::missing $f.apk"; exit 1; }
+          done
           mkdir -p release
-          cp build/app/outputs/flutter-apk/app-release.apk release/zenmusic-${{ github.ref_name }}-universal.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/zenmusic-${{ github.ref_name }}-arm64-v8a.apk
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release/zenmusic-${{ github.ref_name }}-armeabi-v7a.apk
-          cp build/app/outputs/flutter-apk/app-x86_64-release.apk release/zenmusic-${{ github.ref_name }}-x86_64.apk
+          cp "$OUT/app-release.apk"             "release/zenmusic-${{ github.ref_name }}-universal.apk"
+          cp "$OUT/app-arm64-v8a-release.apk"   "release/zenmusic-${{ github.ref_name }}-arm64-v8a.apk"
+          cp "$OUT/app-armeabi-v7a-release.apk" "release/zenmusic-${{ github.ref_name }}-armeabi-v7a.apk"
+          cp "$OUT/app-x86_64-release.apk"      "release/zenmusic-${{ github.ref_name }}-x86_64.apk"
+          ls -lh release
+          {
+            echo "### APK sizes"
+            echo "| File | Size |"
+            echo "|---|---|"
+            for f in release/*.apk; do echo "| $(basename "$f") | $(du -h "$f" | cut -f1) |"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Needed to read obfuscated crash stack traces (flutter symbolize).
+      - name: Zip debug symbols
+        run: cd build && zip -rq ../symbols-${{ github.ref_name }}.zip symbols
 
       - name: Upload build artifacts (workflow run backup)
         uses: actions/upload-artifact@v4
         with:
           name: zenmusic-apks-${{ github.ref_name }}
-          path: release/*.apk
+          path: |
+            release/*.apk
+            symbols-${{ github.ref_name }}.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -69,11 +125,11 @@ jobs:
 
             | File | Best for |
             |---|---|
-            | `zenmusic-*-universal.apk` | Most devices — works everywhere |
-            | `zenmusic-*-arm64-v8a.apk` | Modern phones (2017+) — smaller download |
+            | `zenmusic-*-arm64-v8a.apk` | **Most phones (2017+) - smallest download** |
+            | `zenmusic-*-universal.apk` | Not sure? Works on every ARM phone (arm64 + arm32) |
             | `zenmusic-*-armeabi-v7a.apk` | Older 32-bit phones |
             | `zenmusic-*-x86_64.apk` | Emulators and x86 tablets |
 
-            Install the universal APK if unsure. Splits are smaller but must match your device's ABI.
+            Install `arm64-v8a` if unsure - it is the smallest.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

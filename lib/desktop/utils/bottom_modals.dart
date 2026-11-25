@@ -349,7 +349,7 @@ class _AppleMusicStylePopup extends StatelessWidget {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                      filter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -449,7 +449,9 @@ class _AppleMusicStylePopup extends StatelessWidget {
                               ),
                               onTap: () {
                                 Navigator.pop(context);
-                                context.go('/browse', extra: {
+                                // push, not go — go() wipes the stack and
+                                // the browse AppBar then has no back arrow.
+                                context.push('/browse', extra: {
                                   'endpoint': song['album']['endpoint']
                                       .cast<String, dynamic>(),
                                 });
@@ -591,7 +593,7 @@ class _GlassWindow extends StatelessWidget {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(20),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
               child: Column(
                 children: [
                   // Header
@@ -791,7 +793,9 @@ class _ArtistsWindowContent extends StatelessWidget {
               onTap: () {
                 final router = GoRouter.of(context);
                 Navigator.pop(context);
-                router.go(
+                // push, not go — go() replaces the stack, leaving the
+                // browse page with no back arrow.
+                router.push(
                   '/browse',
                   extra: {
                     'endpoint': artist['endpoint'].cast<String, dynamic>(),
@@ -1133,7 +1137,9 @@ class _SongWindowContent extends StatelessWidget {
             trailing: const Icon(Icons.chevron_right, color: Colors.white54),
             onTap: () {
               Navigator.pop(context);
-              context.go('/browse', extra: {
+              // push, not go — go() wipes the stack and the browse AppBar
+              // then has no back arrow.
+              context.push('/browse', extra: {
                 'endpoint':
                 song['album']['endpoint'].cast<String, dynamic>(),
               });

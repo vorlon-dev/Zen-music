@@ -64,11 +64,9 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        # Only attach the installer: the release title / notes belong to the
+        # Android "Release" workflow (setting name/body here overwrote them).
         with:
-          name: ZenMusic Desktop v${{ steps.ver.outputs.VERSION }}
-          body: |
-            ## ZenMusic Desktop v${{ steps.ver.outputs.VERSION }}
-            One-time installer for Windows. Download, run the `.exe`, and follow the setup wizard.
           files: |
             windows/Output/*.exe
           draft: false

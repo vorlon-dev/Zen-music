@@ -4,7 +4,7 @@ name: zenmusic
 description: "A YouTube zen player built with Flutter."
 publish_to: 'none'
 
-version: 16.11.2026+5
+version: 25.11.2026+6
 
 environment:
   sdk: ^3.13.0
@@ -106,8 +106,6 @@ flutter:
       fonts:
         - asset: assets/fonts/Retro Blendy.otf
     - family: ZenSansFlex
-      fonts:
-        - asset: assets/fonts/gflex_variable.ttf
 
 flutter_launcher_icons:
   image_path: "assets/icon/logo.png"
