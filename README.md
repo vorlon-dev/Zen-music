@@ -214,7 +214,7 @@ It runs on **Android** (phone and tablet) and **Windows** (a full desktop experi
 <br>
 
 - **Android:** phone and tablet, with background playback, notification controls and the Echo mini player.
-- **Windows 10/11:** full desktop experience with an installer, media-key and system media controls, a floating mini player, a lyrics overlay window, Mica / Acrylic backdrop and a responsive layout.
+- **Windows 10/11:** full desktop experience with an installer, media-key and system media controls, a floating mini player, a lyrics overlay window, window backdrop effects and a responsive layout.
 - **Updates:** delivered through GitHub Releases (or Obtainium on Android).
 
 </details>
