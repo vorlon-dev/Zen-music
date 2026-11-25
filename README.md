@@ -498,7 +498,7 @@ Open the Visual Studio Installer and make sure the **Desktop development with C+
 Yes. It is open source under GPL-3.0.
 
 **Does it work on iOS, macOS or Linux?**
-Not at the moment. Android and Windows are the supported targets.
+iOS has a beta: an unsigned IPA is attached to each release (sideload it with AltStore, SideStore or Sideloadly). Some Android-only features are missing on iOS. macOS and Linux are not supported.
 
 **Does ZenMusic host music?**
 No. It acts as a client for publicly available APIs. All content is served by the respective platforms.
