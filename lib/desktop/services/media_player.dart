@@ -946,11 +946,27 @@ class MediaPlayer extends ChangeNotifier {
     _player.durationStream.listen((position) {
       if (_engineOwnsPlayback) return;
       final oldState = _progressBarState.value;
-      if (oldState.total != position) {
+      var total = position ?? Duration.zero;
+      // iOS: AVPlayer can report a wildly wrong length for some streams
+      // (5-6 min for a 3 min song). Trust the song's own metadata when the
+      // two disagree by more than 15 %.
+      if (Platform.isIOS && position != null) {
+        final idx = _player.currentIndex;
+        final known = (idx != null && idx >= 0 && idx < _songList.length)
+            ? (_songList[idx].tag as MediaItem).duration
+            : null;
+        if (known != null &&
+            known > const Duration(seconds: 10) &&
+            (position - known).abs().inMilliseconds >
+                known.inMilliseconds * 0.15) {
+          total = known;
+        }
+      }
+      if (oldState.total != total) {
         _progressBarState.value = ProgressBarState(
           current: oldState.current,
           buffered: oldState.buffered,
-          total: position ?? Duration.zero,
+          total: total,
         );
       }
     });
@@ -1117,7 +1133,10 @@ class MediaPlayer extends ChangeNotifier {
       if (cached != null && await File(cached.filePath).exists()) {
         return AudioSource.file(cached.filePath, tag: tag);
       }
-      if (Platform.isMacOS) {
+      // Apple platforms (macOS, iOS/iPadOS): give AVPlayer the real googlevideo
+      // URL. It seeks and measures duration itself; the local proxy source
+      // broke seeking, stretched duration and loaded slowly on iPad.
+      if (Platform.isMacOS || Platform.isIOS) {
         final quality =
         GetIt.I<SettingsManager>().streamingQuality.name.toLowerCase();
         return await getDirectUrlAudioSource(song['videoId'], quality, tag);

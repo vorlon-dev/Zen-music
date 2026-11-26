@@ -446,8 +446,14 @@ class _SpotifyLoginPageState extends State<SpotifyLoginPage> {
               child: InAppWebView(
                 initialUrlRequest: URLRequest(url: _spotifyUrl),
                 initialSettings: InAppWebViewSettings(
-                  userAgent:
-                  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36',
+                  // iOS/iPadOS: Google rejects embedded WebViews whose user agent
+                  // claims Chrome while the engine is WebKit. Keep WebKit's real
+                  // UA and add the Safari token, as real Safari sends.
+                  userAgent: Platform.isIOS
+                      ? null
+                      : ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36'),
+                  applicationNameForUserAgent:
+                      Platform.isIOS ? 'Version/18.0 Safari/605.1.15' : null,
                   javaScriptEnabled: true,
                   domStorageEnabled: true,
                 ),
