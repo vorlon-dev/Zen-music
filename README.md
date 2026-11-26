@@ -264,7 +264,8 @@ Pick a skin from **Settings → Appearance → Player screen**: **Classic**, **A
 | --- | --- | --- |
 | Android (phone & tablet) | Full experience | APKs via GitHub Releases and Obtainium |
 | Windows 10/11 (x64) | Full desktop experience | Installer (`.exe`), custom Spotify engine, responsive UI |
-| iOS / macOS / Linux | Not supported | Not currently a build target |
+| iOS (beta) | Playback, lyrics, library, sign-in | Unsigned IPA from GitHub Releases, installed by sideloading (AltStore, SideStore, Sideloadly) |
+| macOS / Linux | Not supported | Not currently a build target |
 
 <div align="center"><img src="assets/divider.svg" alt="" width="720" /></div>
 
@@ -278,6 +279,7 @@ Pick a skin from **Settings → Appearance → Player screen**: **Classic**, **A
   <tr>
     <th align="center">Obtainium (Android)</th>
     <th align="center">GitHub (Android)</th>
+    <th align="center">GitHub (iOS)</th>
   </tr>
   <tr>
     <td align="center">
@@ -290,8 +292,15 @@ Pick a skin from **Settings → Appearance → Player screen**: **Classic**, **A
         <img src="assets/badges/github-stable.svg" alt="Get the stable ZenMusic release on GitHub" height="100">
       </a>
     </td>
+    <td align="center">
+      <a href="https://github.com/vorlon-dev/Zen-music/releases/latest">
+        <img src="assets/badges/ios-ipa.svg" alt="Download the ZenMusic iOS IPA" height="100">
+      </a>
+    </td>
   </tr>
 </table>
+
+<sub>iOS: download the <code>.ipa</code> from the release, then sideload it. See <a href="#ios-beta">Installing on iOS</a>.</sub>
 
 <h2>Windows (Desktop)</h2>
 
@@ -342,6 +351,27 @@ Pick a skin from **Settings → Appearance → Player screen**: **Classic**, **A
 4. Launch ZenMusic.
 
 **Tip:** Add the repository to [Obtainium](https://github.com/ImranR98/Obtainium) using the badge above to get automatic update notifications.
+
+### iOS (beta)<a id="ios-beta"></a>
+
+ZenMusic for iOS is an **unsigned IPA** (`zenmusic-<version>-ios-unsigned.ipa`) attached to every release. Apple doesn't allow installing unsigned apps directly, so you sign it yourself with a free Apple ID by **sideloading**.
+
+1. Open the [latest release](https://github.com/vorlon-dev/Zen-music/releases/latest) and download the `.ipa` file (use the **GitHub (iOS)** badge above).
+2. Install it with one of the sideloaders below.
+3. On your iPhone open **Settings → General → VPN & Device Management**, trust your Apple ID profile, then launch ZenMusic.
+4. On iOS 16 and newer, also turn on **Settings → Privacy & Security → Developer Mode** (the phone restarts once).
+
+**Video tutorial:** [How to sideload an IPA on iPhone](https://youtu.be/dtWCNXoNQR8)
+
+| Tool | Platform | Notes |
+| --- | --- | --- |
+| [AltStore](https://altstore.io/) | Windows, macOS | Free Apple ID. Re-signs the app every 7 days while AltServer is running |
+| [SideStore](https://sidestore.io/) | iPhone only (after one-time setup) | Refreshes on the phone itself, no computer needed afterwards |
+| [Sideloadly](https://sideloadly.io/) | Windows, macOS | Drag the `.ipa` in, enter your Apple ID, press Start |
+| [TrollStore](https://github.com/opa334/TrollStore) | Supported iOS versions only | Permanent install with no 7-day expiry |
+
+> [!NOTE]
+> With a free Apple ID the app expires after 7 days and must be refreshed (AltStore and SideStore can do this automatically). Some features that depend on Android are not available on iOS: lossless mirror engine, native equalizer, Sing Mode, launcher logo, Zen Wall and YouTube canvas.
 
 ### Windows
 
@@ -549,7 +579,7 @@ Open the Visual Studio Installer and make sure the **Desktop development with C+
 Yes. It is open source under GPL-3.0.
 
 **Does it work on iOS, macOS or Linux?**
-Not at the moment. Android and Windows are the supported targets.
+iOS has a beta: an unsigned IPA is attached to each release and installed by [sideloading](#ios-beta). Some Android-only features are missing on iOS. macOS and Linux are not supported.
 
 **Does ZenMusic host music?**
 No. It acts as a client for publicly available APIs. All content is served by the respective platforms.
