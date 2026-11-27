@@ -27,12 +27,24 @@ class PlayerSettingsLoaded extends PlayerSettingsState {
   /// (voiceLevel in services/sing_mode.dart).
   final double singVoiceLevel;
 
+  /// Spatial audio: 0 = off, 6 = 6D, 16 = 16D (services/spatial_audio.dart).
+  final int spatialMode;
+
+  /// Sound vibe preset: 0 off, 1 Slowed + Reverb, 2 Nightcore (services/audio_vibe.dart).
+  final int vibe;
+
+  /// Current vibe playback speed.
+  final double vibeSpeed;
+
   const PlayerSettingsLoaded({
     required this.skipSilence,
     required this.beatHaptics,
     required this.beatStrength,
     required this.singMode,
     required this.singVoiceLevel,
+    required this.spatialMode,
+    required this.vibe,
+    required this.vibeSpeed,
   });
 
   @override
@@ -43,9 +55,13 @@ class PlayerSettingsLoaded extends PlayerSettingsState {
           other.beatHaptics == beatHaptics &&
           other.beatStrength == beatStrength &&
           other.singMode == singMode &&
-          other.singVoiceLevel == singVoiceLevel;
+          other.singVoiceLevel == singVoiceLevel &&
+          other.spatialMode == spatialMode &&
+          other.vibe == vibe &&
+          other.vibeSpeed == vibeSpeed;
 
   @override
   int get hashCode => Object.hash(
-      skipSilence, beatHaptics, beatStrength, singMode, singVoiceLevel);
+      skipSilence, beatHaptics, beatStrength, singMode, singVoiceLevel, spatialMode,
+      vibe, vibeSpeed);
 }

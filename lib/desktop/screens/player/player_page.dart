@@ -647,7 +647,11 @@ class _PlayerPageState extends State<PlayerPage>
         child: ValueListenableBuilder<String>(
           valueListenable: PlayerSkinPrefs.skin,
           builder: (context, skinName, _) {
-            final skin = PlayerSkin.fromName(skinName);
+            // Desktop renders exactly one skin (SimpMusic split view); phones
+            // keep the saved choice from the picker.
+            final skin = _isMobile
+                ? PlayerSkin.fromName(skinName)
+                : PlayerSkin.simpMusic;
             if (skin != PlayerSkin.classic) {
               final mediaPlayer = GetIt.I<MediaPlayer>();
               final currentIndex = mediaPlayer.currentIndex.value ?? 0;
@@ -662,6 +666,7 @@ class _PlayerPageState extends State<PlayerPage>
                 quality: _qualityString(song),
                 hasLyrics: _hasLyrics,
                 showLyrics: _showLyrics,
+                lyricsLoading: _lyricsLoading,
                 lyrics: (size) => _lyricsBox(song, size),
                 swipeArt: _sheetArtHider(_buildArtwork(song)),
                 art: (radius) => _sheetArtHider(

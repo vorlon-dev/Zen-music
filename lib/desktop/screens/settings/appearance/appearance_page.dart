@@ -151,7 +151,7 @@ class AppearancePage extends StatelessWidget {
                                 trailing: AdaptiveDropdownButton<String>(
                                   value: current,
                                   items: [
-                                    for (final p in PlayerSkin.values)
+                                    for (final p in PlayerSkin.choosable)
                                       AdaptiveDropdownMenuItem(
                                         value: p.name,
                                         child: Text(p.label),

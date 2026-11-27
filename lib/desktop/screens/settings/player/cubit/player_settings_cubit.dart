@@ -8,6 +8,8 @@ import 'package:zenmusic/desktop/services/appearance_prefs.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
 import 'package:zenmusic/desktop/services/settings_manager.dart';
 import 'package:zenmusic/desktop/services/sing_mode.dart';
+import 'package:zenmusic/desktop/services/spatial_audio.dart';
+import 'package:zenmusic/desktop/services/audio_vibe.dart';
 
 part 'player_settings_state.dart';
 
@@ -25,6 +27,9 @@ class PlayerSettingsCubit extends Cubit<PlayerSettingsState> {
       beatStrength: AppearancePrefs.beatStrength.value,
       singMode: SingMode.instance.enabled.value,
       singVoiceLevel: SingMode.instance.voiceLevel.value,
+      spatialMode: SpatialAudio.instance.mode.value,
+      vibe: AudioVibe.instance.preset.value,
+      vibeSpeed: AudioVibe.instance.speed.value,
     ),
   ) {
     _listener = () {
@@ -38,6 +43,9 @@ class PlayerSettingsCubit extends Cubit<PlayerSettingsState> {
     AppearancePrefs.beatStrength.addListener(_listener);
     SingMode.instance.enabled.addListener(_listener);
     SingMode.instance.voiceLevel.addListener(_listener);
+    SpatialAudio.instance.mode.addListener(_listener);
+    AudioVibe.instance.preset.addListener(_listener);
+    AudioVibe.instance.speed.addListener(_listener);
   }
 
   void _emitState() {
@@ -49,6 +57,9 @@ class PlayerSettingsCubit extends Cubit<PlayerSettingsState> {
       beatStrength: AppearancePrefs.beatStrength.value,
       singMode: SingMode.instance.enabled.value,
       singVoiceLevel: SingMode.instance.voiceLevel.value,
+      spatialMode: SpatialAudio.instance.mode.value,
+      vibe: AudioVibe.instance.preset.value,
+      vibeSpeed: AudioVibe.instance.speed.value,
     );
 
     // Identical-state emits are skipped so a notifier storm never causes
@@ -92,6 +103,15 @@ class PlayerSettingsCubit extends Cubit<PlayerSettingsState> {
     await SingMode.instance.setVoiceLevel(value);
   }
 
+  /// Spatial audio (services/spatial_audio.dart): 0 = off, 6 = 6D, 16 = 16D.
+  Future<void> setSpatialMode(int value) async {
+    await SpatialAudio.instance.setMode(value);
+  }
+
+  /// Sound vibes (services/audio_vibe.dart): 0 off, 1 Slowed + Reverb, 2 Nightcore.
+  Future<void> setVibe(int value) => AudioVibe.instance.setPreset(value);
+  Future<void> setVibeSpeed(double value) => AudioVibe.instance.setSpeed(value);
+
   @override
   Future<void> close() {
     _settings.removeListener(_listener);
@@ -99,6 +119,9 @@ class PlayerSettingsCubit extends Cubit<PlayerSettingsState> {
     AppearancePrefs.beatStrength.removeListener(_listener);
     SingMode.instance.enabled.removeListener(_listener);
     SingMode.instance.voiceLevel.removeListener(_listener);
+    SpatialAudio.instance.mode.removeListener(_listener);
+    AudioVibe.instance.preset.removeListener(_listener);
+    AudioVibe.instance.speed.removeListener(_listener);
     return super.close();
   }
 }

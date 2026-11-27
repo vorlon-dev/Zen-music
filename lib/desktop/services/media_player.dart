@@ -506,8 +506,8 @@ class MediaPlayer extends ChangeNotifier {
         unawaited(skipPrevious());
         break;
       case SmtcButton.stop:
-        // Gentle stop: the media-key stop behaves like pause so the queue
-        // stays intact (real stop() wipes the session queue).
+      // Gentle stop: the media-key stop behaves like pause so the queue
+      // stays intact (real stop() wipes the session queue).
         if (_buttonState.value == ButtonState.playing) {
           unawaited(togglePlayPause());
         }
@@ -527,7 +527,7 @@ class MediaPlayer extends ChangeNotifier {
       artist: item.artist ?? '',
       album: item.album ?? '',
       thumbnailUrl: (thumb != null &&
-              (thumb.startsWith('http://') || thumb.startsWith('https://')))
+          (thumb.startsWith('http://') || thumb.startsWith('https://')))
           ? thumb
           : null,
       duration: progressBarState.value.total,
@@ -582,7 +582,7 @@ class MediaPlayer extends ChangeNotifier {
       title: item.title,
       artist: item.artist ?? '',
       artUrl: (thumb != null &&
-              (thumb.startsWith('http://') || thumb.startsWith('https://')))
+          (thumb.startsWith('http://') || thumb.startsWith('https://')))
           ? thumb
           : null,
       trackKey: item.id,
@@ -668,10 +668,10 @@ class MediaPlayer extends ChangeNotifier {
     MiniPlayerBridge.instance.pushTrack(item == null
         ? null
         : MiniTrack(
-            title: item.title,
-            artist: item.artist ?? '',
-            artUri: item.artUri?.toString(),
-          ));
+      title: item.title,
+      artist: item.artist ?? '',
+      artUri: item.artUri?.toString(),
+    ));
   }
 
   void _miniPushPlaying() {
@@ -712,7 +712,7 @@ class MediaPlayer extends ChangeNotifier {
     try {
       _crossfadeSeconds =
           (Hive.box('SETTINGS').get(_crossfadeKey, defaultValue: 0) as num?)
-                  ?.toInt() ??
+              ?.toInt() ??
               0;
     } catch (_) {}
     // True two-deck overlap (see crossfade_engine.dart). It replaces the old
@@ -730,7 +730,7 @@ class MediaPlayer extends ChangeNotifier {
       nextSong: _nextSongMap,
       advance: skipNext,
       isBlocked: () =>
-          _engineOwnsPlayback || _loopMode.value == LoopMode.one,
+      _engineOwnsPlayback || _loopMode.value == LoopMode.one,
       plan: (outgoing, incoming) async {
         if (AutomixPrefs.enabled) return _automix.plan(outgoing, incoming);
         if (_crossfadeSeconds > 0) {
@@ -781,13 +781,13 @@ class MediaPlayer extends ChangeNotifier {
     LyricsOverlayBridge.instance.pushTrack(item == null
         ? null
         : OverlayTrack(
-            title: item.title,
-            artist: item.artist ?? '',
-            artUri: item.artUri?.toString(),
-            album: item.album,
-            durationMs: item.duration?.inMilliseconds,
-            spotifyUri: item.extras?['spotifyUri'] as String?,
-          ));
+      title: item.title,
+      artist: item.artist ?? '',
+      artUri: item.artUri?.toString(),
+      album: item.album,
+      durationMs: item.duration?.inMilliseconds,
+      spotifyUri: item.extras?['spotifyUri'] as String?,
+    ));
   }
 
   void _overlayPushPosition() {
@@ -845,7 +845,7 @@ class MediaPlayer extends ChangeNotifier {
     _player.sequenceStream.listen((playlist) {
       if (_engineOwnsPlayback) return;
       final List<IndexedAudioSource> newList =
-          (playlist ?? const <IndexedAudioSource>[]).cast<IndexedAudioSource>();
+      (playlist ?? const <IndexedAudioSource>[]).cast<IndexedAudioSource>();
 
       if (listEquals(newList, _songList)) return;
 
@@ -886,9 +886,12 @@ class MediaPlayer extends ChangeNotifier {
         isPlaying ? ButtonState.playing : ButtonState.paused;
         _saveCurrentState();
       } else if (processingState == ProcessingState.completed) {
-        _player.seek(Duration.zero);
-        _player.pause();
-        _buttonState.value = ButtonState.paused;
+        _continueAfterQueueEnd().then((continued) {
+          if (continued) return;
+          _player.seek(Duration.zero);
+          _player.pause();
+          _buttonState.value = ButtonState.paused;
+        });
       } else {
         _buttonState.value = ButtonState.paused;
       }
@@ -946,27 +949,11 @@ class MediaPlayer extends ChangeNotifier {
     _player.durationStream.listen((position) {
       if (_engineOwnsPlayback) return;
       final oldState = _progressBarState.value;
-      var total = position ?? Duration.zero;
-      // iOS: AVPlayer can report a wildly wrong length for some streams
-      // (5-6 min for a 3 min song). Trust the song's own metadata when the
-      // two disagree by more than 15 %.
-      if (Platform.isIOS && position != null) {
-        final idx = _player.currentIndex;
-        final known = (idx != null && idx >= 0 && idx < _songList.length)
-            ? (_songList[idx].tag as MediaItem).duration
-            : null;
-        if (known != null &&
-            known > const Duration(seconds: 10) &&
-            (position - known).abs().inMilliseconds >
-                known.inMilliseconds * 0.15) {
-          total = known;
-        }
-      }
-      if (oldState.total != total) {
+      if (oldState.total != position) {
         _progressBarState.value = ProgressBarState(
           current: oldState.current,
           buffered: oldState.buffered,
-          total: total,
+          total: position ?? Duration.zero,
         );
       }
     });
@@ -1096,7 +1083,7 @@ class MediaPlayer extends ChangeNotifier {
         if (!skipMirror) {
           try {
             final mirror =
-                await MirrorSource.instance.tryBuildSource(song, tag);
+            await MirrorSource.instance.tryBuildSource(song, tag);
             if (mirror != null) return mirror;
           } catch (e) {
             print('[mirror] spotify upgrade error: $e');
@@ -1133,10 +1120,7 @@ class MediaPlayer extends ChangeNotifier {
       if (cached != null && await File(cached.filePath).exists()) {
         return AudioSource.file(cached.filePath, tag: tag);
       }
-      // Apple platforms (macOS, iOS/iPadOS): give AVPlayer the real googlevideo
-      // URL. It seeks and measures duration itself; the local proxy source
-      // broke seeking, stretched duration and loaded slowly on iPad.
-      if (Platform.isMacOS || Platform.isIOS) {
+      if (Platform.isMacOS) {
         final quality =
         GetIt.I<SettingsManager>().streamingQuality.name.toLowerCase();
         return await getDirectUrlAudioSource(song['videoId'], quality, tag);
@@ -1417,7 +1401,7 @@ class MediaPlayer extends ChangeNotifier {
         await _player.stop();
         await _player.clearAudioSources();
         final retrySource =
-            await _getAudioSource(retrySong, skipMirror: true);
+        await _getAudioSource(retrySong, skipMirror: true);
         await _player.setAudioSource(retrySource);
         _player.play();
         if (songs.length > 1) {
@@ -1719,8 +1703,8 @@ class MediaPlayer extends ChangeNotifier {
     // and every further tap retried the same dead song).
     var cursor = target;
     for (var attempt = 0;
-        attempt < 6 && cursor >= 0 && cursor < snapshot.length;
-        attempt++, cursor += step) {
+    attempt < 6 && cursor >= 0 && cursor < snapshot.length;
+    attempt++, cursor += step) {
       final song = Map<String, dynamic>.from(snapshot[cursor]);
       try {
         await _player.stop();
@@ -1826,7 +1810,7 @@ class MediaPlayer extends ChangeNotifier {
     final vid = _flowSongs[index]['videoId']?.toString();
     if (vid != null && vid.isNotEmpty) {
       final pos = _player.sequence.indexWhere(
-          (s) => s.tag is MediaItem && (s.tag as MediaItem).id == vid);
+              (s) => s.tag is MediaItem && (s.tag as MediaItem).id == vid);
       if (pos >= 0) {
         await _player.seek(Duration.zero, index: pos);
         unawaited(_player.play());
@@ -1845,7 +1829,7 @@ class MediaPlayer extends ChangeNotifier {
       await _player.stop();
       await _player.clearAudioSources();
       final first =
-          await _getAudioSource(Map<String, dynamic>.from(_flowSongs[index]));
+      await _getAudioSource(Map<String, dynamic>.from(_flowSongs[index]));
       await _player.setAudioSource(first);
       _flowResolvedThrough = index;
       _player.play();
@@ -1905,21 +1889,55 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
+  /// Fetches more songs for the queue. Returns true when songs were added.
+  /// The busy flag is always released (try/finally): before, one failed
+  /// request — typical on iOS when the app is backgrounded and the network
+  /// call is suspended — left [autoFetching] true forever and autoplay
+  /// silently stopped for the rest of the session.
+  Future<bool> _autofetch(int index) async {
+    if (autoFetching) return false;
+    autoFetching = true;
+    try {
+      final seq = player.sequence;
+      if (index < 0 || index >= seq.length) return false;
+      final before = seq.length;
+      List nextSongs = await GetIt.I<YTMusic>()
+          .getNextSongList(videoId: seq[index].tag.id);
+      if (nextSongs.isNotEmpty) nextSongs.removeAt(0);
+      await _addSongListToQueue(nextSongs);
+      return player.sequence.length > before;
+    } catch (_) {
+      return false;
+    } finally {
+      autoFetching = false;
+    }
+  }
+
   void _listenToAutofetch() {
     player.currentIndexStream.listen((index) async {
       if (_engineOwnsPlayback || _flowActive) return;
       if (index == null) return;
       if (player.sequence.length - index < 5 &&
-          GetIt.I<SettingsManager>().autofetchSongs &&
-          autoFetching == false) {
-        autoFetching = true;
-        List nextSongs = await GetIt.I<YTMusic>()
-            .getNextSongList(videoId: player.sequence[index].tag.id);
-        if (nextSongs.isNotEmpty) nextSongs.removeAt(0);
-        await _addSongListToQueue(nextSongs);
-        autoFetching = false;
+          GetIt.I<SettingsManager>().autofetchSongs) {
+        await _autofetch(index);
       }
     });
+  }
+
+  /// The queue ended before more songs arrived (slow or suspended network).
+  /// Try once more and carry on playing instead of stopping.
+  Future<bool> _continueAfterQueueEnd() async {
+    if (_engineOwnsPlayback ||
+        _flowActive ||
+        !GetIt.I<SettingsManager>().autofetchSongs) {
+      return false;
+    }
+    final last = _player.sequence.length - 1;
+    if (last < 0) return false;
+    if (!await _autofetch(last)) return false;
+    await _player.seek(Duration.zero, index: last + 1);
+    await _player.play();
+    return true;
   }
 
   void setTimer(Duration duration) {

@@ -18,9 +18,11 @@ import 'package:get_it/get_it.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:just_audio_background/just_audio_background.dart'
     show MediaItem;
+import 'package:just_audio/just_audio.dart' show LoopMode;
 
 import 'package:zenmusic/desktop/screens/settings/player/equalizer_page.dart';
 import 'package:zenmusic/desktop/services/media_player.dart';
+import 'package:zenmusic/desktop/services/mini_player_bridge.dart';
 import 'package:zenmusic/desktop/utils/bottom_modals.dart';
 import 'package:zenmusic/desktop/utils/zen_icons.dart';
 import 'package:zenmusic/desktop/utils/zen_settings_kit.dart';
@@ -36,14 +38,38 @@ enum PlayerSkin {
       Icons.blur_on),
   simpM3('Material 3',
       'Connected buttons, squircle transport, rotating cookie play button',
-      Icons.palette_outlined);
+      Icons.palette_outlined),
+  simpMusic('SimpMusic · Split view',
+      'Artwork & transport left, synced lyrics right (desktop)',
+      Icons.space_dashboard_outlined);
 
   const PlayerSkin(this.label, this.desc, this.icon);
   final String label, desc;
   final IconData icon;
 
-  static PlayerSkin fromName(String? n) =>
-      values.firstWhere((s) => s.name == n, orElse: () => classic);
+  /// Desktop platforms (Windows/Linux/macOS builds of the app).
+  static bool get isDesktop => !(Platform.isAndroid || Platform.isIOS);
+
+  /// Skins offered in the settings pickers.
+  ///
+  /// Desktop is fixed to the single SimpMusic split-view skin; phones keep
+  /// every other skin. `simpMusic` never shows in the mobile picker and the
+  /// mobile skins never show on desktop.
+  static List<PlayerSkin> get choosable => isDesktop
+      ? const [PlayerSkin.simpMusic]
+      : PlayerSkin.values
+          .where((s) => s != PlayerSkin.simpMusic)
+          .toList(growable: false);
+
+  static PlayerSkin fromName(String? n) {
+    // Desktop always renders the single SimpMusic split-view skin, whatever
+    // an older install may have saved in Hive.
+    if (isDesktop) return PlayerSkin.simpMusic;
+    final s = PlayerSkin.values
+        .firstWhere((s) => s.name == n, orElse: () => PlayerSkin.classic);
+    // A pref saved on desktop must not leak into the mobile picker.
+    return s == PlayerSkin.simpMusic ? PlayerSkin.classic : s;
+  }
 }
 
 /// Everything a skin needs from the player page.
@@ -67,12 +93,14 @@ class PlayerCtx {
     this.tint,
     this.canvas = const SizedBox.shrink(),
     this.canvasOn = false,
+    this.lyricsLoading = false,
   });
 
   final MediaItem song;
   final int index, total; // 1-based position in the queue
   final String quality; // e.g. "High, 256 kbps" or "Auto"
   final bool hasLyrics, showLyrics;
+  final bool lyricsLoading; // lyrics request still in flight
   final Color? tint; // palette colour of the front artwork (if known)
   final Widget canvas; // Spotify canvas / reel / video backdrop (may be empty)
   final bool canvasOn; // true once the canvas is rendering → hide artwork
@@ -117,6 +145,7 @@ class PlayerSkinView extends StatelessWidget {
     PlayerSkin.appleMusicMesh => _EchoSkin(ctx, material: false),
     PlayerSkin.simpLiquid => _SimpLiquid(ctx),
     PlayerSkin.simpM3 => _EchoSkin(ctx, material: true),
+    PlayerSkin.simpMusic => _SimpMusic(ctx),
     PlayerSkin.classic => const SizedBox.shrink(),
   };
 }
@@ -2099,6 +2128,271 @@ class _MeasureSizeState extends State<_MeasureSize> {
 /// (classic, applemusicmesh, simpliquid, simpm3 — or its label, e.g.
 /// "material3.png"; png / jpg / webp, any case). A style without a file
 /// shows assets/player/placeholder.* (or its icon).
+// ════════════════════ 4 · SimpMusic · Split view (desktop) ═════════════════
+/// SimpMusic's tablet player — the single skin used on desktop.
+///
+/// A blurred artwork backdrop, the artwork and transport controls on the
+/// left, the synced lyrics (with translation, when enabled) always visible on
+/// the right, and a top bar with close / mini-player buttons and a volume
+/// slider. Narrow desktop windows fall back to one column with the full-page
+/// lyrics layer (phones never see this skin).
+class _SimpMusic extends StatelessWidget {
+  const _SimpMusic(this.x);
+  final PlayerCtx x;
+
+  static const _w = Colors.white;
+  static final Color _dim = Colors.white.withValues(alpha: .65);
+
+  /// Pre-blurred artwork behind everything (same recipe as _SimpLiquid).
+  Widget _bg(Color t) => Stack(fit: StackFit.expand, children: [
+    RepaintBoundary(
+      child: ClipRect(
+        child: ImageFiltered(
+          imageFilter: ImageFilter.blur(
+              sigmaX: 44, sigmaY: 44, tileMode: TileMode.decal),
+          child: Transform.scale(
+              scale: 1.7, child: SizedBox.expand(child: x.art(0))),
+        ),
+      ),
+    ),
+    _grad([
+      _dark(t, .30).withValues(alpha: .58),
+      _dark(t, .20).withValues(alpha: .84),
+      _dark(t, .10),
+    ]),
+  ]);
+
+  /// Close / mini-player on the left, volume slider on the right.
+  Widget _top() => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 4, 18, 0),
+    child: Row(children: [
+      _ibtn(Icons.close_rounded, x.close, 'Close', size: 22, c: _w, pad: 8),
+      if (Platform.isWindows)
+        _ibtn(Icons.minimize_rounded,
+            () => MiniPlayerBridge.instance.openMiniPlayer(),
+            'Mini player', size: 22, c: _w, pad: 8),
+      const Spacer(),
+      SizedBox(width: 190, height: 30, child: _volBoth(_w, _w.withValues(alpha: .22))),
+    ]),
+  );
+
+  Widget _quality() => _Tap(
+    onTap: x.openQuality,
+    tip: 'Audio quality',
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+          border: Border.all(color: _w.withValues(alpha: .38)),
+          borderRadius: BorderRadius.circular(5)),
+      child: Text(x.quality,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: _s(10, _dim, w: FontWeight.w700, ls: .5)),
+    ),
+  );
+
+  Widget _play() => _playing((s) => _Tap(
+    onTap: _toggle,
+    tip: s == ButtonState.playing ? 'Pause' : 'Play',
+    child: Container(
+      width: 66,
+      height: 66,
+      decoration: const BoxDecoration(shape: BoxShape.circle, color: _w),
+      child: s == ButtonState.loading
+          ? const Padding(
+              padding: EdgeInsets.all(21),
+              child: CircularProgressIndicator(
+                  strokeWidth: 3, color: Colors.black),
+            )
+          : Icon(
+              s == ButtonState.playing
+                  ? Icons.pause_rounded
+                  : Icons.play_arrow_rounded,
+              size: 40,
+              color: const Color(0xFF17181C)),
+    ),
+  ));
+
+  Widget _shuf() => StreamBuilder<bool>(
+    stream: _mp.player.shuffleModeEnabledStream,
+    initialData: false,
+    builder: (_, snap) {
+      final on = snap.data ?? false;
+      return _ibtn(Icons.shuffle_rounded, () async {
+        await _mp.player.setShuffleModeEnabled(!on);
+        if (!on) await _mp.player.shuffle();
+      }, on ? 'Shuffle: on' : 'Shuffle: off',
+          size: 22, c: _w, on: on, mark: on);
+    },
+  );
+
+  Widget _rep() => ValueListenableBuilder<LoopMode>(
+    valueListenable: _mp.loopMode,
+    builder: (_, m, __) => _ibtn(
+        m == LoopMode.one
+            ? Icons.repeat_one_rounded
+            : Icons.repeat_rounded,
+        () => _mp.changeLoopMode(),
+        m == LoopMode.off
+            ? 'Repeat: off'
+            : m == LoopMode.one
+            ? 'Repeat: one'
+            : 'Repeat: all',
+        size: 22,
+        c: _w,
+        on: m != LoopMode.off,
+        mark: m != LoopMode.off),
+  );
+
+  Widget _transport() =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+        _shuf(),
+        _ibtn(Icons.skip_previous_rounded, x.prev, 'Previous',
+            size: 40, c: _w, pad: 8),
+        _play(),
+        _ibtn(Icons.skip_next_rounded, x.next, 'Next', size: 40, c: _w, pad: 8),
+        _rep(),
+      ]);
+
+  /// Square artwork with the song-swipe gesture, shadowed.
+  Widget _artSquare({double r = 26}) => LayoutBuilder(builder: (_, c) {
+    final s = math.max(60.0, math.min(c.maxWidth, c.maxHeight));
+    return Center(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragEnd: (d) => _swipeSong(x, d),
+        child: Container(
+          width: s,
+          height: s,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(r),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withValues(alpha: .45),
+                  blurRadius: 30,
+                  offset: const Offset(0, 14)),
+            ],
+          ),
+          child: ClipRRect(borderRadius: BorderRadius.circular(r), child: x.swipeArt),
+        ),
+      ),
+    );
+  });
+
+  Widget _left() => Padding(
+    padding: const EdgeInsets.fromLTRB(28, 8, 12, 14),
+    child: Column(children: [
+      Expanded(child: _artSquare()),
+      const SizedBox(height: 18),
+      _titles(x, _w, _dim, size: 26, w: FontWeight.w800),
+      const SizedBox(height: 10),
+      _bar(_w, _w.withValues(alpha: .25), h: 22, t: 4),
+      _times(_dim, rem: true, mid: Flexible(child: _quality())),
+      const SizedBox(height: 8),
+      _transport(),
+    ]),
+  );
+
+  /// Synced lyrics straight on the blurred backdrop. The lyrics box stays
+  /// mounted no matter what, so lyrics keep being discovered; the empty
+  /// state only fades in once the lookup has finished without results.
+  Widget _right() => Padding(
+    padding: const EdgeInsets.fromLTRB(6, 8, 20, 14),
+    child: Stack(children: [
+      Positioned.fill(
+        child: LayoutBuilder(
+          builder: (_, b) => x.lyrics(Size(b.maxWidth, b.maxHeight)),
+        ),
+      ),
+      IgnorePointer(
+        child: AnimatedOpacity(
+          // Not const: no const-eval traps here (G8388A750).
+          opacity: !x.hasLyrics && !x.lyricsLoading ? 1 : 0,
+          duration: const Duration(milliseconds: 250),
+          child: Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.lyrics_outlined, size: 44,
+                  color: _w.withValues(alpha: .24)),
+              const SizedBox(height: 12),
+              Text('No lyrics available',
+                  style: _s(15, _w.withValues(alpha: .38),
+                      w: FontWeight.w600)),
+            ]),
+          ),
+        ),
+      ),
+    ]),
+  );
+
+  Widget _wide() => Padding(
+    padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+    child: Column(children: [
+      _top(),
+      const SizedBox(height: 8),
+      Expanded(
+        child: Row(children: [
+          Expanded(flex: 5, child: _left()),
+          Expanded(flex: 6, child: _right()),
+        ]),
+      ),
+    ]),
+  );
+
+  /// Desktop windows can be resized narrow — fall back to a single column;
+  /// the lyric strip opens the full-page lyrics layer (as on phones).
+  Widget _narrow() => Padding(
+    padding: const EdgeInsets.fromLTRB(26, 0, 26, 14),
+    child: Column(children: [
+      _top(),
+      const SizedBox(height: 4),
+      Expanded(child: _artSquare(r: 24)),
+      const SizedBox(height: 14),
+      _titles(x, _w, _dim, size: 24, w: FontWeight.w800, center: true),
+      const SizedBox(height: 2),
+      AppleLyricStrip(onTap: x.hasLyrics ? x.toggleLyrics : null, fontSize: 15),
+      const SizedBox(height: 6),
+      _bar(_w, _w.withValues(alpha: .25), h: 22, t: 4),
+      _times(_dim, rem: true, mid: Flexible(child: _quality())),
+      const SizedBox(height: 8),
+      _transport(),
+      const SizedBox(height: 4),
+      _volBoth(_w, _w.withValues(alpha: .22)),
+      const _OutputName(),
+    ]),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final t = _t(x);
+    return Material(
+      type: MaterialType.transparency,
+      child: Stack(fit: StackFit.expand, children: [
+        _bg(t),
+        LayoutBuilder(
+          builder: (_, c) => _isWide(c)
+              ? _wide()
+              : _lyricsLayer(
+                  x,
+                  _narrow(),
+                  (shown) => _LyricsPage(
+                    x: x,
+                    shown: shown,
+                    ink: _w,
+                    dim: _dim,
+                    prim: _w,
+                    onPrim: Colors.black,
+                    chip: _w.withValues(alpha: .14),
+                    chipInk: _w,
+                    scrim: Colors.black.withValues(alpha: .34),
+                  ),
+                ),
+        ),
+      ]),
+    );
+  }
+}
+
+
 class PlayerSkinPage extends StatefulWidget {
   const PlayerSkinPage({super.key});
 
@@ -2177,9 +2471,9 @@ class _PlayerSkinPageState extends State<PlayerSkinPage> {
                       crossAxisSpacing: 14,
                       childAspectRatio: .56,
                     ),
-                    itemCount: PlayerSkin.values.length,
+                    itemCount: PlayerSkin.choosable.length,
                     itemBuilder: (context, i) {
-                      final s = PlayerSkin.values[i];
+                      final s = PlayerSkin.choosable[i];
                       final sel = s == cur;
                       final path = _pathFor(idx, s) ?? ph;
                       return GestureDetector(

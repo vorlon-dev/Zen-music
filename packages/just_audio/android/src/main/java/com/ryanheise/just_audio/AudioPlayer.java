@@ -5,6 +5,7 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import com.zen.music.zenmusic.lossless.NativeAudioEngine;
 import com.zen.music.zenmusic.lossless.ZenNativePcmAudioProcessor;
 import com.zen.music.zenmusic.lossless.VocalRemoverAudioProcessor;
+import com.zen.music.zenmusic.lossless.SpatialAudioProcessor;
 import android.content.Context;
 import android.media.audiofx.AudioEffect;
 import android.media.audiofx.Equalizer;
@@ -852,7 +853,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                                 AudioSink sink = new DefaultAudioSink.Builder(sinkContext)
                                         .setEnableFloatOutput(sinkEnableFloatOutput)
                                         .setEnableAudioTrackPlaybackParams(sinkEnableAudioTrackPlaybackParams)
-                                        .setAudioProcessors(new AudioProcessor[]{nativeProcessor, new VocalRemoverAudioProcessor()})
+                                        .setAudioProcessors(new AudioProcessor[]{nativeProcessor, new VocalRemoverAudioProcessor(), new SpatialAudioProcessor()})
                                         .build();
                                 Log.i(TAG, "ZenNative: native DSP processor attached to audio sink");
                                 return sink;
@@ -866,7 +867,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                         return new DefaultAudioSink.Builder(sinkContext)
                                 .setEnableFloatOutput(sinkEnableFloatOutput)
                                 .setEnableAudioTrackPlaybackParams(sinkEnableAudioTrackPlaybackParams)
-                                .setAudioProcessors(new AudioProcessor[]{new VocalRemoverAudioProcessor()})
+                                .setAudioProcessors(new AudioProcessor[]{new VocalRemoverAudioProcessor(), new SpatialAudioProcessor()})
                                 .build();
                     }
                 }
