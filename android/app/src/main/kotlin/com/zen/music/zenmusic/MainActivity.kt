@@ -737,7 +737,7 @@ class MainActivity : AudioServiceActivity() {
                     "setSpatialAudio" -> {
                         val mode = call.argument<Number>("mode")?.toInt() ?: 0
                         com.zen.music.zenmusic.lossless.SpatialAudioState.mode =
-                            if (mode == 6 || mode == 16) mode else 0
+                            if (mode in listOf(6, 8, 16, 18, 100)) mode else 0
                         result.success(null)
                     }
                     "setEqualizer" -> {

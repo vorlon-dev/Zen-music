@@ -296,7 +296,8 @@ class _SingVoiceTile extends StatelessWidget {
 }
 
 
-/// 6D / 16D spatial audio picker: Off · 6D · 16D with a short explanation.
+/// Spatial audio picker: Off · 6D · 8D · 16D · 18D · Surround, with a short
+/// explanation and a headphones tip.
 class _SpatialTile extends StatelessWidget {
   const _SpatialTile({
     required this.mode,
@@ -314,9 +315,21 @@ class _SpatialTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final desc = switch (mode) {
       6 => '6D: the sound slowly circles around your head with a light sense of room.',
+      8 => '8D: the classic wide pan that sweeps from ear to ear.',
       16 => '16D: a faster orbit with front-and-back depth and a bigger room.',
-      _ => 'Make music feel like it moves around you. Use headphones.',
+      18 => '18D: the most intense orbit, with deep front-and-back movement and a large room.',
+      100 => 'Surround: the music sounds far away on a big stage, like a real concert hall.',
+      _ => 'Make music feel like it moves around you or plays in a real space.',
     };
+    final labels = <int, String>{
+      0: 'Off'.tr,
+      6: '6D',
+      8: '8D',
+      16: '16D',
+      18: '18D',
+      100: 'Surround'.tr,
+    };
+    final scheme = Theme.of(context).colorScheme;
     return SettingEmptyTile(
       isFirst: first,
       isLast: last,
@@ -332,21 +345,42 @@ class _SpatialTile extends StatelessWidget {
                 ?.copyWith(fontSize: 16, fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<int>(
-              showSelectedIcon: false,
-              segments: [
-                ButtonSegment(value: 0, label: Text('Off'.tr)),
-                const ButtonSegment(value: 6, label: Text('6D')),
-                const ButtonSegment(value: 16, label: Text('16D')),
-              ],
-              selected: {mode},
-              onSelectionChanged: (s) => onChanged(s.first),
-            ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              for (final e in labels.entries)
+                ChoiceChip(
+                  label: Text(e.value),
+                  selected: mode == e.key,
+                  onSelected: (_) => onChanged(e.key),
+                ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(desc.tr, style: Theme.of(context).textTheme.labelLarge),
+          if (mode != 0) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: scheme.primary.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.headphones_rounded, size: 18, color: scheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Use headphones or earphones to feel the full effect.'.tr,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
