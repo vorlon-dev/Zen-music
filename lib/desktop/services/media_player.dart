@@ -886,9 +886,12 @@ class MediaPlayer extends ChangeNotifier {
         isPlaying ? ButtonState.playing : ButtonState.paused;
         _saveCurrentState();
       } else if (processingState == ProcessingState.completed) {
-        _player.seek(Duration.zero);
-        _player.pause();
-        _buttonState.value = ButtonState.paused;
+        _continueAfterQueueEnd().then((continued) {
+          if (continued) return;
+          _player.seek(Duration.zero);
+          _player.pause();
+          _buttonState.value = ButtonState.paused;
+        });
       } else {
         _buttonState.value = ButtonState.paused;
       }
@@ -1886,21 +1889,55 @@ class MediaPlayer extends ChangeNotifier {
     }
   }
 
+  /// Fetches more songs for the queue. Returns true when songs were added.
+  /// The busy flag is always released (try/finally): before, one failed
+  /// request — typical on iOS when the app is backgrounded and the network
+  /// call is suspended — left [autoFetching] true forever and autoplay
+  /// silently stopped for the rest of the session.
+  Future<bool> _autofetch(int index) async {
+    if (autoFetching) return false;
+    autoFetching = true;
+    try {
+      final seq = player.sequence;
+      if (index < 0 || index >= seq.length) return false;
+      final before = seq.length;
+      List nextSongs = await GetIt.I<YTMusic>()
+          .getNextSongList(videoId: seq[index].tag.id);
+      if (nextSongs.isNotEmpty) nextSongs.removeAt(0);
+      await _addSongListToQueue(nextSongs);
+      return player.sequence.length > before;
+    } catch (_) {
+      return false;
+    } finally {
+      autoFetching = false;
+    }
+  }
+
   void _listenToAutofetch() {
     player.currentIndexStream.listen((index) async {
       if (_engineOwnsPlayback || _flowActive) return;
       if (index == null) return;
       if (player.sequence.length - index < 5 &&
-          GetIt.I<SettingsManager>().autofetchSongs &&
-          autoFetching == false) {
-        autoFetching = true;
-        List nextSongs = await GetIt.I<YTMusic>()
-            .getNextSongList(videoId: player.sequence[index].tag.id);
-        if (nextSongs.isNotEmpty) nextSongs.removeAt(0);
-        await _addSongListToQueue(nextSongs);
-        autoFetching = false;
+          GetIt.I<SettingsManager>().autofetchSongs) {
+        await _autofetch(index);
       }
     });
+  }
+
+  /// The queue ended before more songs arrived (slow or suspended network).
+  /// Try once more and carry on playing instead of stopping.
+  Future<bool> _continueAfterQueueEnd() async {
+    if (_engineOwnsPlayback ||
+        _flowActive ||
+        !GetIt.I<SettingsManager>().autofetchSongs) {
+      return false;
+    }
+    final last = _player.sequence.length - 1;
+    if (last < 0) return false;
+    if (!await _autofetch(last)) return false;
+    await _player.seek(Duration.zero, index: last + 1);
+    await _player.play();
+    return true;
   }
 
   void setTimer(Duration duration) {
