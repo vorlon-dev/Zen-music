@@ -96,6 +96,12 @@ class _SongThumbnailState extends State<SongThumbnail> {
         width: widget.width,
         fit: widget.fit,
         filterQuality: widget.filterQuality,
+        // Decode at the size it is shown, not the size it was downloaded:
+        // big thumbnails decoded at full resolution are a main cause of
+        // dropped frames while a shelf scrolls.
+        memCacheWidth: (widget.width != null && widget.width!.isFinite)
+            ? (widget.width! * MediaQuery.devicePixelRatioOf(context)).round()
+            : null,
         imageBuilder: (context, provider) => _buildDisplayImage(provider),
         placeholder: (context, url) => SizedBox(
           height: widget.height,

@@ -1,5 +1,6 @@
 // ZenMusic · vorlon-dev
 
+import 'package:flutter/scheduler.dart' show SchedulerPhase;
 import 'dart:async';
 import 'dart:io';
 
@@ -115,7 +116,17 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _onFullPageAboveChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // The notifier can fire while a child is being built (it did at startup:
+    // "setState() called during build"). Defer to after the frame then.
+    if (WidgetsBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
   }
 
   void _restartIdleTimer() {
