@@ -6,6 +6,7 @@ import 'package:zenmusic/desktop/services/lyric_translation.dart';
 import 'package:zenmusic/desktop/services/l10n.dart';
 import 'package:zenmusic/desktop/services/lyric_styles.dart';
 import 'package:zenmusic/desktop/services/sing_mode.dart';
+import 'package:zenmusic/desktop/services/spatial_audio.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
 
@@ -69,6 +70,7 @@ Future<void> main() async {
   LyricsTranslation.instance.load();
   LyricsRomanizer.instance.load();
   unawaited(SingMode.instance.restore());
+  unawaited(SpatialAudio.instance.restore());
 
   unawaited(InnertubexBridge.warm());
 

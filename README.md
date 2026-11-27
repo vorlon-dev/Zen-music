@@ -125,6 +125,7 @@ It runs on **Android** (phone and tablet) and **Windows** (a full desktop experi
 - **JioSaavn 320 kbps AAC.**
 - **15-band equalizer:** presets, bass boost, a live response curve and a reset button.
 - **Crossfade:** true two-deck blend with an optional Automix mode that matches tempo between tracks.
+- **6D / 16D spatial audio:** an orbiting-sound effect for headphones (Android). 6D circles slowly with a light room; 16D orbits faster with front-and-back depth and a bigger room.
 - **Skip silence** and **Sing Mode** (vocal dip with an adjustable voice level, on Android).
 - **Haptic Beats:** vibrate with the rhythm of the song.
 - **Offline AI remix models:** optional on-device tempo models you download yourself.

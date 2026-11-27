@@ -121,6 +121,18 @@ class PlayerSettingsPage extends StatelessWidget {
                           ),
                   ],
 
+                  /// Spatial audio (6D / 16D) — Android audio pipeline only.
+                  if (singShown)
+                    ({required bool first, required bool last}) =>
+                        _SpatialTile(
+                          mode: s.spatialMode,
+                          first: first,
+                          last: last,
+                          onChanged: (v) => context
+                              .read<PlayerSettingsCubit>()
+                              .setSpatialMode(v),
+                        ),
+
                   /// AI remix models — offline ONNX model manager +
                   /// on-device track scanner (SP-78).
                   ({required bool first, required bool last}) =>
@@ -277,6 +289,64 @@ class _SingVoiceTile extends StatelessWidget {
             'How much of the vocals stays in the mix'.tr,
             style: Theme.of(context).textTheme.labelLarge,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// 6D / 16D spatial audio picker: Off · 6D · 16D with a short explanation.
+class _SpatialTile extends StatelessWidget {
+  const _SpatialTile({
+    required this.mode,
+    required this.first,
+    required this.last,
+    required this.onChanged,
+  });
+
+  final int mode;
+  final bool first;
+  final bool last;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final desc = switch (mode) {
+      6 => '6D: the sound slowly circles around your head with a light sense of room.',
+      16 => '16D: a faster orbit with front-and-back depth and a bigger room.',
+      _ => 'Make music feel like it moves around you. Use headphones.',
+    };
+    return SettingEmptyTile(
+      isFirst: first,
+      isLast: last,
+      leading: const Icon(Icons.surround_sound_rounded),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Spatial Audio'.tr,
+            style: Theme.of(context)
+                .textTheme
+                .bodyLarge
+                ?.copyWith(fontSize: 16, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              segments: [
+                ButtonSegment(value: 0, label: Text('Off'.tr)),
+                const ButtonSegment(value: 6, label: Text('6D')),
+                const ButtonSegment(value: 16, label: Text('16D')),
+              ],
+              selected: {mode},
+              onSelectionChanged: (s) => onChanged(s.first),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(desc.tr, style: Theme.of(context).textTheme.labelLarge),
         ],
       ),
     );
