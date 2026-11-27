@@ -734,6 +734,12 @@ class MainActivity : AudioServiceActivity() {
                             amount.coerceIn(0f, 1f)
                         result.success(null)
                     }
+                    "setRoomAmount" -> {
+                        val amount = (call.argument<Number>("amount") ?: 0).toFloat()
+                        com.zen.music.zenmusic.lossless.SpatialAudioState.room =
+                            amount.coerceIn(0f, 1f)
+                        result.success(null)
+                    }
                     "setSpatialAudio" -> {
                         val mode = call.argument<Number>("mode")?.toInt() ?: 0
                         com.zen.music.zenmusic.lossless.SpatialAudioState.mode =

@@ -20,6 +20,10 @@ import kotlin.math.sin
 object SpatialAudioState {
     @Volatile
     var mode: Int = 0
+
+    /** 0..1 reverb-only "room" used by Slowed + Reverb when no spatial mode is chosen. */
+    @Volatile
+    var room: Float = 0f
 }
 
 /**
@@ -86,6 +90,7 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
     private var wet = 0f
     private var width = 0f
     private var far = 0f
+    private var plain = 0f // 1 = keep the original stereo untouched (room-only)
     private var preDelay = 0f // seconds
 
     private var pre = FloatArray(0)
@@ -150,9 +155,11 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
             8 -> { tPeriod = 8.0; tDepth = 0f; tWet = 0.10f; tWidth = 0.30f; tFar = 0f; tPre = 0f }
             16 -> { tPeriod = 5.0; tDepth = 1f; tWet = 0.28f; tWidth = 0.35f; tFar = 0f; tPre = 0f }
             18 -> { tPeriod = 3.5; tDepth = 1f; tWet = 0.38f; tWidth = 0.50f; tFar = 0f; tPre = 0f }
+            200 -> { tPeriod = 0.0; tDepth = 0f; tWet = 0.40f * SpatialAudioState.room.coerceIn(0f, 1f); tWidth = 1.0f; tFar = 0f; tPre = 0.015f }
             100 -> { tPeriod = 0.0; tDepth = 0f; tWet = 0.45f; tWidth = 1.0f; tFar = 1f; tPre = 0.025f }
             else -> { tPeriod = 10.0; tDepth = 0f; tWet = 0f; tWidth = 0.35f; tFar = 0f; tPre = 0f }
         }
+        val tPlain = if (mode == 200) 1f else 0f
         val tOmega = if (tPeriod > 0.0) (2.0 * PI / (tPeriod * sr)).toFloat() else 0f
         val sm = 1f / (sr * 0.5f)
         if (mode != 0) { // keep the old shape while fading out
@@ -162,6 +169,7 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
             wet += (tWet - wet) * k
             width += (tWidth - width) * k
             far += (tFar - far) * k
+            plain += (tPlain - plain) * k
             preDelay += (tPre - preDelay) * k
         }
         phase += omega
@@ -203,8 +211,10 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
         lpd += dark * ((lpl + lpr) * 0.5f - lpd)
         val dl2 = lpl + (lpd - lpl) * far
         val dr2 = lpr + (lpd - lpr) * far
-        val pl = (dl2 + side * width + wet * rl) * 0.9f
-        val pr = (dr2 - side * width + wet * rr) * 0.9f
+        val baseL = dl2 + side * width
+        val baseR = dr2 - side * width
+        val pl = ((baseL + (l - baseL) * plain) + wet * rl) * 0.9f
+        val pr = ((baseR + (r - baseR) * plain) + wet * rr) * 0.9f
 
         outL = l + (pl - l) * amount
         outR = r + (pr - r) * amount
@@ -214,7 +224,8 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
         val size = inputBuffer.remaining()
         if (size == 0) return
         val out = replaceOutputBuffer(size)
-        val mode = SpatialAudioState.mode
+        val chosen = SpatialAudioState.mode
+        val mode = if (chosen != 0) chosen else if (SpatialAudioState.room > 0.001f) 200 else 0
 
         if (mode == 0 && amount < 0.001f) {
             amount = 0f

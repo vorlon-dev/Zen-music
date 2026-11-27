@@ -133,6 +133,20 @@ class PlayerSettingsPage extends StatelessWidget {
                               .setSpatialMode(v),
                         ),
 
+                  /// Sound vibes: Slowed + Reverb / Nightcore (Android).
+                  if (singShown)
+                    ({required bool first, required bool last}) => _VibeTile(
+                          preset: s.vibe,
+                          speed: s.vibeSpeed,
+                          first: first,
+                          last: last,
+                          onPreset: (v) =>
+                              context.read<PlayerSettingsCubit>().setVibe(v),
+                          onSpeed: (v) => context
+                              .read<PlayerSettingsCubit>()
+                              .setVibeSpeed(v),
+                        ),
+
                   /// AI remix models — offline ONNX model manager +
                   /// on-device track scanner (SP-78).
                   ({required bool first, required bool last}) =>
@@ -155,11 +169,15 @@ class PlayerSettingsPage extends StatelessWidget {
                       ),
                 ];
 
+                // On phones the mini player and bottom bar float over the page;
+                // without this the last tile (AI Remix Models) could not be
+                // scrolled into view or tapped.
+                final floatingBottom =
+                    (Platform.isAndroid || Platform.isIOS)
+                        ? MediaQuery.paddingOf(context).bottom + 200
+                        : 8.0;
                 return ListView(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
+                  padding: EdgeInsets.fromLTRB(16, 8, 16, floatingBottom),
                   children: [
                     for (var i = 0; i < group.length; i++)
                       group[i](
@@ -345,18 +363,38 @@ class _SpatialTile extends StatelessWidget {
                 ?.copyWith(fontSize: 16, fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              for (final e in labels.entries)
-                ChoiceChip(
-                  label: Text(e.value),
-                  selected: mode == e.key,
-                  onSelected: (_) => onChanged(e.key),
-                ),
-            ],
-          ),
+          // Fixed 3 x 2 grid: the selected chip never grows or wraps, so the
+          // tile keeps one height whichever mode is picked.
+          for (final row in const [
+            [0, 6, 8],
+            [16, 18, 100],
+          ])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  for (var i = 0; i < row.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        showCheckmark: false,
+                        label: SizedBox(
+                          width: double.infinity,
+                          child: Text(
+                            labels[row[i]]!,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        selected: mode == row[i],
+                        onSelected: (_) => onChanged(row[i]),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           const SizedBox(height: 8),
           Text(desc.tr, style: Theme.of(context).textTheme.labelLarge),
           if (mode != 0) ...[
@@ -379,6 +417,141 @@ class _SpatialTile extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+
+/// Slowed + Reverb / Nightcore: two Material 3 tonal cards and a speed slider.
+class _VibeTile extends StatelessWidget {
+  const _VibeTile({
+    required this.preset,
+    required this.speed,
+    required this.first,
+    required this.last,
+    required this.onPreset,
+    required this.onSpeed,
+  });
+
+  final int preset;
+  final double speed;
+  final bool first;
+  final bool last;
+  final ValueChanged<int> onPreset;
+  final ValueChanged<double> onSpeed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final range = switch (preset) {
+      1 => (0.65, 0.95),
+      2 => (1.05, 1.5),
+      _ => (1.0, 1.0),
+    };
+
+    Widget card(int value, IconData icon, String title, String sub) {
+      final on = preset == value;
+      return Expanded(
+        child: Material(
+          color: on ? scheme.secondaryContainer : scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(24),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: () => onPreset(on ? 0 : value),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: on ? scheme.primary : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: on ? scheme.primary : scheme.surfaceContainerLow,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(icon,
+                        size: 22,
+                        color: on ? scheme.onPrimary : scheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(title.tr,
+                      maxLines: 2,
+                      style: text.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: on
+                              ? scheme.onSecondaryContainer
+                              : scheme.onSurface)),
+                  const SizedBox(height: 2),
+                  Text(sub.tr,
+                      maxLines: 2,
+                      style: text.labelMedium?.copyWith(
+                          color: on
+                              ? scheme.onSecondaryContainer
+                              : scheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SettingEmptyTile(
+      isFirst: first,
+      isLast: last,
+      leading: const Icon(Icons.auto_awesome_rounded),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Sound Vibes'.tr,
+              style: text.bodyLarge
+                  ?.copyWith(fontSize: 16, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 4),
+          Text('One-tap styles that change speed, pitch and feel.'.tr,
+              style: text.labelLarge),
+          const SizedBox(height: 12),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                card(1, Icons.slow_motion_video_rounded, 'Slowed + Reverb',
+                    'Slower, deeper, in a big room'),
+                const SizedBox(width: 10),
+                card(2, Icons.bolt_rounded, 'Nightcore',
+                    'Faster and higher, full energy'),
+              ],
+            ),
+          ),
+          if (preset != 0) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text('Speed'.tr, style: text.labelLarge),
+                const Spacer(),
+                Text('${speed.toStringAsFixed(2)}×', style: text.labelLarge),
+              ],
+            ),
+            Slider(
+              value: speed.clamp(range.$1, range.$2),
+              min: range.$1,
+              max: range.$2,
+              divisions: ((range.$2 - range.$1) / 0.05).round(),
+              label: '${speed.toStringAsFixed(2)}×',
+              onChanged: onSpeed,
             ),
           ],
         ],
