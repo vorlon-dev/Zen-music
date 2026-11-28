@@ -189,7 +189,13 @@ class _AuroraPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final base = dark ? const Color(0xFF0B0B18) : const Color(0xFFF4F5FB);
+    // Dark mode is plain black — like other apps — with no coloured glow.
+    // (The violet / teal / rose aurora is a light-mode-only effect now.)
+    if (dark) {
+      canvas.drawRect(Offset.zero & size, Paint()..color = Colors.black);
+      return;
+    }
+    final base = const Color(0xFFF4F5FB);
     canvas.drawRect(Offset.zero & size, Paint()..color = base);
 
     final colors = dark ? _darkColors : _lightColors;

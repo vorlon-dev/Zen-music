@@ -10,9 +10,9 @@ class ZenM3Palette {
   static const Color darkPrimary = Color(0xFFAB47BC); // PixelPlayerPurplePrimary
   static const Color darkSecondary = Color(0xFFF06292); // PixelPlayerPink
   static const Color darkTertiary = Color(0xFFFF8A65); // PixelPlayerOrange
-  static const Color darkBackground = Color(0xFF1E1234); // PixelPlayerPurpleDark
-  static const Color darkSurface = Color(0xFF2A1F40); // PixelPlayerSurface
-  static const Color darkOnSurface = Color(0xFFE1BEE7); // PixelPlayerLightPurple
+  static const Color darkBackground = Color(0xFF000000); // true black
+  static const Color darkSurface = Color(0xFF0E0E0E);
+  static const Color darkOnSurface = Color(0xFFEDEDED);
   static const Color darkError = Color(0xFFFF5252);
 
   // Light scheme anchors.
@@ -35,21 +35,21 @@ class ZenM3Palette {
   /// Derived M3 dark containers (PixelMusic relies on MaterialTheme's
   /// defaults blended over the anchors — reproduced here so Windows and
   /// pre-channel builds match Android exactly).
-  static const Color darkPrimaryContainer = Color(0xFF3D2350);
-  static const Color darkOnPrimaryContainer = Color(0xFFF6D9FF);
-  static const Color darkSecondaryContainer = Color(0xFF4A2540);
-  static const Color darkOnSecondaryContainer = Color(0xFFFFD9E6);
-  static const Color darkTertiaryContainer = Color(0xFF57321E);
-  static const Color darkOnTertiaryContainer = Color(0xFFFFDBD1);
+  static const Color darkPrimaryContainer = Color(0xFF2A2A2A);
+  static const Color darkOnPrimaryContainer = Color(0xFFF2F2F2);
+  static const Color darkSecondaryContainer = Color(0xFF2A2A2A);
+  static const Color darkOnSecondaryContainer = Color(0xFFF2F2F2);
+  static const Color darkTertiaryContainer = Color(0xFF2A2A2A);
+  static const Color darkOnTertiaryContainer = Color(0xFFF2F2F2);
 
   /// M3 surface container ladder over the dark surface (PixelMusic lets
   /// the M3 defaults derive these; the ladder is tuned to sit on
   /// #2A1F40 without washing out).
-  static const Color darkSurfaceLowest = Color(0xFF150C27);
-  static const Color darkSurfaceLow = Color(0xFF241A38);
-  static const Color darkSurfaceContainer = Color(0xFF2E2244);
-  static const Color darkSurfaceContainerHigh = Color(0xFF392C4F);
-  static const Color darkSurfaceContainerHighest = Color(0xFF44375B);
+  static const Color darkSurfaceLowest = Color(0xFF000000);
+  static const Color darkSurfaceLow = Color(0xFF121212);
+  static const Color darkSurfaceContainer = Color(0xFF181818);
+  static const Color darkSurfaceContainerHigh = Color(0xFF1F1F1F);
+  static const Color darkSurfaceContainerHighest = Color(0xFF272727);
 
   /// Light M3 container ladder.
   static const Color lightSecondaryContainer = Color(0xFFFFD9E6);
