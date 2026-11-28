@@ -51,12 +51,12 @@ const double _kDockSideGap = 14;
 /// Space the page content must leave at the bottom for the dock.
 const double _kDockExtent = _kDockHeight + _kDockBottomGap;
 
-const double _kBubble = 50; // glowing circle diameter
-const double _kGlow = 76; // soft glow around it (gradient, not blur)
-const double _kBubbleCenterY = _kOverhang + 6; // circle centre, from dock top
-
-const double _kNotchHalf = 40;
-const double _kNotchDepth = 13;
+// Segmented Dynamic Bar: the active segment is a raised card that pops above
+// the bar's top edge.
+const double _kPop = 14; // how far the active card rises above the bar
+const double _kCardWidthFactor = 1.14; // active card width vs. one segment
+const double _kBarRadius = 24;
+const double _kCardRadius = 20;
 
 /// The mini pill's total wrapper height (64 pill + 10 internal bottom pad).
 const double _kMiniWrapHeight = 74;
@@ -831,7 +831,18 @@ class _SheetRectClipper extends CustomClipper<Path> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Floating-button dock
+//  Segmented Dynamic Bar
+//
+//  A rounded bar split into equal segments. The active segment is a raised
+//  card that lifts above the bar and glides between tabs on a spring.
+//
+//  Built to stay smooth on 1 GB phones:
+//   * no BackdropFilter / blur layer, no shader, no saveLayer (icons fade by
+//     colour alpha, not Opacity);
+//   * the bar, its dividers and the card's shadow are STATIC layers inside
+//     RepaintBoundaries — they are rasterised once;
+//   * per frame only two small widgets translate (Transform) and at most two
+//     icon/label pairs change colour alpha.
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _ZenDock extends StatefulWidget {
@@ -862,10 +873,12 @@ class _ZenDock extends StatefulWidget {
 
 class _ZenDockState extends State<_ZenDock>
     with SingleTickerProviderStateMixin {
+  // Close to critically damped (zeta ~0.83): a soft landing with a hint of
+  // life, never a wobble.
   static const _spring = SpringDescription(
     mass: 1,
     stiffness: 420,
-    damping: 30,
+    damping: 34,
   );
 
   late final AnimationController _pos; // value = tab position (0..n-1)
@@ -894,7 +907,8 @@ class _ZenDockState extends State<_ZenDock>
     if (MediaQuery.of(context).disableAnimations) {
       _pos.value = target;
     } else {
-      _pos.animateWith(SpringSimulation(_spring, _pos.value, target, _pos.velocity));
+      _pos.animateWith(
+          SpringSimulation(_spring, _pos.value, target, _pos.velocity));
     }
   }
 
@@ -927,19 +941,15 @@ class _ZenDockState extends State<_ZenDock>
 
     final liquid = GetIt.I<SettingsManager>().liquidGlass;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Liquid theme: surface colours are translucent, so the dock gets the
-    // frost recipe (blur layer below + ~80% slab) instead of a see-through
-    // fill that let covers and text show through.
+    // Liquid theme keeps its frosted-slab colour, but WITHOUT a live blur
+    // layer (that is the expensive part on low-end GPUs).
     final barFill = liquid ? ZenFrost.slab(isDark) : cs.surfaceContainerHigh;
-    final barStroke = cs.primary.withValues(alpha: 0.32);
-
-    // Built once per selection change, then only translated while animating.
-    final bubble = _Bubble(
-      icon: _ZenDock._activeIcons[slot],
-      slot: slot,
-      color: cs.primary,
-      iconColor: cs.onPrimary,
+    final line = cs.outlineVariant.withValues(alpha: isDark ? 0.45 : 0.65);
+    final cardFill = Color.alphaBlend(
+      cs.primary.withValues(alpha: isDark ? 0.16 : 0.08),
+      isDark ? cs.surfaceContainerHighest : cs.surface,
     );
+    final shadow = Colors.black.withValues(alpha: isDark ? 0.5 : 0.18);
 
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: 1.15,
@@ -952,6 +962,14 @@ class _ZenDockState extends State<_ZenDock>
             builder: (context, box) {
               final width = box.maxWidth;
               final itemW = width / n;
+              final cardW = itemW * _kCardWidthFactor;
+              const cardH = _kBarHeight + _kPop;
+              const cardTop = _kOverhang - _kPop;
+
+              double cardLeft(double pos) =>
+                  ((pos + 0.5) * itemW - cardW / 2)
+                      .clamp(0.0, width - cardW)
+                      .toDouble();
 
               return SizedBox(
                 height: _kDockHeight,
@@ -975,47 +993,25 @@ class _ZenDockState extends State<_ZenDock>
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      // 0) Frost: blur of whatever scrolls under the dock.
-                      if (liquid)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          top: _kOverhang,
-                          height: _kBarHeight,
-                          child: RepaintBoundary(
-                            child: ClipRRect(
-                              borderRadius:
-                              BorderRadius.circular(_kBarHeight / 2),
-                              child: BackdropFilter(
-                                filter: ZenFrost.blur,
-                                child: const SizedBox.expand(),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                      // 1) Bar outline with the moving notch.
+                      // 1) Bar + dividers (static, rasterised once).
                       Positioned(
                         left: 0,
                         right: 0,
                         top: _kOverhang,
                         height: _kBarHeight,
                         child: RepaintBoundary(
-                          child: AnimatedBuilder(
-                            animation: _pos,
-                            builder: (context, _) => CustomPaint(
-                              painter: _BarPainter(
-                                pos: _pos.value,
-                                itemWidth: itemW,
-                                fill: barFill,
-                                stroke: barStroke,
-                              ),
+                          child: CustomPaint(
+                            painter: _SegBarPainter(
+                              segments: n,
+                              fill: barFill,
+                              line: line,
+                              shadow: shadow,
                             ),
                           ),
                         ),
                       ),
 
-                      // 2) Icons + labels (static; no per-frame work).
+                      // 2) Idle icons + labels (static).
                       Positioned(
                         left: 0,
                         right: 0,
@@ -1025,12 +1021,11 @@ class _ZenDockState extends State<_ZenDock>
                           children: [
                             for (var i = 0; i < n; i++)
                               Expanded(
-                                child: _DockItem(
+                                child: _SegItem(
                                   label: _ZenDock._labels[i],
                                   icon: _ZenDock._icons[i],
+                                  color: cs.onSurfaceVariant,
                                   selected: i == slot,
-                                  activeColor: cs.onSurface,
-                                  idleColor: cs.onSurfaceVariant,
                                   onTap: () => widget
                                       .onSelect(kZenMobileBranchOrder[i]),
                                 ),
@@ -1039,24 +1034,77 @@ class _ZenDockState extends State<_ZenDock>
                         ),
                       ),
 
-                      // 3) Glowing circle: Transform only → no repaint.
+                      // 3) The raised card: its decoration is built ONCE and
+                      //    cached as a layer; only a translate runs per frame.
                       Positioned(
                         left: 0,
-                        top: _kBubbleCenterY - _kGlow / 2,
+                        top: cardTop,
                         child: IgnorePointer(
-                          child: RepaintBoundary(
-                            child: AnimatedBuilder(
-                              animation: _pos,
-                              child: bubble,
-                              builder: (context, child) =>
-                                  Transform.translate(
-                                    offset: Offset(
-                                      (_pos.value + 0.5) * itemW - _kGlow / 2,
-                                      0,
-                                    ),
-                                    child: child,
+                          child: AnimatedBuilder(
+                            animation: _pos,
+                            child: RepaintBoundary(
+                              child: Container(
+                                width: cardW,
+                                height: cardH,
+                                decoration: BoxDecoration(
+                                  color: cardFill,
+                                  borderRadius:
+                                      BorderRadius.circular(_kCardRadius),
+                                  border: Border.all(
+                                    color:
+                                        cs.primary.withValues(alpha: 0.28),
                                   ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: shadow,
+                                      blurRadius: 14,
+                                      offset: const Offset(0, 5),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
+                            builder: (context, child) => Transform.translate(
+                              offset: Offset(cardLeft(_pos.value), 0),
+                              child: child,
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 4) The card's icon + label. They ride with the card
+                      //    and cross-fade by COLOUR alpha between segments.
+                      Positioned(
+                        left: 0,
+                        top: cardTop,
+                        child: IgnorePointer(
+                          child: AnimatedBuilder(
+                            animation: _pos,
+                            builder: (context, _) {
+                              final pos = _pos.value;
+                              return Transform.translate(
+                                offset: Offset(cardLeft(pos), 0),
+                                child: SizedBox(
+                                  width: cardW,
+                                  height: cardH,
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      for (var i = 0; i < n; i++)
+                                        if ((1 - (pos - i).abs()) > 0.01)
+                                          _CardContent(
+                                            icon: _ZenDock._activeIcons[i],
+                                            label: _ZenDock._labels[i],
+                                            color: cs.onSurface.withValues(
+                                              alpha: (1 - (pos - i).abs())
+                                                  .clamp(0.0, 1.0),
+                                            ),
+                                          ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                         ),
                       ),
@@ -1072,130 +1120,44 @@ class _ZenDockState extends State<_ZenDock>
   }
 }
 
-// ── Glowing circle ──────────────────────────────────────────────────────────
-class _Bubble extends StatelessWidget {
-  const _Bubble({
-    required this.icon,
-    required this.slot,
-    required this.color,
-    required this.iconColor,
-  });
-
-  final IconData icon;
-  final int slot;
-  final Color color;
-  final Color iconColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final light = Color.lerp(color, Colors.white, 0.28)!;
-    return SizedBox(
-      width: _kGlow,
-      height: _kGlow,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Soft glow = plain radial gradient (much cheaper than a blur).
-          DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  color.withValues(alpha: 0.34),
-                  color.withValues(alpha: 0.0),
-                ],
-                stops: const [0.6, 1.0],
-              ),
-            ),
-            child: const SizedBox.expand(),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [light, color],
-              ),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.22),
-                width: 1,
-              ),
-            ),
-            child: SizedBox(
-              width: _kBubble,
-              height: _kBubble,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 260),
-                switchInCurve: Curves.easeOutBack,
-                transitionBuilder: (child, anim) => FadeTransition(
-                  opacity: anim,
-                  child: ScaleTransition(
-                    scale: Tween<double>(begin: 0.7, end: 1.0).animate(anim),
-                    child: child,
-                  ),
-                ),
-                child: Icon(
-                  icon,
-                  key: ValueKey<int>(slot),
-                  size: 24,
-                  color: iconColor,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── One tab: icon + label ───────────────────────────────────────────────────
-class _DockItem extends StatelessWidget {
-  const _DockItem({
+/// One idle segment: icon over a small label.
+class _SegItem extends StatelessWidget {
+  const _SegItem({
     required this.label,
     required this.icon,
+    required this.color,
     required this.selected,
-    required this.activeColor,
-    required this.idleColor,
     required this.onTap,
   });
 
   final String label;
   final IconData icon;
+  final Color color;
   final bool selected;
-  final Color activeColor;
-  final Color idleColor;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? activeColor : idleColor;
     return Semantics(
       button: true,
       selected: selected,
       label: label,
-      onTap: onTap,
       excludeSemantics: true,
+      onTap: onTap,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // The active icon lives inside the circle, so hide it here.
-          AnimatedOpacity(
-            opacity: selected ? 0.0 : 1.0,
-            duration: const Duration(milliseconds: 140),
-            child: Icon(icon, size: 24, color: idleColor),
-          ),
+          Icon(icon, size: 24, color: color),
           const SizedBox(height: 3),
           Text(
             label,
             maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.clip,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 11.5,
+              fontSize: 11,
               height: 1.1,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.2,
               color: color,
             ),
           ),
@@ -1205,68 +1167,79 @@ class _DockItem extends StatelessWidget {
   }
 }
 
-// ── Pill bar with a notch that follows the circle ───────────────────────────
-class _BarPainter extends CustomPainter {
-  _BarPainter({
-    required this.pos,
-    required this.itemWidth,
-    required this.fill,
-    required this.stroke,
+/// The active segment's icon + bold label (lives inside the raised card).
+class _CardContent extends StatelessWidget {
+  const _CardContent({
+    required this.icon,
+    required this.label,
+    required this.color,
   });
 
-  final double pos;
-  final double itemWidth;
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 26, color: color),
+        const SizedBox(height: 3),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 11,
+            height: 1.1,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Bar body: rounded slab, soft drop shadow, thin segment dividers.
+class _SegBarPainter extends CustomPainter {
+  const _SegBarPainter({
+    required this.segments,
+    required this.fill,
+    required this.line,
+    required this.shadow,
+  });
+
+  final int segments;
   final Color fill;
-  final Color stroke;
+  final Color line;
+  final Color shadow;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final rc = h / 2; // full pill
-    final cx = (pos + 0.5) * itemWidth;
-
-    // Notch limits, kept inside the straight part of the top edge.
-    final a = math.max(rc, cx - _kNotchHalf);
-    final b = math.min(w - rc, cx + _kNotchHalf);
-    final nw = b - a;
-
-    final path = Path()..moveTo(rc, 0);
-
-    if (nw > 6) {
-      final depth =
-          _kNotchDepth * (nw / (2 * _kNotchHalf)).clamp(0.35, 1.0).toDouble();
-      path
-        ..lineTo(a, 0)
-        ..cubicTo(a + nw * 0.28, 0, a + nw * 0.18, depth, a + nw * 0.5, depth)
-        ..cubicTo(b - nw * 0.18, depth, b - nw * 0.28, 0, b, 0);
-    }
-
-    path
-      ..lineTo(w - rc, 0)
-      ..arcToPoint(Offset(w, rc), radius: Radius.circular(rc))
-      ..lineTo(w, h - rc)
-      ..arcToPoint(Offset(w - rc, h), radius: Radius.circular(rc))
-      ..lineTo(rc, h)
-      ..arcToPoint(Offset(0, h - rc), radius: Radius.circular(rc))
-      ..lineTo(0, rc)
-      ..arcToPoint(Offset(rc, 0), radius: Radius.circular(rc))
-      ..close();
-
-    canvas.drawPath(path, Paint()..color = fill);
-    canvas.drawPath(
-      path,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..color = stroke,
+    final rrect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      const Radius.circular(_kBarRadius),
     );
+    canvas.drawShadow(Path()..addRRect(rrect), shadow, 6, false);
+    canvas.drawRRect(rrect, Paint()..color = fill);
+
+    final p = Paint()
+      ..color = line
+      ..strokeWidth = 1;
+    final w = size.width / segments;
+    for (var i = 1; i < segments; i++) {
+      final x = (w * i).roundToDouble() + 0.5;
+      canvas.drawLine(Offset(x, 16), Offset(x, size.height - 16), p);
+    }
   }
 
   @override
-  bool shouldRepaint(covariant _BarPainter o) =>
-      o.pos != pos ||
-          o.itemWidth != itemWidth ||
-          o.fill != fill ||
-          o.stroke != stroke;
+  bool shouldRepaint(covariant _SegBarPainter old) =>
+      old.segments != segments ||
+      old.fill != fill ||
+      old.line != line ||
+      old.shadow != shadow;
 }
