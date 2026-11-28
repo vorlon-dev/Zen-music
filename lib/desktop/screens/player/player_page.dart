@@ -347,8 +347,32 @@ class _PlayerPageState extends State<PlayerPage>
         ),
       );
 
+  /// Inside the mobile shell's sheet the page is built on pointer-down, i.e.
+  /// right before the open animation. Starting the canvas lookup + video
+  /// decoder at that moment lands heavy work in the middle of the travel and
+  /// drops frames. Wait until the sheet is (almost) fully open instead; the
+  /// canvas then fades in on a calm frame. Never waits more than 3 s, and
+  /// not at all on desktop / standalone (no sheet offset).
+  Future<void> _waitForSheetSettled() async {
+    final l = widget.sheetOffset;
+    if (l == null || l.value >= 0.98) return;
+    final done = Completer<void>();
+    void check() {
+      if (l.value >= 0.98 && !done.isCompleted) done.complete();
+    }
+
+    l.addListener(check);
+    try {
+      await done.future.timeout(const Duration(seconds: 3), onTimeout: () {});
+    } finally {
+      l.removeListener(check);
+    }
+  }
+
   Future<void> _maybeLoadVideoBackdrop() async {
     if (!AppearancePrefs.canvasEnabled.value) return;
+    await _waitForSheetSettled();
+    if (!mounted) return;
     final id = currentSong?.id ?? '';
     final song = currentSong;
     final spUri = song?.extras?['spotifyUri'] as String?;
