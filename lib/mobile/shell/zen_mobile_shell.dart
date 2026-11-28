@@ -42,21 +42,12 @@ const List<int> kZenMobileBranchOrder = [0, 1, 2, 3, 4];
 const int _kDiscoverBranch = 2; // Home, Search, Discover, Saved, Settings
 
 // ── Dock geometry ───────────────────────────────────────────────────────────
-const double _kBarHeight = 64; // pill bar
-const double _kOverhang = 24; // how far the circle area sticks above the bar
-const double _kDockHeight = _kBarHeight + _kOverhang;
+const double _kDockHeight = 64; // floating pill bar
 const double _kDockBottomGap = 10;
 const double _kDockSideGap = 14;
 
 /// Space the page content must leave at the bottom for the dock.
 const double _kDockExtent = _kDockHeight + _kDockBottomGap;
-
-const double _kBubble = 50; // glowing circle diameter
-const double _kGlow = 76; // soft glow around it (gradient, not blur)
-const double _kBubbleCenterY = _kOverhang + 6; // circle centre, from dock top
-
-const double _kNotchHalf = 40;
-const double _kNotchDepth = 13;
 
 /// The mini pill's total wrapper height (64 pill + 10 internal bottom pad).
 const double _kMiniWrapHeight = 74;
@@ -831,7 +822,12 @@ class _SheetRectClipper extends CustomClipper<Path> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Floating-button dock
+//  Bottom navigation — floating black pill ("cinema" style)
+//
+//  A black rounded bar with five tabs. The selected tab turns white with a
+//  filled icon and a bold label; the others are dimmed. No sliding indicator,
+//  no blur, no shaders: the bar and its shadow are one static layer, and each
+//  tab only lerps a colour when selected — as light as a nav bar gets.
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _ZenDock extends StatefulWidget {
@@ -860,48 +856,13 @@ class _ZenDock extends StatefulWidget {
   State<_ZenDock> createState() => _ZenDockState();
 }
 
-class _ZenDockState extends State<_ZenDock>
-    with SingleTickerProviderStateMixin {
-  static const _spring = SpringDescription(
-    mass: 1,
-    stiffness: 420,
-    damping: 30,
-  );
-
-  late final AnimationController _pos; // value = tab position (0..n-1)
+class _ZenDockState extends State<_ZenDock> {
   int? _downBranch;
   bool _changedWhileDown = false;
 
   int _slotOf(int branch) {
     final i = kZenMobileBranchOrder.indexOf(branch);
     return i < 0 ? 0 : i;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _pos = AnimationController.unbounded(
-      vsync: this,
-      value: _slotOf(widget.currentIndex).toDouble(),
-    );
-  }
-
-  @override
-  void didUpdateWidget(covariant _ZenDock old) {
-    super.didUpdateWidget(old);
-    if (old.currentIndex == widget.currentIndex) return;
-    final target = _slotOf(widget.currentIndex).toDouble();
-    if (MediaQuery.of(context).disableAnimations) {
-      _pos.value = target;
-    } else {
-      _pos.animateWith(SpringSimulation(_spring, _pos.value, target, _pos.velocity));
-    }
-  }
-
-  @override
-  void dispose() {
-    _pos.dispose();
-    super.dispose();
   }
 
   // ── Touch handling: plain pointer math, no render-object lookups ─────────
@@ -921,25 +882,15 @@ class _ZenDockState extends State<_ZenDock>
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final n = kZenMobileBranchOrder.length;
     final slot = _slotOf(widget.currentIndex);
 
-    final liquid = GetIt.I<SettingsManager>().liquidGlass;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Liquid theme: surface colours are translucent, so the dock gets the
-    // frost recipe (blur layer below + ~80% slab) instead of a see-through
-    // fill that let covers and text show through.
-    final barFill = liquid ? ZenFrost.slab(isDark) : cs.surfaceContainerHigh;
-    final barStroke = cs.primary.withValues(alpha: 0.32);
-
-    // Built once per selection change, then only translated while animating.
-    final bubble = _Bubble(
-      icon: _ZenDock._activeIcons[slot],
-      slot: slot,
-      color: cs.primary,
-      iconColor: cs.onPrimary,
-    );
+    // Black in both themes (as in the design); a hairline rim keeps it
+    // readable on pure-black pages.
+    final barColor = isDark ? const Color(0xFF0A0A0A) : const Color(0xFF111111);
+    final rim = Colors.white.withValues(alpha: isDark ? 0.10 : 0.06);
+    final shadow = Colors.black.withValues(alpha: isDark ? 0.6 : 0.25);
 
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: 1.15,
@@ -951,8 +902,6 @@ class _ZenDockState extends State<_ZenDock>
           child: LayoutBuilder(
             builder: (context, box) {
               final width = box.maxWidth;
-              final itemW = width / n;
-
               return SizedBox(
                 height: _kDockHeight,
                 child: Listener(
@@ -973,92 +922,41 @@ class _ZenDockState extends State<_ZenDock>
                   },
                   onPointerCancel: (_) => _downBranch = null,
                   child: Stack(
-                    clipBehavior: Clip.none,
                     children: [
-                      // 0) Frost: blur of whatever scrolls under the dock.
-                      if (liquid)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          top: _kOverhang,
-                          height: _kBarHeight,
-                          child: RepaintBoundary(
-                            child: ClipRRect(
-                              borderRadius:
-                              BorderRadius.circular(_kBarHeight / 2),
-                              child: BackdropFilter(
-                                filter: ZenFrost.blur,
-                                child: const SizedBox.expand(),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                      // 1) Bar outline with the moving notch.
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        top: _kOverhang,
-                        height: _kBarHeight,
+                      // Static bar + shadow (rasterised once).
+                      Positioned.fill(
                         child: RepaintBoundary(
-                          child: AnimatedBuilder(
-                            animation: _pos,
-                            builder: (context, _) => CustomPaint(
-                              painter: _BarPainter(
-                                pos: _pos.value,
-                                itemWidth: itemW,
-                                fill: barFill,
-                                stroke: barStroke,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      // 2) Icons + labels (static; no per-frame work).
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        top: _kOverhang,
-                        height: _kBarHeight,
-                        child: Row(
-                          children: [
-                            for (var i = 0; i < n; i++)
-                              Expanded(
-                                child: _DockItem(
-                                  label: _ZenDock._labels[i],
-                                  icon: _ZenDock._icons[i],
-                                  selected: i == slot,
-                                  activeColor: cs.onSurface,
-                                  idleColor: cs.onSurfaceVariant,
-                                  onTap: () => widget
-                                      .onSelect(kZenMobileBranchOrder[i]),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: barColor,
+                              borderRadius:
+                              BorderRadius.circular(_kDockHeight / 2),
+                              border: Border.all(color: rim),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: shadow,
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 6),
                                 ),
-                              ),
-                          ],
-                        ),
-                      ),
-
-                      // 3) Glowing circle: Transform only → no repaint.
-                      Positioned(
-                        left: 0,
-                        top: _kBubbleCenterY - _kGlow / 2,
-                        child: IgnorePointer(
-                          child: RepaintBoundary(
-                            child: AnimatedBuilder(
-                              animation: _pos,
-                              child: bubble,
-                              builder: (context, child) =>
-                                  Transform.translate(
-                                    offset: Offset(
-                                      (_pos.value + 0.5) * itemW - _kGlow / 2,
-                                      0,
-                                    ),
-                                    child: child,
-                                  ),
+                              ],
                             ),
                           ),
                         ),
+                      ),
+                      Row(
+                        children: [
+                          for (var i = 0; i < n; i++)
+                            Expanded(
+                              child: _CinemaTab(
+                                label: _ZenDock._labels[i],
+                                icon: _ZenDock._icons[i],
+                                activeIcon: _ZenDock._activeIcons[i],
+                                selected: i == slot,
+                                onSemanticTap: () => widget
+                                    .onSelect(kZenMobileBranchOrder[i]),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),
@@ -1072,201 +970,63 @@ class _ZenDockState extends State<_ZenDock>
   }
 }
 
-// ── Glowing circle ──────────────────────────────────────────────────────────
-class _Bubble extends StatelessWidget {
-  const _Bubble({
-    required this.icon,
-    required this.slot,
-    required this.color,
-    required this.iconColor,
-  });
-
-  final IconData icon;
-  final int slot;
-  final Color color;
-  final Color iconColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final light = Color.lerp(color, Colors.white, 0.28)!;
-    return SizedBox(
-      width: _kGlow,
-      height: _kGlow,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Soft glow = plain radial gradient (much cheaper than a blur).
-          DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  color.withValues(alpha: 0.34),
-                  color.withValues(alpha: 0.0),
-                ],
-                stops: const [0.6, 1.0],
-              ),
-            ),
-            child: const SizedBox.expand(),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [light, color],
-              ),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.22),
-                width: 1,
-              ),
-            ),
-            child: SizedBox(
-              width: _kBubble,
-              height: _kBubble,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 260),
-                switchInCurve: Curves.easeOutBack,
-                transitionBuilder: (child, anim) => FadeTransition(
-                  opacity: anim,
-                  child: ScaleTransition(
-                    scale: Tween<double>(begin: 0.7, end: 1.0).animate(anim),
-                    child: child,
-                  ),
-                ),
-                child: Icon(
-                  icon,
-                  key: ValueKey<int>(slot),
-                  size: 24,
-                  color: iconColor,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── One tab: icon + label ───────────────────────────────────────────────────
-class _DockItem extends StatelessWidget {
-  const _DockItem({
+/// One tab: icon over label. Selected = white + filled icon + bold label,
+/// idle = dimmed. The change is a short colour lerp (no layers).
+class _CinemaTab extends StatelessWidget {
+  const _CinemaTab({
     required this.label,
     required this.icon,
+    required this.activeIcon,
     required this.selected,
-    required this.activeColor,
-    required this.idleColor,
-    required this.onTap,
+    required this.onSemanticTap,
   });
 
   final String label;
   final IconData icon;
+  final IconData activeIcon;
   final bool selected;
-  final Color activeColor;
-  final Color idleColor;
-  final VoidCallback onTap;
+  final VoidCallback onSemanticTap;
+
+  static const _idle = Color(0x99FFFFFF); // white @ 60 %
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? activeColor : idleColor;
     return Semantics(
       button: true,
       selected: selected,
       label: label,
-      onTap: onTap,
       excludeSemantics: true,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // The active icon lives inside the circle, so hide it here.
-          AnimatedOpacity(
-            opacity: selected ? 0.0 : 1.0,
-            duration: const Duration(milliseconds: 140),
-            child: Icon(icon, size: 24, color: idleColor),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.clip,
-            style: TextStyle(
-              fontSize: 11.5,
-              height: 1.1,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              color: color,
-            ),
-          ),
-        ],
+      onTap: onSemanticTap,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(end: selected ? 1.0 : 0.0),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        builder: (context, t, _) {
+          final color = Color.lerp(_idle, Colors.white, t)!;
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Transform.scale(
+                scale: 1 + 0.08 * t,
+                child: Icon(selected ? activeIcon : icon, size: 26, color: color),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.1,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  letterSpacing: 0.1,
+                  color: color,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
-}
-
-// ── Pill bar with a notch that follows the circle ───────────────────────────
-class _BarPainter extends CustomPainter {
-  _BarPainter({
-    required this.pos,
-    required this.itemWidth,
-    required this.fill,
-    required this.stroke,
-  });
-
-  final double pos;
-  final double itemWidth;
-  final Color fill;
-  final Color stroke;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final rc = h / 2; // full pill
-    final cx = (pos + 0.5) * itemWidth;
-
-    // Notch limits, kept inside the straight part of the top edge.
-    final a = math.max(rc, cx - _kNotchHalf);
-    final b = math.min(w - rc, cx + _kNotchHalf);
-    final nw = b - a;
-
-    final path = Path()..moveTo(rc, 0);
-
-    if (nw > 6) {
-      final depth =
-          _kNotchDepth * (nw / (2 * _kNotchHalf)).clamp(0.35, 1.0).toDouble();
-      path
-        ..lineTo(a, 0)
-        ..cubicTo(a + nw * 0.28, 0, a + nw * 0.18, depth, a + nw * 0.5, depth)
-        ..cubicTo(b - nw * 0.18, depth, b - nw * 0.28, 0, b, 0);
-    }
-
-    path
-      ..lineTo(w - rc, 0)
-      ..arcToPoint(Offset(w, rc), radius: Radius.circular(rc))
-      ..lineTo(w, h - rc)
-      ..arcToPoint(Offset(w - rc, h), radius: Radius.circular(rc))
-      ..lineTo(rc, h)
-      ..arcToPoint(Offset(0, h - rc), radius: Radius.circular(rc))
-      ..lineTo(0, rc)
-      ..arcToPoint(Offset(rc, 0), radius: Radius.circular(rc))
-      ..close();
-
-    canvas.drawPath(path, Paint()..color = fill);
-    canvas.drawPath(
-      path,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..color = stroke,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _BarPainter o) =>
-      o.pos != pos ||
-          o.itemWidth != itemWidth ||
-          o.fill != fill ||
-          o.stroke != stroke;
 }

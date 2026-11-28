@@ -8,7 +8,7 @@ import 'm3_tokens.dart';
 /// Font family declared in pubspec.yaml (assets/fonts/gflex_variable.ttf).
 const String kZenM3FontFamily = 'ZenSansFlex';
 
-const Color _darkOnSurfaceVariant = Color(0xFFCBBCF0);
+const Color _darkOnSurfaceVariant = Color(0xFFB8B8B8);
 const Color _lightOnPrimary = Color(0xFFFFFFFF);
 
 TextStyle _m3Text(
@@ -114,9 +114,9 @@ ColorScheme _darkScheme() {
     surfaceContainer: ZenM3Palette.darkSurfaceContainer,
     surfaceContainerHigh: ZenM3Palette.darkSurfaceContainerHigh,
     surfaceContainerHighest: ZenM3Palette.darkSurfaceContainerHighest,
-    outline: Color(0xFF9A8FB5),
-    outlineVariant: Color(0xFF4E4365),
-    surfaceTint: ZenM3Palette.darkPrimary,
+    outline: Color(0xFF8A8A8A),
+    outlineVariant: Color(0xFF2E2E2E),
+    surfaceTint: Colors.transparent,
     scrim: ZenM3Palette.black,
   );
 }

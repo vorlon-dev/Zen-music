@@ -30,7 +30,7 @@ class SettingsManager extends ChangeNotifier {
   bool _amoledBlack = true;
   bool _dynamicColors = false;
   bool _liquidGlass = false;
-  String _uiTheme = 'classic';
+  String _uiTheme = 'm3'; // default look: Material 3
   bool _equalizerEnabled = false;
   List<double> _equalizerBandsGain = [];
   bool _loudnessEnabled = false;
@@ -64,7 +64,8 @@ class SettingsManager extends ChangeNotifier {
     _init();
   }
   _init() {
-    _themeMode = _themeModes[_box.get('THEME_MODE', defaultValue: 0)];
+    // Default: white (light) theme. 0 = system, 1 = light, 2 = dark.
+    _themeMode = _themeModes[_box.get('THEME_MODE', defaultValue: 1)];
     _language = _languages.firstWhere((language) =>
     language['value'] == _box.get('LANGUAGE', defaultValue: 'en-IN'));
     _autofetchSongs = _box.get('AUTOFETCH_SONGS', defaultValue: true);
@@ -75,7 +76,7 @@ class SettingsManager extends ChangeNotifier {
     _dynamicColors = _box.get('DYNAMIC_COLORS', defaultValue: false);
     _liquidGlass = _box.get('LIQUID_GLASS', defaultValue: false);
     _uiTheme = _box.get('UI_THEME') as String? ??
-        (_liquidGlass ? 'liquid' : 'classic');
+        (_liquidGlass ? 'liquid' : 'm3');
     _liquidGlass = _uiTheme == 'liquid';
 
     _location = _countries.firstWhere((country) =>

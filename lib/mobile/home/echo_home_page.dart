@@ -220,6 +220,16 @@ class _EchoFeed extends StatelessWidget {
         if (state.chips.isNotEmpty)
           SliverToBoxAdapter(child: _EchoChipsRow(chips: state.chips)),
 
+        // Hero carousel - the first thing on the page. While the feed has not
+        // arrived yet a hero-shaped skeleton holds its place, so nothing
+        // jumps when the real cards appear.
+        if (hero != null && (hero['contents'] as List?)?.isNotEmpty == true)
+          SliverToBoxAdapter(
+            child: _EchoHeroCarousel(items: hero['contents'] as List),
+          )
+        else if (state.sections.isEmpty)
+          const SliverToBoxAdapter(child: _EchoHeroSkeleton()),
+
         // Zen feature cards keep working, placed like Echo's entry card.
         SliverToBoxAdapter(child: SmartMixCard()),
 
@@ -233,12 +243,6 @@ class _EchoFeed extends StatelessWidget {
         EchoChartsGroup(key: chartsKey),
 
         SliverToBoxAdapter(child: YtmAccountSection(key: ytmKey)),
-
-        // Hero carousel.
-        if (hero != null && (hero['contents'] as List?)?.isNotEmpty == true)
-          SliverToBoxAdapter(
-            child: _EchoHeroCarousel(items: hero['contents'] as List),
-          ),
 
         // Sections.
         ...shelves.map((sec) {
@@ -1959,6 +1963,33 @@ class _EchoSlideRotateInState extends State<_EchoSlideRotateIn>
         );
       },
       child: widget.child,
+    );
+  }
+}
+
+
+/// Hero-shaped skeleton: big rounded blocks peeking at the edges. Holds the
+/// hero's place at the top of the page until the feed has loaded.
+class _EchoHeroSkeleton extends StatelessWidget {
+  const _EchoHeroSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return _EchoShimmerScope(
+      child: SizedBox(
+        height: _kHeroHeight + 12,
+        child: ListView.separated(
+          physics: const NeverScrollableScrollPhysics(),
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          itemCount: 3,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (_, __) => _EchoShimmerBox(
+            width: MediaQuery.of(context).size.width - 48,
+            borderRadius: BorderRadius.circular(_kHeroCorner),
+          ),
+        ),
+      ),
     );
   }
 }
