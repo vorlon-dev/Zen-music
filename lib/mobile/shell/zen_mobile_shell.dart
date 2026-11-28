@@ -42,9 +42,9 @@ const List<int> kZenMobileBranchOrder = [0, 1, 2, 3, 4];
 const int _kDiscoverBranch = 2; // Home, Search, Discover, Saved, Settings
 
 // ── Dock geometry ───────────────────────────────────────────────────────────
-const double _kDockHeight = 72; // Material 3 NavigationBar
-const double _kDockBottomGap = 0;
-const double _kDockSideGap = 14; // mini pill side margin (liquid theme)
+const double _kDockHeight = 64; // floating pill bar
+const double _kDockBottomGap = 10;
+const double _kDockSideGap = 14;
 
 /// Space the page content must leave at the bottom for the dock.
 const double _kDockExtent = _kDockHeight + _kDockBottomGap;
@@ -822,13 +822,15 @@ class _SheetRectClipper extends CustomClipper<Path> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Bottom navigation — standard Material 3 NavigationBar
+//  Bottom navigation — floating black pill ("cinema" style)
 //
-//  The framework's own widget: tuned, accessible and cheap. Only the
-//  selection pill animates; no custom painting, no blur layer.
+//  A black rounded bar with five tabs. The selected tab turns white with a
+//  filled icon and a bold label; the others are dimmed. No sliding indicator,
+//  no blur, no shaders: the bar and its shadow are one static layer, and each
+//  tab only lerps a colour when selected — as light as a nav bar gets.
 // ═══════════════════════════════════════════════════════════════════════════
 
-class _ZenDock extends StatelessWidget {
+class _ZenDock extends StatefulWidget {
   const _ZenDock({required this.currentIndex, required this.onSelect});
 
   final int currentIndex;
@@ -850,54 +852,180 @@ class _ZenDock extends StatelessWidget {
     Icons.settings_rounded,
   ];
 
+  @override
+  State<_ZenDock> createState() => _ZenDockState();
+}
+
+class _ZenDockState extends State<_ZenDock> {
+  int? _downBranch;
+  bool _changedWhileDown = false;
+
   int _slotOf(int branch) {
     final i = kZenMobileBranchOrder.indexOf(branch);
     return i < 0 ? 0 : i;
   }
 
+  // ── Touch handling: plain pointer math, no render-object lookups ─────────
+  int _branchAt(double dx, double width) {
+    final n = kZenMobileBranchOrder.length;
+    final slot = (dx / (width / n)).floor().clamp(0, n - 1).toInt();
+    return kZenMobileBranchOrder[slot];
+  }
+
+  void _pick(double dx, double width) {
+    final branch = _branchAt(dx, width);
+    if (branch == widget.currentIndex) return;
+    _changedWhileDown = true;
+    HapticFeedback.selectionClick();
+    widget.onSelect(branch);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final liquid = GetIt.I<SettingsManager>().liquidGlass;
-    final slot = _slotOf(currentIndex);
+    final n = kZenMobileBranchOrder.length;
+    final slot = _slotOf(widget.currentIndex);
+
+    // Black in both themes (as in the design); a hairline rim keeps it
+    // readable on pure-black pages.
+    final barColor = isDark ? const Color(0xFF0A0A0A) : const Color(0xFF111111);
+    final rim = Colors.white.withValues(alpha: isDark ? 0.10 : 0.06);
+    final shadow = Colors.black.withValues(alpha: isDark ? 0.6 : 0.25);
 
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: 1.15,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(
-              color: cs.outlineVariant.withValues(alpha: isDark ? 0.35 : 0.5),
-              width: 0.5,
-            ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              _kDockSideGap, 0, _kDockSideGap, _kDockBottomGap),
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final width = box.maxWidth;
+              return SizedBox(
+                height: _kDockHeight,
+                child: Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: (e) {
+                    _changedWhileDown = false;
+                    _downBranch = _branchAt(e.localPosition.dx, width);
+                    _pick(e.localPosition.dx, width);
+                  },
+                  onPointerMove: (e) => _pick(e.localPosition.dx, width),
+                  onPointerUp: (e) {
+                    // Re-tap on the active tab → pop to its root.
+                    if (!_changedWhileDown &&
+                        _downBranch == widget.currentIndex) {
+                      widget.onSelect(widget.currentIndex);
+                    }
+                    _downBranch = null;
+                  },
+                  onPointerCancel: (_) => _downBranch = null,
+                  child: Stack(
+                    children: [
+                      // Static bar + shadow (rasterised once).
+                      Positioned.fill(
+                        child: RepaintBoundary(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: barColor,
+                              borderRadius:
+                                  BorderRadius.circular(_kDockHeight / 2),
+                              border: Border.all(color: rim),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: shadow,
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 6),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          for (var i = 0; i < n; i++)
+                            Expanded(
+                              child: _CinemaTab(
+                                label: _ZenDock._labels[i],
+                                icon: _ZenDock._icons[i],
+                                activeIcon: _ZenDock._activeIcons[i],
+                                selected: i == slot,
+                                onSemanticTap: () => widget
+                                    .onSelect(kZenMobileBranchOrder[i]),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         ),
-        child: NavigationBar(
-          height: _kDockHeight,
-          selectedIndex: slot,
-          backgroundColor:
-              liquid ? ZenFrost.slab(isDark) : cs.surfaceContainer,
-          surfaceTintColor: Colors.transparent,
-          shadowColor: Colors.transparent,
-          elevation: 0,
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          onDestinationSelected: (i) {
-            final branch = kZenMobileBranchOrder[i];
-            if (branch != currentIndex) HapticFeedback.selectionClick();
-            // Re-tapping the active tab pops it to its root (goBranch with
-            // initialLocation), exactly as before.
-            onSelect(branch);
-          },
-          destinations: [
-            for (var i = 0; i < _labels.length; i++)
-              NavigationDestination(
-                icon: Icon(_icons[i]),
-                selectedIcon: Icon(_activeIcons[i]),
-                label: _labels[i],
+      ),
+    );
+  }
+}
+
+/// One tab: icon over label. Selected = white + filled icon + bold label,
+/// idle = dimmed. The change is a short colour lerp (no layers).
+class _CinemaTab extends StatelessWidget {
+  const _CinemaTab({
+    required this.label,
+    required this.icon,
+    required this.activeIcon,
+    required this.selected,
+    required this.onSemanticTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final IconData activeIcon;
+  final bool selected;
+  final VoidCallback onSemanticTap;
+
+  static const _idle = Color(0x99FFFFFF); // white @ 60 %
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: true,
+      onTap: onSemanticTap,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(end: selected ? 1.0 : 0.0),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        builder: (context, t, _) {
+          final color = Color.lerp(_idle, Colors.white, t)!;
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Transform.scale(
+                scale: 1 + 0.08 * t,
+                child: Icon(selected ? activeIcon : icon, size: 26, color: color),
               ),
-          ],
-        ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.1,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  letterSpacing: 0.1,
+                  color: color,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
