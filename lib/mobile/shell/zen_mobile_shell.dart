@@ -42,21 +42,12 @@ const List<int> kZenMobileBranchOrder = [0, 1, 2, 3, 4];
 const int _kDiscoverBranch = 2; // Home, Search, Discover, Saved, Settings
 
 // ── Dock geometry ───────────────────────────────────────────────────────────
-const double _kBarHeight = 64; // pill bar
-const double _kOverhang = 24; // how far the circle area sticks above the bar
-const double _kDockHeight = _kBarHeight + _kOverhang;
-const double _kDockBottomGap = 10;
-const double _kDockSideGap = 14;
+const double _kDockHeight = 72; // Material 3 NavigationBar
+const double _kDockBottomGap = 0;
+const double _kDockSideGap = 14; // mini pill side margin (liquid theme)
 
 /// Space the page content must leave at the bottom for the dock.
 const double _kDockExtent = _kDockHeight + _kDockBottomGap;
-
-// Segmented Dynamic Bar: the active segment is a raised card that pops above
-// the bar's top edge.
-const double _kPop = 14; // how far the active card rises above the bar
-const double _kCardWidthFactor = 1.14; // active card width vs. one segment
-const double _kBarRadius = 24;
-const double _kCardRadius = 20;
 
 /// The mini pill's total wrapper height (64 pill + 10 internal bottom pad).
 const double _kMiniWrapHeight = 74;
@@ -831,21 +822,13 @@ class _SheetRectClipper extends CustomClipper<Path> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Segmented Dynamic Bar
+//  Bottom navigation — standard Material 3 NavigationBar
 //
-//  A rounded bar split into equal segments. The active segment is a raised
-//  card that lifts above the bar and glides between tabs on a spring.
-//
-//  Built to stay smooth on 1 GB phones:
-//   * no BackdropFilter / blur layer, no shader, no saveLayer (icons fade by
-//     colour alpha, not Opacity);
-//   * the bar, its dividers and the card's shadow are STATIC layers inside
-//     RepaintBoundaries — they are rasterised once;
-//   * per frame only two small widgets translate (Transform) and at most two
-//     icon/label pairs change colour alpha.
+//  The framework's own widget: tuned, accessible and cheap. Only the
+//  selection pill animates; no custom painting, no blur layer.
 // ═══════════════════════════════════════════════════════════════════════════
 
-class _ZenDock extends StatefulWidget {
+class _ZenDock extends StatelessWidget {
   const _ZenDock({required this.currentIndex, required this.onSelect});
 
   final int currentIndex;
@@ -867,379 +850,55 @@ class _ZenDock extends StatefulWidget {
     Icons.settings_rounded,
   ];
 
-  @override
-  State<_ZenDock> createState() => _ZenDockState();
-}
-
-class _ZenDockState extends State<_ZenDock>
-    with SingleTickerProviderStateMixin {
-  // Close to critically damped (zeta ~0.83): a soft landing with a hint of
-  // life, never a wobble.
-  static const _spring = SpringDescription(
-    mass: 1,
-    stiffness: 420,
-    damping: 34,
-  );
-
-  late final AnimationController _pos; // value = tab position (0..n-1)
-  int? _downBranch;
-  bool _changedWhileDown = false;
-
   int _slotOf(int branch) {
     final i = kZenMobileBranchOrder.indexOf(branch);
     return i < 0 ? 0 : i;
   }
 
   @override
-  void initState() {
-    super.initState();
-    _pos = AnimationController.unbounded(
-      vsync: this,
-      value: _slotOf(widget.currentIndex).toDouble(),
-    );
-  }
-
-  @override
-  void didUpdateWidget(covariant _ZenDock old) {
-    super.didUpdateWidget(old);
-    if (old.currentIndex == widget.currentIndex) return;
-    final target = _slotOf(widget.currentIndex).toDouble();
-    if (MediaQuery.of(context).disableAnimations) {
-      _pos.value = target;
-    } else {
-      _pos.animateWith(
-          SpringSimulation(_spring, _pos.value, target, _pos.velocity));
-    }
-  }
-
-  @override
-  void dispose() {
-    _pos.dispose();
-    super.dispose();
-  }
-
-  // ── Touch handling: plain pointer math, no render-object lookups ─────────
-  int _branchAt(double dx, double width) {
-    final n = kZenMobileBranchOrder.length;
-    final slot = (dx / (width / n)).floor().clamp(0, n - 1).toInt();
-    return kZenMobileBranchOrder[slot];
-  }
-
-  void _pick(double dx, double width) {
-    final branch = _branchAt(dx, width);
-    if (branch == widget.currentIndex) return;
-    _changedWhileDown = true;
-    HapticFeedback.selectionClick();
-    widget.onSelect(branch);
-  }
-
-  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final n = kZenMobileBranchOrder.length;
-    final slot = _slotOf(widget.currentIndex);
-
-    final liquid = GetIt.I<SettingsManager>().liquidGlass;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Liquid theme keeps its frosted-slab colour, but WITHOUT a live blur
-    // layer (that is the expensive part on low-end GPUs).
-    final barFill = liquid ? ZenFrost.slab(isDark) : cs.surfaceContainerHigh;
-    final line = cs.outlineVariant.withValues(alpha: isDark ? 0.45 : 0.65);
-    final cardFill = Color.alphaBlend(
-      cs.primary.withValues(alpha: isDark ? 0.16 : 0.08),
-      isDark ? cs.surfaceContainerHighest : cs.surface,
-    );
-    final shadow = Colors.black.withValues(alpha: isDark ? 0.5 : 0.18);
+    final liquid = GetIt.I<SettingsManager>().liquidGlass;
+    final slot = _slotOf(currentIndex);
 
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: 1.15,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-              _kDockSideGap, 0, _kDockSideGap, _kDockBottomGap),
-          child: LayoutBuilder(
-            builder: (context, box) {
-              final width = box.maxWidth;
-              final itemW = width / n;
-              final cardW = itemW * _kCardWidthFactor;
-              const cardH = _kBarHeight + _kPop;
-              const cardTop = _kOverhang - _kPop;
-
-              double cardLeft(double pos) =>
-                  ((pos + 0.5) * itemW - cardW / 2)
-                      .clamp(0.0, width - cardW)
-                      .toDouble();
-
-              return SizedBox(
-                height: _kDockHeight,
-                child: Listener(
-                  behavior: HitTestBehavior.opaque,
-                  onPointerDown: (e) {
-                    _changedWhileDown = false;
-                    _downBranch = _branchAt(e.localPosition.dx, width);
-                    _pick(e.localPosition.dx, width);
-                  },
-                  onPointerMove: (e) => _pick(e.localPosition.dx, width),
-                  onPointerUp: (e) {
-                    // Re-tap on the active tab → pop to its root.
-                    if (!_changedWhileDown &&
-                        _downBranch == widget.currentIndex) {
-                      widget.onSelect(widget.currentIndex);
-                    }
-                    _downBranch = null;
-                  },
-                  onPointerCancel: (_) => _downBranch = null,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      // 1) Bar + dividers (static, rasterised once).
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        top: _kOverhang,
-                        height: _kBarHeight,
-                        child: RepaintBoundary(
-                          child: CustomPaint(
-                            painter: _SegBarPainter(
-                              segments: n,
-                              fill: barFill,
-                              line: line,
-                              shadow: shadow,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      // 2) Idle icons + labels (static).
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        top: _kOverhang,
-                        height: _kBarHeight,
-                        child: Row(
-                          children: [
-                            for (var i = 0; i < n; i++)
-                              Expanded(
-                                child: _SegItem(
-                                  label: _ZenDock._labels[i],
-                                  icon: _ZenDock._icons[i],
-                                  color: cs.onSurfaceVariant,
-                                  selected: i == slot,
-                                  onTap: () => widget
-                                      .onSelect(kZenMobileBranchOrder[i]),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-
-                      // 3) The raised card: its decoration is built ONCE and
-                      //    cached as a layer; only a translate runs per frame.
-                      Positioned(
-                        left: 0,
-                        top: cardTop,
-                        child: IgnorePointer(
-                          child: AnimatedBuilder(
-                            animation: _pos,
-                            child: RepaintBoundary(
-                              child: Container(
-                                width: cardW,
-                                height: cardH,
-                                decoration: BoxDecoration(
-                                  color: cardFill,
-                                  borderRadius:
-                                      BorderRadius.circular(_kCardRadius),
-                                  border: Border.all(
-                                    color:
-                                        cs.primary.withValues(alpha: 0.28),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: shadow,
-                                      blurRadius: 14,
-                                      offset: const Offset(0, 5),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            builder: (context, child) => Transform.translate(
-                              offset: Offset(cardLeft(_pos.value), 0),
-                              child: child,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      // 4) The card's icon + label. They ride with the card
-                      //    and cross-fade by COLOUR alpha between segments.
-                      Positioned(
-                        left: 0,
-                        top: cardTop,
-                        child: IgnorePointer(
-                          child: AnimatedBuilder(
-                            animation: _pos,
-                            builder: (context, _) {
-                              final pos = _pos.value;
-                              return Transform.translate(
-                                offset: Offset(cardLeft(pos), 0),
-                                child: SizedBox(
-                                  width: cardW,
-                                  height: cardH,
-                                  child: Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      for (var i = 0; i < n; i++)
-                                        if ((1 - (pos - i).abs()) > 0.01)
-                                          _CardContent(
-                                            icon: _ZenDock._activeIcons[i],
-                                            label: _ZenDock._labels[i],
-                                            color: cs.onSurface.withValues(
-                                              alpha: (1 - (pos - i).abs())
-                                                  .clamp(0.0, 1.0),
-                                            ),
-                                          ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// One idle segment: icon over a small label.
-class _SegItem extends StatelessWidget {
-  const _SegItem({
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
-      excludeSemantics: true,
-      onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 24, color: color),
-          const SizedBox(height: 3),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              height: 1.1,
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.2,
-              color: color,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(
+              color: cs.outlineVariant.withValues(alpha: isDark ? 0.35 : 0.5),
+              width: 0.5,
             ),
           ),
-        ],
+        ),
+        child: NavigationBar(
+          height: _kDockHeight,
+          selectedIndex: slot,
+          backgroundColor:
+              liquid ? ZenFrost.slab(isDark) : cs.surfaceContainer,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          elevation: 0,
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+          onDestinationSelected: (i) {
+            final branch = kZenMobileBranchOrder[i];
+            if (branch != currentIndex) HapticFeedback.selectionClick();
+            // Re-tapping the active tab pops it to its root (goBranch with
+            // initialLocation), exactly as before.
+            onSelect(branch);
+          },
+          destinations: [
+            for (var i = 0; i < _labels.length; i++)
+              NavigationDestination(
+                icon: Icon(_icons[i]),
+                selectedIcon: Icon(_activeIcons[i]),
+                label: _labels[i],
+              ),
+          ],
+        ),
       ),
     );
   }
-}
-
-/// The active segment's icon + bold label (lives inside the raised card).
-class _CardContent extends StatelessWidget {
-  const _CardContent({
-    required this.icon,
-    required this.label,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 26, color: color),
-        const SizedBox(height: 3),
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11,
-            height: 1.1,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
-            color: color,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Bar body: rounded slab, soft drop shadow, thin segment dividers.
-class _SegBarPainter extends CustomPainter {
-  const _SegBarPainter({
-    required this.segments,
-    required this.fill,
-    required this.line,
-    required this.shadow,
-  });
-
-  final int segments;
-  final Color fill;
-  final Color line;
-  final Color shadow;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rrect = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      const Radius.circular(_kBarRadius),
-    );
-    canvas.drawShadow(Path()..addRRect(rrect), shadow, 6, false);
-    canvas.drawRRect(rrect, Paint()..color = fill);
-
-    final p = Paint()
-      ..color = line
-      ..strokeWidth = 1;
-    final w = size.width / segments;
-    for (var i = 1; i < segments; i++) {
-      final x = (w * i).roundToDouble() + 0.5;
-      canvas.drawLine(Offset(x, 16), Offset(x, size.height - 16), p);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SegBarPainter old) =>
-      old.segments != segments ||
-      old.fill != fill ||
-      old.line != line ||
-      old.shadow != shadow;
 }
